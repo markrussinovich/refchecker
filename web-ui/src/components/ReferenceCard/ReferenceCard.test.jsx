@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import ReferenceCard from './ReferenceCard'
 
@@ -73,5 +73,30 @@ describe('ReferenceCard', () => {
 
     expect(screen.getByText('Afl')).toBeTruthy()
     expect(screen.queryByText('n.d.')).toBeNull()
+  })
+
+  it('highlights author-year citation markers inside context excerpts', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Model multiplicity: Opportunities, concerns, and solutions',
+      authors: ['E. Black', 'M. Raghavan', 'S. Barocas'],
+      year: 2022,
+      citation_count: 1,
+      citation_contexts: [{
+        marker: '(Black et al., 2022)',
+        sentence: 'The model can be arbitrary or random when addressing marginalized groups (Black et al., 2022).',
+      }],
+      errors: [],
+      warnings: [],
+      suggestions: [],
+    }
+
+    const { container } = render(<ReferenceCard reference={reference} index={10} />)
+    fireEvent.click(screen.getByRole('button', { name: /Context/ }))
+
+    const marker = screen.getAllByText('(Black et al., 2022)')[1]
+    expect(marker).toBeInTheDocument()
+    expect(marker.style.fontWeight).toBe('700')
+    expect(container.textContent).toContain('groups (Black et al., 2022).')
   })
 })

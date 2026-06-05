@@ -207,6 +207,8 @@ export default function InputSection() {
       if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
+      const paperclipKey = keyStore.getKey('paperclip')
+      if (paperclipKey) formData.append('paperclip_api_key', paperclipKey)
       appendAiDetection(formData)
 
       logger.info('Check', 'Initiating check request', { 
@@ -301,6 +303,7 @@ export default function InputSection() {
       const llmKey = getConfigApiKey(keyStore, config)
       const hallucinationKey = getConfigApiKey(keyStore, hallucinationConfig)
       const ssKey = keyStore.getKey('semantic_scholar')
+      const paperclipKey = keyStore.getKey('paperclip')
       
       let response
       
@@ -320,6 +323,7 @@ export default function InputSection() {
           api_key: llmKey,
           hallucination_api_key: hallucinationKey,
           semantic_scholar_api_key: ssKey,
+          paperclip_api_key: paperclipKey,
           ...(aiDetectionValues() || {}),
         })
       } else {
@@ -343,6 +347,7 @@ export default function InputSection() {
         if (llmKey) formData.append('api_key', llmKey)
         if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
         if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
+        if (paperclipKey) formData.append('paperclip_api_key', paperclipKey)
         appendAiDetection(formData)
 
         response = await api.startBatchFileCheck(formData)

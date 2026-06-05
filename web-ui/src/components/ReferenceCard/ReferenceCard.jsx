@@ -38,6 +38,46 @@ const handleExternalClick = (url) => (e) => {
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
+function normalizeCitationMarkerText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .trim()
+    .toLowerCase()
+}
+
+function findCitationMarkerRange(sentence, marker) {
+  if (!sentence || !marker) return null
+  const exactAt = sentence.indexOf(marker)
+  if (exactAt >= 0) return { start: exactAt, end: exactAt + marker.length }
+
+  const normalizedMarker = normalizeCitationMarkerText(marker)
+  if (!normalizedMarker) return null
+  const markerCore = normalizedMarker.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
+  const normalizedCore = markerCore || normalizedMarker
+
+  const candidates = []
+  for (let start = 0; start < sentence.length; start += 1) {
+    const ch = sentence[start]
+    if (ch !== '(' && ch !== '[' && !/[A-Za-z]/.test(ch)) continue
+    const windowEnd = Math.min(sentence.length, start + Math.max(marker.length + 24, 24))
+    for (let end = start + 3; end <= windowEnd; end += 1) {
+      const raw = sentence.slice(start, end)
+      const normalized = normalizeCitationMarkerText(raw)
+      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
+        candidates.push({ start, end, length: end - start })
+      }
+    }
+  }
+
+  if (!candidates.length) return null
+  candidates.sort((a, b) => a.length - b.length || a.start - b.start)
+  return { start: candidates[0].start, end: candidates[0].end }
+}
+
 // Parse error_details to extract cited/actual values and format on separate lines
 // Handles new format: "Title mismatch:\n       cited:  value\n       actual: value"
 const parseErrorDetails = (details) => {
@@ -771,9 +811,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                         // without dangerouslySetInnerHTML.
                         const marker = ctx.marker || ''
                         const sent = ctx.sentence || ''
-                        const markerAt = marker ? sent.indexOf(marker) : -1
-                        const head = markerAt >= 0 ? sent.slice(0, markerAt) : sent
-                        const tail = markerAt >= 0 ? sent.slice(markerAt + marker.length) : ''
+                        const markerRange = findCitationMarkerRange(sent, marker)
+                        const markerAt = markerRange ? markerRange.start : -1
+                        const markerEnd = markerRange ? markerRange.end : -1
+                        const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
+                        const head = markerRange ? sent.slice(0, markerAt) : sent
+                        const tail = markerRange ? sent.slice(markerEnd) : ''
                         return (
                           <div
                             key={i}
@@ -827,7 +870,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                               <span>
                                 {head}
                               </span>
-                              {markerAt >= 0 && (
+                              {markerRange && (
                                 <span
                                   style={{
                                     fontStyle: 'normal',
@@ -835,7 +878,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                                     color: 'var(--color-accent, #3b82f6)',
                                   }}
                                 >
-                                  {marker}
+                                  {markerText}
                                 </span>
                               )}
                               <span>{tail}</span>

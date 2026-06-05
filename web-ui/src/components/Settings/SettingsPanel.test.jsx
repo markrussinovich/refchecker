@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -76,6 +76,16 @@ async function saveSemanticScholarKey() {
   await waitFor(() => expect(mocks.validateSemanticScholarKey).toHaveBeenCalledWith('ss-key'))
 }
 
+async function savePaperclipKey() {
+  render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'API Keys' }))
+  const paperclipSection = screen.getByText('Paperclip API Key').closest('.py-3')
+  fireEvent.click(within(paperclipSection).getByRole('button', { name: 'Set' }))
+  fireEvent.change(screen.getByPlaceholderText('Enter Paperclip API key…'), { target: { value: 'pc-key' } })
+  fireEvent.click(within(paperclipSection).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(mocks.setKey.mock.calls.length + mocks.setPaperclipKey.mock.calls.length).toBeGreaterThan(0))
+}
+
 describe('SettingsPanel Semantic Scholar key storage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -107,5 +117,23 @@ describe('SettingsPanel Semantic Scholar key storage', () => {
     expect(mocks.setSemanticScholarKey).toHaveBeenCalledWith('ss-key')
     expect(mocks.deleteKey).toHaveBeenCalledWith('semantic_scholar')
     expect(mocks.setKey).not.toHaveBeenCalled()
+  })
+
+  it('stores Paperclip keys in the browser cache in multi-user mode', async () => {
+    mocks.multiuser = true
+
+    await savePaperclipKey()
+
+    expect(mocks.setKey).toHaveBeenCalledWith('paperclip', 'pc-key')
+    expect(mocks.setPaperclipKey).not.toHaveBeenCalled()
+  })
+
+  it('stores Paperclip keys in the local database in single-user mode', async () => {
+    mocks.multiuser = false
+
+    await savePaperclipKey()
+
+    expect(mocks.setPaperclipKey).toHaveBeenCalledWith('pc-key')
+    expect(mocks.deleteKey).toHaveBeenCalledWith('paperclip')
   })
 })

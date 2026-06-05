@@ -544,6 +544,91 @@ def _attach_citation_contexts(references, paper_text):
 
     sentences = _sentence_tokenize(paper_text)
 
+    def _build_author_year_lookup():
+        lookup = {}
+        for ref in references:
+            try:
+                ref_idx = int(ref.get("index") or 0)
+            except Exception:
+                continue
+            if ref_idx <= 0:
+                continue
+            authors = ref.get("authors") or []
+            if not isinstance(authors, list) or not authors:
+                continue
+            year = ref.get("year")
+            try:
+                year_int = int(year) if year else 0
+            except Exception:
+                year_int = 0
+            if not year_int:
+                continue
+            first = (authors[0] or "").strip()
+            if not first:
+                continue
+            if "," in first:
+                last_name = first.split(",", 1)[0].strip()
+            else:
+                last_name = first.split()[-1] if first.split() else first
+            last_name = re.sub(r"[^A-Za-z\-]", "", last_name).lower()
+            if len(last_name) < 2:
+                continue
+            key = (last_name, year_int)
+            if key not in lookup or ref_idx < lookup[key]:
+                lookup[key] = ref_idx
+        return lookup
+
+    author_year_lookup = _build_author_year_lookup()
+    au_yr_patterns = [
+        re.compile(r"\[\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?(?:\s*[,;]\s*[A-Z][A-Za-z\-' ]*?(?:\d{4})[a-z]?)*\s*\]"),
+        re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
+        re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*[\(\[](\d{4})[a-z]?[\)\]]"),
+    ]
+    inner_au_yr = re.compile(
+        r"([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?"
+    )
+    bracket_scan_pattern = re.compile(r"\[([^\[\]]{3,300})\]")
+
+    author_year_refs_seen = set()
+    has_non_paren_numeric_marker = False
+    if author_year_lookup:
+        for sent in sentences:
+            stripped = sent.strip()
+            if not stripped or _is_header_noise(stripped):
+                continue
+            for m in _NUMERIC_MARKER_RE.finditer(stripped):
+                marker_text = m.group(0)
+                if not (marker_text.startswith("(") and marker_text.endswith(")")):
+                    has_non_paren_numeric_marker = True
+                    break
+            for pat in au_yr_patterns:
+                for m in pat.finditer(stripped):
+                    name = re.sub(r"[^A-Za-z\-]", "", m.group(1)).lower()
+                    try:
+                        yr = int(m.group(2))
+                    except Exception:
+                        continue
+                    ref_idx = author_year_lookup.get((name, yr))
+                    if ref_idx:
+                        author_year_refs_seen.add(ref_idx)
+            for bm in bracket_scan_pattern.finditer(stripped):
+                inner = bm.group(1)
+                if re.fullmatch(r"\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*", inner):
+                    continue
+                for im in inner_au_yr.finditer(inner):
+                    name = re.sub(r"[^A-Za-z\-]", "", im.group(1)).lower()
+                    try:
+                        yr = int(im.group(2))
+                    except Exception:
+                        continue
+                    ref_idx = author_year_lookup.get((name, yr))
+                    if ref_idx:
+                        author_year_refs_seen.add(ref_idx)
+
+    suppress_parenthetical_numeric_markers = (
+        len(author_year_refs_seen) >= 2 and not has_non_paren_numeric_marker
+    )
+
     # For each numeric index N, collect a list of
     #   {sentence, marker, before, after}
     # entries — one per occurrence, with surrounding sentences trimmed
@@ -568,6 +653,8 @@ def _attach_citation_contexts(references, paper_text):
             # end-of-line after). The `[N]` form stays unambiguous, and
             # the superscript form has its own >200 guard below.
             if marker_text.startswith("(") and marker_text.endswith(")"):
+                if suppress_parenthetical_numeric_markers:
+                    continue
                 _start = m.start()
                 _end = m.end()
                 _prev_ch = stripped[_start - 1] if _start > 0 else ""
@@ -626,74 +713,22 @@ def _attach_citation_contexts(references, paper_text):
     # extractor silently returned zero contexts for them. Lookup builds
     # a {(last_name_lower, year_int): ref_index} table from the
     # references list, then scans body sentences for the patterns.
-    author_year_lookup = {}
-    for ref in references:
-        try:
-            ref_idx = int(ref.get("index") or 0)
-        except Exception:
-            continue
-        if ref_idx <= 0:
-            continue
-        authors = ref.get("authors") or []
-        if not isinstance(authors, list) or not authors:
-            continue
-        year = ref.get("year")
-        try:
-            year_int = int(year) if year else 0
-        except Exception:
-            year_int = 0
-        if not year_int:
-            continue
-        # First author's last name = last whitespace-separated token,
-        # stripped of punctuation. Handles "Smith", "John Smith", "Smith,
-        # John" (in which case the first word is the last name).
-        first = (authors[0] or "").strip()
-        if not first:
-            continue
-        if "," in first:
-            last_name = first.split(",", 1)[0].strip()
-        else:
-            last_name = first.split()[-1] if first.split() else first
-        last_name = re.sub(r"[^A-Za-z\-]", "", last_name).lower()
-        if len(last_name) < 2:
-            continue
-        # First-key collisions (multiple refs with same first author +
-        # year) are rare but real; keep the lowest-index winner for
-        # determinism, matching numeric markers' first-occurrence behavior.
-        key = (last_name, year_int)
-        if key not in author_year_lookup or ref_idx < author_year_lookup[key]:
-            author_year_lookup[key] = ref_idx
-
     if author_year_lookup:
         # Patterns covering the common citation forms. Each one captures
         # the surface name and the year as separate groups so we can
         # look up the ref. `et al.` and `and X` are absorbed into the
         # "name" group via a non-capturing extension so the lookup only
         # sees the first author's last name.
-        au_yr_patterns = [
-            # natbib \citep style: "[Arditi et al., 2024]" /
-            # "[Wang et al., 2022, Gurnee et al., 2023]" / "[Anthropic, 2025]"
-            # Brackets + author-year is the dominant CS/ML preprint
-            # convention but wasn't covered by the earlier two patterns
-            # (numeric brackets and paren-style author-year only).
-            re.compile(r"\[\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?(?:\s*[,;]\s*[A-Z][A-Za-z\-' ]*?(?:\d{4})[a-z]?)*\s*\]"),
-            # "(Smith et al., 2024)" / "(Smith and Jones 2024)"
-            re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
-            # "Smith et al. (2024)" / "Smith (2024)" / "Smith et al. [2024]"
-            # The trailing year delimiter is (…) or [\[…\]] for LaTeX
-            # \citet which writes "Arditi et al. [2024]".
-            re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*[\(\[](\d{4})[a-z]?[\)\]]"),
-        ]
+        # natbib \citep style: "[Arditi et al., 2024]" /
+        # "[Wang et al., 2022, Gurnee et al., 2023]" / "[Anthropic, 2025]"
+        # is covered by au_yr_patterns[0]. Brackets + author-year is the
+        # dominant CS/ML preprint convention but wasn't covered by the
+        # earlier parenthetical patterns.
         # Inner pattern for splitting multi-citation brackets like
         # "[Wang et al., 2022; Gurnee et al., 2023]" — each chunk is
         # one Name(, et al.)? + Year. The bracketed group pattern above
         # only grabs the FIRST author/year; this second scanner sweeps
         # the entire bracket content for additional citations.
-        inner_au_yr = re.compile(
-            r"([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?"
-        )
-        bracket_scan_pattern = re.compile(r"\[([^\[\]]{3,300})\]")
-
         for i, sent in enumerate(sentences):
             stripped = sent.strip()
             if not stripped:
@@ -878,7 +913,8 @@ class ProgressRefChecker:
                  ai_detection_backend: str = "local",
                  ai_detection_api_key: Optional[str] = None,
                  ai_detection_consent: bool = False,
-                 ai_detection_service: str = "pangram"):
+                 ai_detection_service: str = "pangram",
+                 paperclip_api_key: Optional[str] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -913,6 +949,11 @@ class ProgressRefChecker:
         self.ai_detection_api_key = ai_detection_api_key
         self.ai_detection_consent = bool(ai_detection_consent)
         self.ai_detection_service = (ai_detection_service or "pangram").lower()
+        self.paperclip_api_key = paperclip_api_key
+        self.hallucination_provider = None
+        self.hallucination_model = None
+        self.hallucination_api_key = None
+        self.hallucination_endpoint = None
 
         # Initialize LLM if requested
         self.llm = None
@@ -975,6 +1016,10 @@ class ProgressRefChecker:
                     endpoint=h_endpoint,
                     model=h_model,
                 )
+                self.hallucination_provider = verifier.provider
+                self.hallucination_model = verifier.model
+                self.hallucination_api_key = h_api_key
+                self.hallucination_endpoint = h_endpoint
                 verifier.cache_dir = cache_dir
                 if verifier.available or cache_dir:
                     self.hallucination_verifier = verifier
@@ -994,6 +1039,7 @@ class ProgressRefChecker:
             logger.info("Semantic Scholar API key configured")
         self.checker = EnhancedHybridReferenceChecker(
             semantic_scholar_api_key=ss_api_key,
+            paperclip_api_key=self.paperclip_api_key,
             db_path=db_path,
             db_paths=db_paths,
             debug_mode=False,
@@ -2429,10 +2475,10 @@ class ProgressRefChecker:
         opts: Dict[str, Any] = {}
         if backend in ("llm-judge", "llm"):
             opts = {
-                "provider": self.llm_provider,
-                "api_key": self.api_key,
-                "model": self.llm_model,
-                "endpoint": self.endpoint,
+                "provider": self.hallucination_provider or self.llm_provider,
+                "api_key": self.hallucination_api_key or self.api_key,
+                "model": self.hallucination_model or self.llm_model,
+                "endpoint": self.hallucination_endpoint or self.endpoint,
             }
         elif backend == "api":
             opts = {

@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   hasKey: vi.fn(() => false),
   getSemanticScholarKeyStatus: vi.fn(),
   getPaperclipKeyStatus: vi.fn(),
+  aiDetectionEnabled: false,
+  aiDetectionBackend: 'local',
+  keys: {},
 }))
 
 vi.mock('../../stores/useConfigStore', () => ({
@@ -28,7 +31,14 @@ vi.mock('../../stores/useAuthStore', () => ({
 }))
 
 vi.mock('../../stores/useKeyStore', () => ({
-  useKeyStore: (selector) => selector({ hasKey: mocks.hasKey }),
+  useKeyStore: (selector) => selector({ hasKey: mocks.hasKey, keys: mocks.keys }),
+}))
+
+vi.mock('../../stores/useAiDetectionStore', () => ({
+  useAiDetectionStore: (selector) => selector({
+    enabled: mocks.aiDetectionEnabled,
+    backend: mocks.aiDetectionBackend,
+  }),
 }))
 
 vi.mock('../../utils/api', () => ({
@@ -51,6 +61,9 @@ describe('OnboardingBanner', () => {
     mocks.settings = {}
     mocks.multiuser = false
     mocks.hasKey.mockReturnValue(false)
+    mocks.keys = {}
+    mocks.aiDetectionEnabled = false
+    mocks.aiDetectionBackend = 'local'
     mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: { has_key: false } })
     mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: false } })
   })
@@ -105,5 +118,26 @@ describe('OnboardingBanner', () => {
     expect(screen.getByText('Bonus: Semantic Scholar API key')).toBeInTheDocument()
     expect(screen.getByText('Bonus: Paperclip key (biomedical / arXiv full-text)')).toBeInTheDocument()
     expect(await screen.findAllByText('— configured')).toHaveLength(2)
+  })
+
+  it('marks AI detection as enabled and describes LLM judge model source', () => {
+    mocks.aiDetectionEnabled = true
+    mocks.aiDetectionBackend = 'llm-judge'
+
+    render(<OnboardingBanner onOpenSettings={vi.fn()} />)
+
+    expect(screen.getByText('— enabled')).toBeInTheDocument()
+    expect(screen.getByText(/LLM judge mode uses the same provider and model selected for hallucination checks/)).toBeInTheDocument()
+  })
+
+  it('updates the AI detection row when preferences change', () => {
+    const { rerender } = render(<OnboardingBanner onOpenSettings={vi.fn()} />)
+
+    expect(screen.queryByText('— enabled')).not.toBeInTheDocument()
+
+    mocks.aiDetectionEnabled = true
+    rerender(<OnboardingBanner onOpenSettings={vi.fn()} />)
+
+    expect(screen.getByText('— enabled')).toBeInTheDocument()
   })
 })

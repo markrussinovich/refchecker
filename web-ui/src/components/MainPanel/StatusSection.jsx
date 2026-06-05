@@ -575,6 +575,7 @@ export default function StatusSection() {
   const isCompleted = displayStatus === 'completed'
   const isCancelled = displayStatus === 'cancelled'
   const isError = displayStatus === 'error'
+  const thumbnailRetryPhase = isCompleted ? 'completed' : 'active'
 
   // State for thumbnail loading
   const [thumbnailUrl, setThumbnailUrl] = useState(null)
@@ -594,7 +595,10 @@ export default function StatusSection() {
     return () => document.removeEventListener('keydown', handleEscape)
   }, [showThumbnailOverlay])
 
-  // Fetch thumbnail when check ID changes
+  // Fetch thumbnail when check ID changes, and retry once a check completes.
+  // For URL/PDF checks the first request can happen while the backend is still
+  // downloading/extracting; if that early request fails, clear the error and
+  // re-request after completion so the UI can show the generated thumbnail.
   useEffect(() => {
     if (!selectedCheckId || selectedCheckId === -1) {
       setThumbnailUrl(null)
@@ -610,12 +614,12 @@ export default function StatusSection() {
     setThumbnailLoading(true)
     
     // Set the thumbnail URL - let the img element handle loading
-    const url = `${API_BASE}/api/thumbnail/${selectedCheckId}`
+    const url = `${API_BASE}/api/thumbnail/${selectedCheckId}?phase=${thumbnailRetryPhase}`
     setThumbnailUrl(url)
     // Set the high-resolution preview URL for overlay
-    setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}`)
+    setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}?phase=${thumbnailRetryPhase}`)
     
-  }, [selectedCheckId])
+  }, [selectedCheckId, thumbnailRetryPhase])
 
   // Thumbnail component showing actual PDF first page
   const renderThumbnail = () => {

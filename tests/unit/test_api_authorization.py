@@ -558,3 +558,17 @@ def test_env_llm_config_resolution_prefers_request_key(auth_db, monkeypatch):
         api_key="browser-override",
     ))
     assert override_key == "browser-override"
+
+
+def test_multiuser_rejects_server_side_paperclip_key_storage(auth_db):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-paperclip-browser"))
+
+    status = _run(api_main.get_paperclip_key_status(owner))
+    assert status["has_key"] is False
+    assert status["storage"] == "browser-only"
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.set_paperclip_key(api_main.PaperclipKeyUpdate(api_key="pc-key"), owner))
+    assert exc.value.status_code == 410
+    assert _run(db.has_setting("paperclip_api_key")) is False

@@ -65,6 +65,7 @@ class EnhancedHybridReferenceChecker:
                  db_path: Optional[str] = None,
                  db_paths: Optional[Dict[str, str]] = None,
                  contact_email: Optional[str] = None,
+                 paperclip_api_key: Optional[str] = None,
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
@@ -77,6 +78,7 @@ class EnhancedHybridReferenceChecker:
         
         Args:
             semantic_scholar_api_key: Optional API key for Semantic Scholar
+            paperclip_api_key: Optional API key for Paperclip secondary verification
             db_path: Optional path to local Semantic Scholar database
             contact_email: Email for polite pool access to APIs
             enable_openalex: Whether to use OpenAlex API
@@ -178,11 +180,12 @@ class EnhancedHybridReferenceChecker:
         # flag, no pip install — and the tier activates on the next
         # run.
         if enable_paperclip is None:
-            enable_paperclip = bool(os.environ.get('PAPERCLIP_API_KEY'))
+            enable_paperclip = bool(paperclip_api_key or os.environ.get('PAPERCLIP_API_KEY'))
         self.paperclip = None
         if enable_paperclip:
             self.paperclip = self._initialize_checker(
-                'paperclip', 'PaperclipReferenceChecker', 'Paperclip secondary checker'
+                'paperclip', 'PaperclipReferenceChecker', 'Paperclip secondary checker',
+                api_key=paperclip_api_key
             )
             if self.paperclip is not None and not getattr(self.paperclip, 'enabled', False):
                 # _initialize_checker succeeded but PAPERCLIP_API_KEY was

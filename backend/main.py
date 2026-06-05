@@ -93,6 +93,18 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
+    loggers = [logging.getLogger()]
+    loggers.extend(
+        logger_obj
+        for logger_obj in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger_obj, logging.Logger)
+    )
+    for configured_logger in loggers:
+        for handler in configured_logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                handler.setStream(sys.stderr)
 logger = logging.getLogger(__name__)
 
 
@@ -939,6 +951,7 @@ class BatchUrlsRequest(BaseModel):
     api_key: Optional[str] = None
     hallucination_api_key: Optional[str] = None
     semantic_scholar_api_key: Optional[str] = None
+    paperclip_api_key: Optional[str] = None
     ai_detection_enabled: bool = False
     ai_detection_backend: str = "local"
     ai_detection_api_key: Optional[str] = None
@@ -1413,6 +1426,7 @@ async def start_check(
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    paperclip_api_key: Optional[str] = Form(None),
     ai_detection_enabled: bool = Form(False),
     ai_detection_backend: str = Form("local"),
     ai_detection_api_key: Optional[str] = Form(None),
@@ -1452,6 +1466,7 @@ async def start_check(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
+        paperclip_api_key = _form_default_value(paperclip_api_key)
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -1630,6 +1645,7 @@ async def start_check(
                 "hallucination_model": resolved_hallucination_model if use_llm else None,
                 "input_bytes": input_bytes,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(paperclip_api_key),
                 "original_filename_ext": Path(original_filename).suffix.lower() if original_filename else None,
             },
         )
@@ -1651,6 +1667,7 @@ async def start_check(
                 ai_detection_api_key=ai_detection_api_key,
                 ai_detection_consent=ai_detection_consent,
                 ai_detection_service=ai_detection_service,
+                paperclip_api_key=paperclip_api_key,
             )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
@@ -1696,6 +1713,7 @@ async def run_check(
     ai_detection_api_key: Optional[str] = None,
     ai_detection_consent: bool = False,
     ai_detection_service: str = "pangram",
+    paperclip_api_key: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -1817,6 +1835,7 @@ async def run_check(
             ai_detection_api_key=ai_detection_api_key,
             ai_detection_consent=ai_detection_consent,
             ai_detection_service=ai_detection_service,
+            paperclip_api_key=paperclip_api_key,
         )
 
         # Run the check
@@ -2847,6 +2866,7 @@ async def start_batch_check(
                 "llm_provider": llm_provider if request.use_llm else None,
                 "llm_model": llm_model if request.use_llm else None,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(request.paperclip_api_key),
             },
         )
 
@@ -2915,6 +2935,7 @@ async def start_batch_check(
                     ai_detection_api_key=request.ai_detection_api_key,
                     ai_detection_consent=request.ai_detection_consent,
                     ai_detection_service=request.ai_detection_service,
+                    paperclip_api_key=request.paperclip_api_key,
                 )
             )
             active_checks[session_id] = {
@@ -2961,6 +2982,7 @@ async def start_batch_check_files(
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    paperclip_api_key: Optional[str] = Form(None),
     ai_detection_enabled: bool = Form(False),
     ai_detection_backend: str = Form("local"),
     ai_detection_api_key: Optional[str] = Form(None),
@@ -2986,6 +3008,7 @@ async def start_batch_check_files(
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
         semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
+        paperclip_api_key = _form_default_value(paperclip_api_key)
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -3117,6 +3140,7 @@ async def start_batch_check_files(
                 "llm_provider": llm_provider if use_llm else None,
                 "llm_model": llm_model if use_llm else None,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(paperclip_api_key),
                 "uploaded_bytes": sum(Path(item['path']).stat().st_size for item in files_to_process if Path(item['path']).exists()),
             },
         )
@@ -3180,6 +3204,7 @@ async def start_batch_check_files(
                     ai_detection_api_key=ai_detection_api_key,
                     ai_detection_consent=ai_detection_consent,
                     ai_detection_service=ai_detection_service,
+                    paperclip_api_key=paperclip_api_key,
                 )
             )
             active_checks[session_id] = {
