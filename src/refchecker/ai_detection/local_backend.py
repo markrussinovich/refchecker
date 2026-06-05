@@ -287,6 +287,12 @@ class _TorchEngine:
         import torch.nn as nn
 
         self.torch = torch
+        # The engine is a process-wide singleton (see _get_engine), so during a
+        # BATCH run several worker threads call score() on the SAME tokenizer +
+        # model at once. The HF fast tokenizer is a Rust object that raises
+        # "RuntimeError: Already borrowed" when borrowed concurrently, and torch
+        # CPU inference isn't guaranteed thread-safe either — serialise both.
+        self._infer_lock = threading.Lock()
         # Suppress warnings around EVERY transformers call below. A warning
         # emitted while a frame of THIS module is on the stack makes the warnings
         # formatter read this file's source; in a PyInstaller bundle that read
@@ -393,8 +399,9 @@ class _TorchEngine:
         # Same frozen-bundle guard as __init__: a warning emitted from the
         # tokenizer or from `_DesklibModel.forward` (this module) would try to
         # read the missing source file. Suppress so inference never raises
-        # FileNotFoundError.
-        with warnings.catch_warnings(), torch.no_grad():
+        # FileNotFoundError. The lock serialises concurrent batch threads
+        # (fixes "RuntimeError: Already borrowed" on the shared tokenizer).
+        with self._infer_lock, warnings.catch_warnings(), torch.no_grad():
             warnings.simplefilter("ignore")
             enc = self.tokenizer(
                 text, truncation=True, max_length=_MAX_TOKENS, return_tensors="pt"
@@ -419,6 +426,9 @@ class _OnnxEngine:
         import numpy as np
 
         self.np = np
+        # Serialise concurrent batch threads on the shared tokenizer/session
+        # (see _TorchEngine note — fixes "Already borrowed").
+        self._infer_lock = threading.Lock()
         # Same frozen-bundle guard as _TorchEngine: suppress warnings around the
         # transformers calls so the formatter never reads this module's source.
         with warnings.catch_warnings():
@@ -440,11 +450,12 @@ class _OnnxEngine:
 
     def score(self, text: str) -> float:
         np = self.np
-        enc = self.tokenizer(
-            text, truncation=True, max_length=_MAX_TOKENS, return_tensors="np"
-        )
-        feeds = {k: v for k, v in enc.items() if k in self.input_names}
-        out = self.session.run(None, feeds)[0]
+        with self._infer_lock:
+            enc = self.tokenizer(
+                text, truncation=True, max_length=_MAX_TOKENS, return_tensors="np"
+            )
+            feeds = {k: v for k, v in enc.items() if k in self.input_names}
+            out = self.session.run(None, feeds)[0]
         arr = np.asarray(out).reshape(-1)
         if arr.size == 1:
             return float(1.0 / (1.0 + np.exp(-arr[0])))

@@ -5958,7 +5958,8 @@ def _extract_key_phrases(title: str) -> List[str]:
     return phrases
 
 
-def are_venues_substantially_different(venue1: str, venue2: str, citation_style: Optional[str] = None) -> bool:
+def are_venues_substantially_different(venue1: str, venue2: str, citation_style: Optional[str] = None,
+                                       paper_title: Optional[str] = None) -> bool:
     """
     Check if two venue names are substantially different (not just minor variations).
     This function uses a generic approach to handle academic venue abbreviations and formats.
@@ -5971,16 +5972,27 @@ def are_venues_substantially_different(venue1: str, venue2: str, citation_style:
             style is one that permits NLM-style abbreviated journal titles
             and the cited venue is a known abbreviation of the authoritative
             venue, returns False (no mismatch).
+        paper_title: Optional paper title. When the paper is a known multi-journal
+            reporting guideline (PRISMA / CONSORT / STROBE …) co-published across
+            both venues, the difference is a co-publication, not a mismatch.
 
     Returns:
         True if venues are substantially different, False if they match/overlap
     """
     # Import here to avoid circular dependency
     from refchecker.utils.url_utils import extract_arxiv_id_from_url
-    from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation, venues_core_match
+    from refchecker.utils.venue_abbreviations import (
+        is_acceptable_abbreviation, venues_core_match, is_copublication_venue_pair,
+    )
 
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
+
+    # Multi-journal reporting-guideline co-publication (PRISMA / CONSORT / …):
+    # citing one journal's copy is correct even if the matched record is another
+    # journal's copy. Bounded to the guideline allowlist.
+    if paper_title and is_copublication_venue_pair(paper_title, venue1, venue2):
+        return False
 
     # Style-independent core match: handles a ':' subtitle on either side
     # ('European spine journal: official publication of …' ↔ 'European spine

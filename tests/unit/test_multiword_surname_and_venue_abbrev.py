@@ -172,6 +172,21 @@ def test_venue_core_match_does_not_overmatch():
     assert va.venues_core_match('Arch Bone Jt Surg', 'Archives of Internal Medicine') is False
 
 
+def test_reporting_guideline_copublication_not_flagged():
+    # PRISMA 2020 was co-published in BMJ AND PLoS Medicine; citing one when the
+    # DB record is the other is NOT a venue mismatch — but only with the title.
+    prisma = 'The PRISMA 2020 statement: an updated guideline for reporting systematic reviews'
+    assert are_venues_substantially_different('BMJ', 'PLoS Medicine', paper_title=prisma) is False
+    assert are_venues_substantially_different(
+        'Annals of Internal Medicine', 'Journal of Clinical Epidemiology', paper_title=prisma) is False
+    # Without the title (or a non-guideline title), the difference still flags.
+    assert are_venues_substantially_different('BMJ', 'PLoS Medicine') is True
+    assert are_venues_substantially_different(
+        'BMJ', 'PLoS Medicine', paper_title='A cohort study of hip fractures') is True
+    # A journal that did NOT co-publish the guideline still flags.
+    assert are_venues_substantially_different('BMJ', 'Nature', paper_title=prisma) is True
+
+
 def test_venue_part_designator_preserved():
     # 'Am J Med Genet A' ↔ 'American Journal of Medical Genetics. Part A' — the
     # structural 'Part' is dropped but the 'A' designator is preserved.

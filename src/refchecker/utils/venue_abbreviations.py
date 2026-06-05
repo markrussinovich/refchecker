@@ -311,6 +311,50 @@ def _venue_core(venue: Optional[str]) -> str:
     return _normalize_venue(head)
 
 
+# Reporting guidelines that were SIMULTANEOUSLY co-published across several
+# journals (PRISMA 2020 appeared in BMJ, PLoS Medicine, J Clin Epidemiol, Int J
+# Surg, Systematic Reviews …). Citing one journal's copy is correct even when
+# the matched database record is a different journal's copy — so a 'cited BMJ /
+# found PLoS Medicine' difference for such a paper is NOT a real venue mismatch.
+_REPORTING_GUIDELINE_MARKERS = (
+    "prisma", "consort", "strobe", "moose", "spirit", "stard", "arrive",
+    "squire", "tripod", "agree", "preferred reporting items",
+    "strengthening the reporting", "consolidated standards of reporting",
+    "standards for reporting", "enhancing the quality and transparency",
+)
+_COPUB_VENUE_GROUP = (
+    "bmj", "british medical journal",
+    "plos medicine", "plos med",
+    "annals of internal medicine", "ann intern med",
+    "journal of clinical epidemiology", "j clin epidemiol",
+    "systematic reviews", "syst rev",
+    "international journal of surgery", "int j surg",
+    "bmc medicine", "lancet", "jama", "epidemiology", "trials",
+    "cmaj", "canadian medical association journal",
+    "bulletin of the world health organization", "phlebology",
+    "physical therapy", "open medicine", "research methods in medicine",
+)
+
+
+def is_copublication_venue_pair(title: Optional[str], venue1: Optional[str], venue2: Optional[str]) -> bool:
+    """True when the paper is a known multi-journal reporting guideline and BOTH
+    venues are among its co-publication journals — so the venue difference is a
+    co-publication, not a citation error. Bounded to that guideline allowlist."""
+    if not title or not venue1 or not venue2:
+        return False
+    t = str(title).lower()
+    if not any(mk in t for mk in _REPORTING_GUIDELINE_MARKERS):
+        return False
+    n1, n2 = _normalize_venue(venue1), _normalize_venue(venue2)
+    if not n1 or not n2:
+        return False
+
+    def _in_group(n: str) -> bool:
+        return any(g == n or g in n or n in g for g in _COPUB_VENUE_GROUP)
+
+    return _in_group(n1) and _in_group(n2)
+
+
 def venues_core_match(venue1: Optional[str], venue2: Optional[str]) -> bool:
     """Style-independent: do two venue strings name the same journal, allowing
     a ':' subtitle on either side and NLM-style word abbreviations?

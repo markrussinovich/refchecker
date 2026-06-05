@@ -1391,12 +1391,18 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     if (styleAcceptsAbbrev) supplemental = resolvedAcronym
   }
 
-  const titleBits = []
+  // Always surface the journal/venue details on hover (parallels the per-author
+  // hover) — the first line is the cited venue itself, so the tooltip is never
+  // empty even when there's no enrichment (user request: "journal info on hover
+  // like authors").
+  const titleBits = [`Journal / venue: ${venue}`]
   if (resolvedFull && venueNorm !== fullNorm) titleBits.push(`Full name: ${resolvedFull}`)
-  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM acronym: ${resolvedAcronym}`)
-  if (venueOpenalexId) titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
-  if (venueOpenalexId) titleBits.push('(click to open venue page)')
-  const title = titleBits.join('\n') || undefined
+  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM abbreviation: ${resolvedAcronym}`)
+  if (venueOpenalexId) {
+    titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
+    titleBits.push('(click to open venue page)')
+  }
+  const title = titleBits.join('\n')
   const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
   const handle = (ev) => {
     if (!href || !isTauri()) return

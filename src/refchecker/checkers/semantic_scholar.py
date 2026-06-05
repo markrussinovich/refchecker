@@ -1073,8 +1073,11 @@ class NonArxivReferenceChecker:
         
         # Check venue mismatches
         if cited_venue and paper_venue:
-            # Use the utility function to check if venues are substantially different
-            if are_venues_substantially_different(cited_venue, paper_venue):
+            # Use the utility function to check if venues are substantially different.
+            # Pass the title so multi-journal reporting-guideline co-publications
+            # (PRISMA cited as BMJ, matched to the PLoS Medicine copy) aren't flagged.
+            _ref_title = reference.get('title') or paper_data.get('title')
+            if are_venues_substantially_different(cited_venue, paper_venue, paper_title=_ref_title):
                 from refchecker.utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
