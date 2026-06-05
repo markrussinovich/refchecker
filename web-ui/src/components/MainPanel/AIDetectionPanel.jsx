@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import DocumentViewer from './DocumentViewer'
 
 /**
  * Document-level AI-generated-text detection result for a single manuscript.
@@ -40,8 +41,9 @@ const ABSTAIN_REASONS = {
   unknown_backend: 'The selected detection backend is unknown.',
 }
 
-export default function AIDetectionPanel({ detection }) {
+export default function AIDetectionPanel({ detection, checkId }) {
   const [open, setOpen] = useState(false)
+  const [viewerOpen, setViewerOpen] = useState(false)
   if (!detection) return null
 
   const band = detection.band || 'unavailable'
@@ -80,18 +82,34 @@ export default function AIDetectionPanel({ detection }) {
           </span>
         </div>
         {spans.length > 0 && !isAbstain && (
-          <button
-            type="button"
-            onClick={() => setOpen(o => !o)}
-            aria-expanded={open}
-            aria-controls="ai-detection-spans"
-            className="text-xs underline focus:outline-none focus:ring-2 rounded"
-            style={{ color: 'var(--color-accent)', '--tw-ring-color': 'var(--color-accent)' }}
-          >
-            {open ? 'Hide' : `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`}
-          </button>
+          <div className="flex items-center gap-3">
+            {checkId != null && (
+              <button
+                type="button"
+                onClick={() => setViewerOpen(true)}
+                className="text-xs underline focus:outline-none focus:ring-2 rounded"
+                style={{ color: 'var(--color-accent)', '--tw-ring-color': 'var(--color-accent)' }}
+                title="Show the flagged passages highlighted in the document text"
+              >
+                View in document
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpen(o => !o)}
+              aria-expanded={open}
+              aria-controls="ai-detection-spans"
+              className="text-xs underline focus:outline-none focus:ring-2 rounded"
+              style={{ color: 'var(--color-accent)', '--tw-ring-color': 'var(--color-accent)' }}
+            >
+              {open ? 'Hide' : `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
         )}
       </div>
+      {viewerOpen && (
+        <DocumentViewer checkId={checkId} spans={spans} onClose={() => setViewerOpen(false)} />
+      )}
 
       <div className="px-3 pb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         {isAbstain ? (reason || detection.summary) : detection.summary}

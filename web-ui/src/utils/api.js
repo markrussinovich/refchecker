@@ -171,6 +171,12 @@ export const verifyReferenceInCheck = (checkId, refId, opts = {}) =>
 export const getLLMUsage = (checkId) =>
   api.get(`/history/${checkId}/llm-usage`)
 
+// Extracted body text of a check's source document — used by the in-document
+// highlighter to show AI-detection flagged passages in context. Larger papers
+// can take a moment to extract, so give it a generous budget.
+export const getPaperText = (checkId) =>
+  api.get(`/paper-text/${checkId}`, { timeout: 60000 })
+
 // Resolve a DOI to title/authors/year/venue via CrossRef
 export const resolveDoi = (doi) =>
   api.get('/doi/resolve', { params: { doi } })

@@ -4,7 +4,29 @@ from refchecker.utils.text_utils import (
     calculate_title_similarity,
     compare_titles_with_latex_cleaning,
     normalize_venue_for_display,
+    titles_align_with_subtitle_tolerance,
 )
+
+
+def test_field_scramble_body_text_merged_into_title():
+    # Extraction merged a body sentence in front of a book title; the real
+    # title still appears as a clause, so it must NOT flag a title mismatch.
+    assert titles_align_with_subtitle_tolerance(
+        "Cox proportional hazards regression model. Regression modeling strategies",
+        "Regression Modeling Strategies: With Applications to Linear Models, "
+        "Logistic and Ordinal Regression, and Survival Analysis",
+    ) is True
+
+
+def test_field_scramble_does_not_overmatch_unrelated():
+    assert titles_align_with_subtitle_tolerance(
+        "Cox proportional hazards regression model. Some unrelated short note",
+        "Deep learning for image recognition",
+    ) is False
+    assert titles_align_with_subtitle_tolerance(
+        "A study of widgets and gadgets in industry",
+        "A survey of gizmos and gadgets in commerce",
+    ) is False
 
 
 def test_title_similarity_ignores_trailing_year():

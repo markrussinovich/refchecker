@@ -345,7 +345,10 @@ export default function MainPanel() {
 
         {/* Document-level AI-generated-text detection (opt-in) */}
         {showContent && displayAiDetection && (
-          <AIDetectionPanel detection={displayAiDetection} />
+          <AIDetectionPanel
+            detection={displayAiDetection}
+            checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+          />
         )}
 
         {/* References / Corrections tabs */}

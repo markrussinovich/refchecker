@@ -5535,6 +5535,38 @@ def titles_align_with_subtitle_tolerance(cited_title: str, actual_title: str) ->
         if ':' in nc and ':' in na:
             return True
 
+    # 4) Field-scramble tolerance. PDF / bibtex extraction sometimes merges a
+    #    body sentence or a leading clause IN FRONT of the real title, e.g.
+    #      cited:  "Cox proportional hazards regression model. Regression modeling strategies"
+    #      actual: "Regression Modeling Strategies: With Applications to ..."
+    #    Split the side that carries the extra text on sentence ('. ') and
+    #    subtitle (':') boundaries and check whether any single substantial
+    #    clause aligns with the OTHER title's head. Each clause must be >= 20
+    #    chars so short fragments can't spuriously match.
+    def _norm_plain(s: str) -> str:
+        s = strip_html_markup(strip_latex_commands(s or '')).lower()
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]+", " ", s)).strip()
+
+    def _clauses(orig: str):
+        # Split the ORIGINAL (period-bearing) title on sentence ('. ') and
+        # subtitle (': ') boundaries, normalising each substantial clause.
+        out = []
+        for p in re.split(r"\.\s+|:\s+", orig or ""):
+            n = _norm_plain(p)
+            if len(n) >= 20:
+                out.append(n)
+        return out
+
+    for big_orig, head in ((cited_title, na_head), (actual_title, nc_head)):
+        if not head or len(head) < 20:
+            continue
+        for clause in _clauses(big_orig):
+            if clause == head:
+                return True
+            sh, lo = (head, clause) if len(head) <= len(clause) else (clause, head)
+            if lo.startswith(sh) and len(sh) >= max(20, int(0.85 * len(lo))):
+                return True
+
     return False
 
 

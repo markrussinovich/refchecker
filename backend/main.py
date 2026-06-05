@@ -2423,6 +2423,70 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/paper-text/{check_id}")
+async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Return the extracted body text of a check's source document.
+
+    Powers the "view in document" highlighter: the frontend renders this text
+    and marks the AI-detection flagged passages / citation contexts in place.
+    Works for uploaded PDFs/text files AND URL/DOI inputs (via the PDF cached
+    during the check). Never throws on a missing source — returns available=False.
+    """
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        source_type = check.get('source_type', '') or ''
+        paper_source = check.get('paper_source', '') or ''
+        text = ""
+        fmt = "text"
+
+        def _read_textfile(path):
+            try:
+                with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                    return fh.read()
+            except Exception:
+                return ""
+
+        from backend.refchecker_wrapper import _extract_pdf_text_cli_style
+
+        # 1) Uploaded local file (pdf / txt / bib / tex).
+        if source_type == 'file' and paper_source and os.path.exists(paper_source):
+            if paper_source.lower().endswith('.pdf'):
+                text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+                fmt = "pdf"
+            else:
+                text = _read_textfile(paper_source)
+
+        # 2) URL / DOI input — reuse the PDF cached during the check.
+        if not (text or "").strip() and paper_source:
+            try:
+                from refchecker.utils.cache_utils import get_cached_artifact_path
+                cache_dir = await _get_configured_cache_dir()
+                if cache_dir:
+                    for artifact in ("ai_body.pdf", "paper.pdf"):
+                        p = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                        if p and os.path.exists(p) and os.path.getsize(p) > 0:
+                            text = await asyncio.to_thread(_extract_pdf_text_cli_style, p, None)
+                            fmt = "pdf"
+                            break
+            except Exception as _e:
+                logger.debug("paper-text cache lookup failed: %s", _e)
+
+        text = text or ""
+        MAX = 600_000  # cap so a whole book can't bloat the response
+        return {
+            "text": text[:MAX],
+            "format": fmt,
+            "word_count": len(text.split()),
+            "truncated": len(text) > MAX,
+            "available": bool(text.strip()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting paper text: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/bibliography/{check_id}")
 async def get_bibliography_source(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
