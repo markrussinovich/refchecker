@@ -10,7 +10,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,7 +69,8 @@ from .thumbnail import (
     get_text_thumbnail_async,
     get_text_preview_async,
     get_thumbnail_cache_path,
-    get_preview_cache_path
+    get_preview_cache_path,
+    is_probably_placeholder_thumbnail,
 )
 from .usage_tracking import (
     append_usage_event,
@@ -92,6 +93,18 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
+    loggers = [logging.getLogger()]
+    loggers.extend(
+        logger_obj
+        for logger_obj in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger_obj, logging.Logger)
+    )
+    for configured_logger in loggers:
+        for handler in configured_logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                handler.setStream(sys.stderr)
 logger = logging.getLogger(__name__)
 
 
@@ -111,6 +124,8 @@ MAX_UPLOAD_FILE_BYTES = int(os.environ.get("MAX_UPLOAD_FILE_BYTES", str(25 * 102
 MAX_BATCH_UPLOAD_TOTAL_BYTES = int(os.environ.get("MAX_BATCH_UPLOAD_TOTAL_BYTES", str(500 * 1024 * 1024)))
 MAX_BATCH_ARCHIVE_BYTES = int(os.environ.get("MAX_BATCH_ARCHIVE_BYTES", str(250 * 1024 * 1024)))
 MAX_BATCH_SIZE = int(os.environ.get("MAX_BATCH_SIZE", "1000"))
+LLMConfigId = Union[int, str]
+ENV_LLM_CONFIG_ID_PREFIX = "env:"
 
 
 def get_uploads_dir() -> Path:
@@ -479,11 +494,108 @@ def _ensure_hallucination_capable_provider(provider_name: Optional[str]) -> None
         )
 
 
+def _normalize_llm_provider_name(provider_name: Optional[str]) -> str:
+    normalized = (provider_name or "").strip().lower()
+    return "google" if normalized == "gemini" else normalized
+
+
+def _env_llm_config_for_provider(provider_name: str) -> Optional[Dict[str, Any]]:
+    """Return non-secret metadata for a provider configured via server env vars."""
+    from refchecker.config.settings import DEFAULT_EXTRACTION_MODELS, resolve_api_key, resolve_endpoint
+
+    provider = _normalize_llm_provider_name(provider_name)
+    if provider == "vllm" or provider not in DEFAULT_EXTRACTION_MODELS:
+        return None
+    if not resolve_api_key(provider):
+        return None
+
+    endpoint = resolve_endpoint(provider)
+    return {
+        "id": f"{ENV_LLM_CONFIG_ID_PREFIX}{provider}",
+        "name": f"{provider.title()} (server environment)",
+        "provider": provider,
+        "model": DEFAULT_EXTRACTION_MODELS[provider],
+        "endpoint": endpoint,
+        "is_default": False,
+        "created_at": None,
+        "has_key": True,
+        "key_source": "environment",
+        "is_environment": True,
+        "env_key_available": True,
+        "env_endpoint_available": bool(endpoint),
+    }
+
+
+def _all_env_llm_configs() -> Dict[str, Dict[str, Any]]:
+    from refchecker.config.settings import DEFAULT_EXTRACTION_MODELS
+
+    configs: Dict[str, Dict[str, Any]] = {}
+    for provider in DEFAULT_EXTRACTION_MODELS:
+        config = _env_llm_config_for_provider(provider)
+        if config:
+            configs[provider] = config
+    return configs
+
+
+def _merge_env_llm_configs(configs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Annotate DB configs with env-key availability and add missing env configs."""
+    env_configs = _all_env_llm_configs()
+    merged: list[Dict[str, Any]] = []
+    seen_providers: set[str] = set()
+
+    for config in configs:
+        enriched = dict(config)
+        provider = _normalize_llm_provider_name(enriched.get("provider"))
+        if provider:
+            seen_providers.add(provider)
+        env_config = env_configs.get(provider)
+        if env_config:
+            enriched["env_key_available"] = True
+            enriched["env_endpoint_available"] = env_config.get("env_endpoint_available", False)
+            if not enriched.get("endpoint") and env_config.get("endpoint"):
+                enriched["endpoint"] = env_config["endpoint"]
+                enriched["endpoint_source"] = "environment"
+            if not enriched.get("has_key"):
+                enriched["has_key"] = True
+                enriched["key_source"] = "environment"
+            else:
+                enriched.setdefault("key_source", "database")
+        else:
+            enriched.setdefault("env_key_available", False)
+            if enriched.get("has_key"):
+                enriched.setdefault("key_source", "database")
+        merged.append(enriched)
+
+    default_provider = _normalize_llm_provider_name(os.environ.get("REFCHECKER_LLM_PROVIDER"))
+    has_default = any(config.get("is_default") for config in merged)
+    for provider, env_config in env_configs.items():
+        if provider in seen_providers:
+            continue
+        synthetic = dict(env_config)
+        if not has_default and provider == default_provider:
+            synthetic["is_default"] = True
+            has_default = True
+        merged.append(synthetic)
+
+    return merged
+
+
+def _is_env_llm_config_id(config_id: Optional[LLMConfigId]) -> bool:
+    return isinstance(config_id, str) and config_id.startswith(ENV_LLM_CONFIG_ID_PREFIX)
+
+
+def _env_llm_config_from_id(config_id: LLMConfigId) -> Optional[Dict[str, Any]]:
+    if not _is_env_llm_config_id(config_id):
+        return None
+    provider = str(config_id)[len(ENV_LLM_CONFIG_ID_PREFIX):]
+    return _env_llm_config_for_provider(provider)
+
+
 async def _resolve_llm_config_for_request(
     *,
     user_id: int,
     use_llm: bool,
-    llm_config_id: Optional[int],
+    llm_config_id: Optional[LLMConfigId],
     llm_provider: Optional[str],
     llm_model: Optional[str],
     api_key: Optional[str],
@@ -499,7 +611,9 @@ async def _resolve_llm_config_for_request(
     model = llm_model
 
     if llm_config_id:
-        config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
+        config = _env_llm_config_from_id(llm_config_id)
+        if not config and not _is_env_llm_config_id(llm_config_id):
+            config = await db.get_llm_config_by_id(int(llm_config_id), user_id=user_id)
         if config:
             if not effective_api_key:
                 effective_api_key = config.get('api_key')
@@ -515,6 +629,14 @@ async def _resolve_llm_config_for_request(
             provider=provider,
             user_id=user_id,
         )
+
+    if provider:
+        from refchecker.config.settings import resolve_api_key, resolve_endpoint
+
+        if not effective_api_key:
+            effective_api_key = resolve_api_key(provider)
+        if not endpoint:
+            endpoint = resolve_endpoint(provider)
 
     _ensure_allowed_web_llm_provider(provider)
     if require_hallucination_capable:
@@ -819,16 +941,17 @@ class BatchUrlsRequest(BaseModel):
     """Request model for batch URL submission"""
     urls: list[str]
     batch_label: Optional[str] = None
-    llm_config_id: Optional[int] = None
+    llm_config_id: Optional[LLMConfigId] = None
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
-    hallucination_config_id: Optional[int] = None
+    hallucination_config_id: Optional[LLMConfigId] = None
     hallucination_provider: Optional[str] = None
     hallucination_model: Optional[str] = None
     use_llm: bool = True
     api_key: Optional[str] = None
     hallucination_api_key: Optional[str] = None
     semantic_scholar_api_key: Optional[str] = None
+    paperclip_api_key: Optional[str] = None
     ai_detection_enabled: bool = False
     ai_detection_backend: str = "local"
     ai_detection_api_key: Optional[str] = None
@@ -1293,16 +1416,17 @@ async def start_check(
     source_value: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     source_text: Optional[str] = Form(None),
-    llm_config_id: Optional[int] = Form(None),
+    llm_config_id: Optional[LLMConfigId] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
-    hallucination_config_id: Optional[int] = Form(None),
+    hallucination_config_id: Optional[LLMConfigId] = Form(None),
     hallucination_provider: Optional[str] = Form(None),
     hallucination_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    paperclip_api_key: Optional[str] = Form(None),
     ai_detection_enabled: bool = Form(False),
     ai_detection_backend: str = Form("local"),
     ai_detection_api_key: Optional[str] = Form(None),
@@ -1342,6 +1466,7 @@ async def start_check(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
+        paperclip_api_key = _form_default_value(paperclip_api_key)
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -1520,6 +1645,7 @@ async def start_check(
                 "hallucination_model": resolved_hallucination_model if use_llm else None,
                 "input_bytes": input_bytes,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(paperclip_api_key),
                 "original_filename_ext": Path(original_filename).suffix.lower() if original_filename else None,
             },
         )
@@ -1541,6 +1667,7 @@ async def start_check(
                 ai_detection_api_key=ai_detection_api_key,
                 ai_detection_consent=ai_detection_consent,
                 ai_detection_service=ai_detection_service,
+                paperclip_api_key=paperclip_api_key,
             )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
@@ -1586,6 +1713,7 @@ async def run_check(
     ai_detection_api_key: Optional[str] = None,
     ai_detection_consent: bool = False,
     ai_detection_service: str = "pangram",
+    paperclip_api_key: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -1707,6 +1835,7 @@ async def run_check(
             ai_detection_api_key=ai_detection_api_key,
             ai_detection_consent=ai_detection_consent,
             ai_detection_service=ai_detection_service,
+            paperclip_api_key=paperclip_api_key,
         )
 
         # Run the check
@@ -1940,21 +2069,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
-        # Check if we already have a cached thumbnail path
-        thumbnail_path = check.get('thumbnail_path')
-        if thumbnail_path and os.path.exists(thumbnail_path):
-            return FileResponse(
-                thumbnail_path,
-                media_type="image/png",
-                headers=_private_artifact_headers(),
-            )
-        
-        # Stale thumbnail path — clear it from DB so we regenerate cleanly
-        if thumbnail_path:
-            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
-            await db.update_check_thumbnail(check_id, "")
-        
+
         cache_dir = await _get_configured_cache_dir()
 
         # Generate thumbnail based on source type
@@ -1981,6 +2096,25 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
             'arxiv.org' not in paper_source.lower()
         )
+        force_pdf_thumbnail_regen = False
+
+        # Check if we already have a cached thumbnail path
+        thumbnail_path = check.get('thumbnail_path')
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            if is_direct_pdf_url and is_probably_placeholder_thumbnail(thumbnail_path):
+                logger.info(f"Regenerating placeholder PDF thumbnail for check {check_id}: {thumbnail_path}")
+                force_pdf_thumbnail_regen = True
+            else:
+                return FileResponse(
+                    thumbnail_path,
+                    media_type="image/png",
+                    headers=_private_artifact_headers(),
+                )
+
+        # Stale thumbnail path — clear it from DB so we regenerate cleanly
+        if thumbnail_path:
+            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
+            await db.update_check_thumbnail(check_id, "")
         
         if is_direct_pdf_url:
             # Generate thumbnail from direct PDF URL
@@ -1998,7 +2132,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     thumbnail_path = await get_text_thumbnail_async(
                         check_id,
                         "PDF",
-                        source_identifier=paper_source,
+                        source_identifier=f"{paper_source}#pdf-placeholder",
                         cache_dir=cache_dir,
                     )
                     pdf_path = None
@@ -2008,12 +2142,13 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     pdf_path,
                     source_identifier=paper_source,
                     cache_dir=cache_dir,
+                    force=force_pdf_thumbnail_regen,
                 )
             else:
                 thumbnail_path = await get_text_thumbnail_async(
                     check_id,
                     "PDF",
-                    source_identifier=paper_source,
+                    source_identifier=f"{paper_source}#pdf-placeholder",
                     cache_dir=cache_dir,
                 )
         elif arxiv_match:
@@ -2795,6 +2930,7 @@ async def start_batch_check(
                 "llm_provider": llm_provider if request.use_llm else None,
                 "llm_model": llm_model if request.use_llm else None,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(request.paperclip_api_key),
             },
         )
 
@@ -2863,6 +2999,7 @@ async def start_batch_check(
                     ai_detection_api_key=request.ai_detection_api_key,
                     ai_detection_consent=request.ai_detection_consent,
                     ai_detection_service=request.ai_detection_service,
+                    paperclip_api_key=request.paperclip_api_key,
                 )
             )
             active_checks[session_id] = {
@@ -2899,16 +3036,17 @@ async def start_batch_check(
 async def start_batch_check_files(
     files: list[UploadFile] = File(...),
     batch_label: Optional[str] = Form(None),
-    llm_config_id: Optional[int] = Form(None),
+    llm_config_id: Optional[LLMConfigId] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
-    hallucination_config_id: Optional[int] = Form(None),
+    hallucination_config_id: Optional[LLMConfigId] = Form(None),
     hallucination_provider: Optional[str] = Form(None),
     hallucination_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    paperclip_api_key: Optional[str] = Form(None),
     ai_detection_enabled: bool = Form(False),
     ai_detection_backend: str = Form("local"),
     ai_detection_api_key: Optional[str] = Form(None),
@@ -2934,6 +3072,7 @@ async def start_batch_check_files(
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
         semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
+        paperclip_api_key = _form_default_value(paperclip_api_key)
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -3065,6 +3204,7 @@ async def start_batch_check_files(
                 "llm_provider": llm_provider if use_llm else None,
                 "llm_model": llm_model if use_llm else None,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "paperclip_key_present": bool(paperclip_api_key),
                 "uploaded_bytes": sum(Path(item['path']).stat().st_size for item in files_to_process if Path(item['path']).exists()),
             },
         )
@@ -3128,6 +3268,7 @@ async def start_batch_check_files(
                     ai_detection_api_key=ai_detection_api_key,
                     ai_detection_consent=ai_detection_consent,
                     ai_detection_service=ai_detection_service,
+                    paperclip_api_key=paperclip_api_key,
                 )
             )
             active_checks[session_id] = {
@@ -3497,7 +3638,7 @@ async def get_llm_configs(current_user: UserInfo = Depends(require_user)):
     try:
         user_id = get_user_id_filter(current_user)
         configs = await db.get_llm_configs(user_id=user_id)
-        return configs
+        return _merge_env_llm_configs(configs)
     except Exception as e:
         logger.error(f"Error getting LLM configs: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -3534,7 +3675,7 @@ async def create_llm_config(
             api_key=store_key,
             user_id=user_id,
         )
-        return {
+        created = {
             "id": config_id,
             "name": config.name,
             "provider": config.provider,
@@ -3543,6 +3684,7 @@ async def create_llm_config(
             "is_default": False,
             "has_key": bool(store_key),
         }
+        return _merge_env_llm_configs([created])[0]
     except HTTPException:
         raise
     except Exception as e:
@@ -3594,7 +3736,7 @@ async def update_llm_config(
         if success:
             # Get updated config
             updated = await db.get_llm_configs(user_id=user_id)
-            updated_config = next((c for c in updated if c["id"] == config_id), None)
+            updated_config = next((c for c in _merge_env_llm_configs(updated) if c["id"] == config_id), None)
             return updated_config or {"id": config_id, "message": "Updated"}
         else:
             raise HTTPException(status_code=404, detail="Config not found")
@@ -3627,13 +3769,17 @@ async def delete_llm_config(
 
 @app.post("/api/llm-configs/{config_id}/set-default")
 async def set_default_llm_config(
-    config_id: int,
+    config_id: LLMConfigId,
     current_user: UserInfo = Depends(require_user),
 ):
     """Set an LLM configuration as the default"""
     try:
+        if _is_env_llm_config_id(config_id):
+            if _env_llm_config_from_id(config_id):
+                return {"message": "Environment config selected"}
+            raise HTTPException(status_code=404, detail="Config not found")
         user_id = get_user_id_filter(current_user)
-        success = await db.set_default_llm_config(config_id, user_id=user_id)
+        success = await db.set_default_llm_config(int(config_id), user_id=user_id)
         if success:
             return {"message": "Default config set successfully"}
         else:
@@ -6474,6 +6620,11 @@ async def list_llm_models(req: _ListModelsRequest, current_user: UserInfo = Depe
         provider = "google"
     api_key = (req.api_key or "").strip() or None
     endpoint = (req.endpoint or "").strip() or None
+    if not api_key or not endpoint:
+        from refchecker.config.settings import resolve_api_key, resolve_endpoint
+
+        api_key = api_key or resolve_api_key(provider)
+        endpoint = endpoint or resolve_endpoint(provider)
 
     source = "fallback"
     models: list[str] = []

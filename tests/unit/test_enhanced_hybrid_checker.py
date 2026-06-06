@@ -160,6 +160,32 @@ def _build_checker():
     return checker
 
 
+def test_paperclip_key_can_be_supplied_per_request(monkeypatch):
+    paperclip_calls = []
+
+    class FakePaperclip:
+        enabled = True
+
+    def fake_initialize(self, module_name, class_name, log_name, *args, **kwargs):
+        if module_name == 'paperclip':
+            paperclip_calls.append(kwargs)
+            return FakePaperclip()
+        return None
+
+    monkeypatch.delenv('PAPERCLIP_API_KEY', raising=False)
+    with patch.object(EnhancedHybridReferenceChecker, '_initialize_checker', fake_initialize):
+        checker = EnhancedHybridReferenceChecker(
+            paperclip_api_key='pc-request-key',
+            enable_openalex=False,
+            enable_crossref=False,
+            enable_arxiv_citation=False,
+            enable_acl_anthology=False,
+        )
+
+    assert checker.paperclip is not None
+    assert paperclip_calls == [{'api_key': 'pc-request-key'}]
+
+
 @patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
 def test_unverified_reason_includes_negative_and_failed_checkers(_mock_sleep):
     checker = _build_checker()

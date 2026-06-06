@@ -35,7 +35,12 @@ function withBackendPythonPath(env) {
   if (!parts.includes(srcDir)) {
     parts.unshift(srcDir);
   }
-  return { ...env, PYTHONPATH: parts.filter(Boolean).join(separator) };
+  return {
+    ...env,
+    PYTHONPATH: parts.filter(Boolean).join(separator),
+    PYTHONIOENCODING: env.PYTHONIOENCODING || 'utf-8:replace',
+    PYTHONUTF8: env.PYTHONUTF8 || '1',
+  };
 }
 
 // Colors for console output
@@ -147,6 +152,22 @@ function killProcessOnPort(port) {
 
 // Find Python executable
 function findPython() {
+  const activeVenvPython = process.env.VIRTUAL_ENV
+    ? (isWindows
+      ? join(process.env.VIRTUAL_ENV, 'Scripts', 'python.exe')
+      : join(process.env.VIRTUAL_ENV, 'bin', 'python'))
+    : null;
+  if (activeVenvPython && existsSync(activeVenvPython)) {
+    return activeVenvPython;
+  }
+
+  const uvTestVenvPython = isWindows
+    ? join(rootDir, '.uv-test-venv', 'Scripts', 'python.exe')
+    : join(rootDir, '.uv-test-venv', 'bin', 'python');
+  if (existsSync(uvTestVenvPython)) {
+    return uvTestVenvPython;
+  }
+
   const venvPython = isWindows 
     ? join(rootDir, '.venv', 'Scripts', 'python.exe')
     : join(rootDir, '.venv', 'bin', 'python');
@@ -605,7 +626,7 @@ async function main() {
     await new Promise(() => {});
   } else {
     log('Both servers were already running. Browser opened.', colors.green);
-    process.exit(0);
+    process.exitCode = 0;
   }
 }
 

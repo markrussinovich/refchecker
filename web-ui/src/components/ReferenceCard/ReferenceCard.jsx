@@ -7,7 +7,8 @@ import {
   exportReferenceAsBibtex,
   exportReferenceAsStyle,
   CITATION_STYLE_DEFAULTS,
-  copyToClipboard
+  copyToClipboard,
+  displayReferenceValue,
 } from '../../utils/formatters'
 import {
   getEffectiveReferenceStatus,
@@ -36,6 +37,46 @@ const handleExternalClick = (url) => (e) => {
 }
 
 const urlPattern = /https?:\/\/[^\s]+/g
+
+function normalizeCitationMarkerText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .trim()
+    .toLowerCase()
+}
+
+function findCitationMarkerRange(sentence, marker) {
+  if (!sentence || !marker) return null
+  const exactAt = sentence.indexOf(marker)
+  if (exactAt >= 0) return { start: exactAt, end: exactAt + marker.length }
+
+  const normalizedMarker = normalizeCitationMarkerText(marker)
+  if (!normalizedMarker) return null
+  const markerCore = normalizedMarker.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
+  const normalizedCore = markerCore || normalizedMarker
+
+  const candidates = []
+  for (let start = 0; start < sentence.length; start += 1) {
+    const ch = sentence[start]
+    if (ch !== '(' && ch !== '[' && !/[A-Za-z]/.test(ch)) continue
+    const windowEnd = Math.min(sentence.length, start + Math.max(marker.length + 24, 24))
+    for (let end = start + 3; end <= windowEnd; end += 1) {
+      const raw = sentence.slice(start, end)
+      const normalized = normalizeCitationMarkerText(raw)
+      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
+        candidates.push({ start, end, length: end - start })
+      }
+    }
+  }
+
+  if (!candidates.length) return null
+  candidates.sort((a, b) => a.length - b.length || a.start - b.start)
+  return { start: candidates[0].start, end: candidates[0].end }
+}
 
 // Parse error_details to extract cited/actual values and format on separate lines
 // Handles new format: "Title mismatch:\n       cited:  value\n       actual: value"
@@ -511,6 +552,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
         warning_details: issue.error_details,
       }, activeFormat)
     })
+  const displayVenue = displayReferenceValue(reference.venue)
+  const displayYear = displayReferenceValue(reference.year)
 
   return (
     <div
@@ -653,9 +696,9 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   if user cited acronym, or NLM acronym if user cited
                   full name AND the active style accepts abbrevs).
                   Re-evaluates when style changes. */}
-              {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
+              {displayVenue && displayVenue !== 0 && displayVenue !== '0' && (
                 <VenueLine
-                  venue={reference.venue}
+                  venue={displayVenue}
                   fullVenue={reference.enrichment?.venue}
                   venueOpenalexId={reference.enrichment?.venue_id}
                   activeStyle={activeFormat}
@@ -665,12 +708,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               {/* Year — with accessed date if it differs from the
                   published year (web-style references like "Accessed
                   2024-03-12; published 2018"). */}
-              {reference.year && reference.year !== 0 && reference.year !== '0' && (
+              {displayYear && displayYear !== 0 && displayYear !== '0' && (
                 <div
                   style={{ color: 'var(--color-text-secondary)' }}
                 >
-                  {reference.year}
-                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(reference.year) && (
+                  {displayYear}
+                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(displayYear) && (
                     <span style={{ color: 'var(--color-text-muted)' }}>
                       {' '}· accessed {reference.accessed_date}
                     </span>
@@ -766,7 +809,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                     : 'Context'}
                 </button>
               </span>
-              <span
+              <div
                 style={{
                   flex: '1 1 auto',
                   minWidth: 0,
@@ -775,45 +818,93 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               >
                 {contextOpen && (
                   reference.citation_contexts?.length > 0 ? (
-                    <span style={{ display: 'block' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
                         // Split sentence at marker for inline bold
                         // without dangerouslySetInnerHTML.
                         const marker = ctx.marker || ''
                         const sent = ctx.sentence || ''
-                        const markerAt = marker ? sent.indexOf(marker) : -1
-                        const head = markerAt >= 0 ? sent.slice(0, markerAt) : sent
-                        const tail = markerAt >= 0 ? sent.slice(markerAt + marker.length) : ''
+                        const markerRange = findCitationMarkerRange(sent, marker)
+                        const markerAt = markerRange ? markerRange.start : -1
+                        const markerEnd = markerRange ? markerRange.end : -1
+                        const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
+                        const head = markerRange ? sent.slice(0, markerAt) : sent
+                        const tail = markerRange ? sent.slice(markerEnd) : ''
                         return (
-                          <span
+                          <div
                             key={i}
                             style={{
-                              display: 'block',
-                              color: 'var(--color-text)',
-                              fontStyle: 'italic',
-                              marginBottom: i < Math.min(reference.citation_contexts.length, 3) - 1 ? 6 : 0,
-                              paddingLeft: 6,
-                              borderLeft: '2px solid var(--color-border, #d4d4d8)',
+                              color: 'var(--color-text-primary)',
+                              background: 'var(--color-bg-secondary)',
+                              border: '1px solid var(--color-border, #d4d4d8)',
+                              borderLeft: '3px solid var(--color-accent, #3b82f6)',
+                              borderRadius: 6,
+                              padding: '8px 10px',
+                              boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
                             }}
                             title="Sentence around the citation marker in the source paper"
                           >
-                            {head}
-                            {markerAt >= 0 && (
-                              <span
-                                style={{
-                                  fontStyle: 'normal',
-                                  fontWeight: 700,
-                                  color: 'var(--color-accent, #3b82f6)',
-                                }}
-                              >
-                                {marker}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                marginBottom: 5,
+                                color: 'var(--color-text-muted)',
+                                fontSize: '0.72rem',
+                                fontStyle: 'normal',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}
+                            >
+                              <span>Excerpt {i + 1}</span>
+                              {marker && (
+                                <span
+                                  style={{
+                                    color: 'var(--color-accent, #3b82f6)',
+                                    background: 'var(--color-bg-tertiary)',
+                                    border: '1px solid var(--color-border, #d4d4d8)',
+                                    borderRadius: 999,
+                                    padding: '0 6px',
+                                    textTransform: 'none',
+                                    letterSpacing: 0,
+                                  }}
+                                >
+                                  {marker}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
+                              {ctx.before && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {ctx.before}{' '}
+                                </span>
+                              )}
+                              <span>
+                                {head}
                               </span>
-                            )}
-                            {tail}
-                          </span>
+                              {markerRange && (
+                                <span
+                                  style={{
+                                    fontStyle: 'normal',
+                                    fontWeight: 700,
+                                    color: 'var(--color-accent, #3b82f6)',
+                                  }}
+                                >
+                                  {markerText}
+                                </span>
+                              )}
+                              <span>{tail}</span>
+                              {ctx.after && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {' '}{ctx.after}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         )
                       })}
-                    </span>
+                    </div>
                   ) : (
                     <span
                       style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
@@ -823,7 +914,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                     </span>
                   )
                 )}
-              </span>
+              </div>
             </div>
           )}
 

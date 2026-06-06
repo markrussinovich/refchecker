@@ -117,6 +117,25 @@ class TestBibliographyEndDetection:
         assert "[2] Second Author" in bibliography_text
         assert "[3] Third Author" in bibliography_text
 
+    def test_final_reference_year_before_appendix_is_preserved(self):
+        """A previous reference year must not be consumed as a numbered appendix heading."""
+        sample_text = """
+        References
+        [1] First Author. First title. In Conference, 2020.
+        [2] Jixuan Zhou, Dan Feng, and Bo Li. A fuzzing method
+        based on dual variation strategy for cisco ios. In ICCC,
+        2017.
+        APPENDIX
+        A Optimization Strategies
+        Appendix prose should not be included.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert "In ICCC," in bibliography_text
+        assert "2017." in bibliography_text
+        assert "APPENDIX" not in bibliography_text
+
     def test_bibliography_stops_before_period_lettered_appendix_headings(self):
         """Regression for ICML PDFs whose appendices start as 'A. ...'."""
         appendix_patterns = [

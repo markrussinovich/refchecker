@@ -28,6 +28,16 @@ describe('useConfigStore', () => {
     expect(result.current.isLoading).toBe(false)
   })
 
+  it('restores string environment config selections', async () => {
+    localStorage.getItem.mockImplementation((key) => (
+      key === 'refchecker_selected_extraction_llm' ? 'env:anthropic' : null
+    ))
+    const { useConfigStore } = await import('./useConfigStore')
+    const { result } = renderHook(() => useConfigStore())
+
+    expect(result.current.selectedExtractionConfigId).toBe('env:anthropic')
+  })
+
   it('should have fetchConfigs method', async () => {
     const { useConfigStore } = await import('./useConfigStore')
     const { result } = renderHook(() => useConfigStore())

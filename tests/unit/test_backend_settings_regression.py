@@ -135,7 +135,65 @@ class TestCacheHelperScoping:
 
 
 # ---------------------------------------------------------------------------
-# 4. Zero-byte PDF cache protection
+# 4. Lightweight CLI parser state in WebUI wrapper
+# ---------------------------------------------------------------------------
+
+class TestLightweightCliCheckerState:
+    """The WebUI parser shim must initialize CLI state used by shared methods."""
+
+    def test_cli_parser_shim_has_debug_mode(self):
+        from backend.refchecker_wrapper import _make_cli_checker
+
+        checker = _make_cli_checker(None)
+
+        assert checker.debug_mode is False
+
+    def test_cli_parser_shim_can_handle_failed_biblatex_parse(self):
+        from backend.refchecker_wrapper import _make_cli_checker
+
+        checker = _make_cli_checker(None)
+
+        refs = checker._parse_references_regex("[1] A\n[2] B\n[3] C")
+
+        assert refs == []
+        assert checker.fatal_error is True
+
+    def test_failed_deterministic_fallback_does_not_poison_llm_results(self):
+        from backend.refchecker_wrapper import _make_cli_checker
+
+        class UnderExtractingProvider:
+            model = "test-model"
+            cache_dir = None
+
+            def is_available(self):
+                return True
+
+            def extract_references(self, bibliography_text):
+                return ["Alice Smith#First extracted reference#Journal#2024#"]
+
+        checker = _make_cli_checker(UnderExtractingProvider())
+        checker._extract_numbered_references_with_llm_chunks = lambda numbered_entries: []
+
+        def failed_deterministic_fallback(_bibliography_text):
+            checker.fatal_error = True
+            return []
+
+        checker._parse_references_regex = failed_deterministic_fallback
+        bibliography = "\n".join([
+            "[1] Alice Smith. First extracted reference. Journal. 2024.",
+            "[2] Bob Jones. Second reference that the LLM missed. Conference. 2023.",
+            "[3] Carol White. Third reference that the LLM missed. Workshop. 2022.",
+        ])
+
+        refs = checker.parse_references(bibliography)
+
+        assert len(refs) == 1
+        assert refs[0]["title"] == "First extracted reference"
+        assert checker.fatal_error is False
+
+
+# ---------------------------------------------------------------------------
+# 5. Zero-byte PDF cache protection
 # ---------------------------------------------------------------------------
 
 class TestPdfCacheSizeCheck:
@@ -166,7 +224,7 @@ class TestPdfCacheSizeCheck:
 
 
 # ---------------------------------------------------------------------------
-# 5. DOI validation in bulk pipeline
+# 6. DOI validation in bulk pipeline
 # ---------------------------------------------------------------------------
 
 class TestBulkPipelineDOIValidation:
@@ -202,7 +260,7 @@ class TestBulkPipelineDOIValidation:
 
 
 # ---------------------------------------------------------------------------
-# 6. Semantic Scholar URL construction in bulk pipeline
+# 7. Semantic Scholar URL construction in bulk pipeline
 # ---------------------------------------------------------------------------
 
 class TestSemanticScholarURLConstruction:

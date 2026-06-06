@@ -47,7 +47,7 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
-BIBLIOGRAPHY_EXTRACTION_CACHE_VERSION = 'refparse-v3'
+BIBLIOGRAPHY_EXTRACTION_CACHE_VERSION = 'refparse-v4'
 
 
 def cache_key_for_spec(input_spec: str) -> str:

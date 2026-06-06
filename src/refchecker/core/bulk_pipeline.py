@@ -26,7 +26,11 @@ from refchecker.core.hallucination_policy import (
     should_defer_likely_to_llm,
 )
 from refchecker.utils.arxiv_utils import get_bibtex_content
-from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
+from refchecker.utils.text_utils import (
+    detect_latex_bibliography_format,
+    display_reference_value,
+    extract_latex_references,
+)
 
 logger = logging.getLogger(__name__)
 _PRINT_LOCK = threading.RLock()
@@ -442,9 +446,9 @@ def _print_bulk_reference_block_unlocked(error_entry: Dict[str, Any], ref_idx: i
     """Print a bulk reference block while the caller holds _PRINT_LOCK."""
     ref_title = error_entry.get('ref_title', 'Untitled')
     ref_authors = error_entry.get('ref_authors_cited', '')
-    ref_year = error_entry.get('ref_year_cited', '')
+    ref_year = display_reference_value(error_entry.get('ref_year_cited', ''))
     ref_url = error_entry.get('ref_url_cited', '')
-    ref_venue = error_entry.get('ref_venue_cited', '')
+    ref_venue = display_reference_value(error_entry.get('ref_venue_cited', ''))
     ref_verified_url = error_entry.get('ref_verified_url', '')
 
     # Reference header with simple [n] index

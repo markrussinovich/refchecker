@@ -5,6 +5,8 @@ graceful-degradation contract — backends must return a result, never raise,
 when their dependency / model / key is missing. No network or ML deps needed.
 """
 
+import asyncio
+
 import pytest
 
 from refchecker.ai_detection import base, run_detection
@@ -125,11 +127,53 @@ def test_local_backend_unavailable_without_model():
     assert r.disclaimer  # honesty disclaimer always present
 
 
-def test_llm_backend_unavailable_without_key():
+def test_llm_backend_unavailable_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("REFCHECKER_ANTHROPIC_API_KEY", raising=False)
     r = run_detection(LONG_PROSE, title="t", backend="llm-judge",
                       provider="anthropic", api_key=None)
     assert r.band == base.BAND_UNAVAILABLE
     assert r.abstain_reason == "llm_not_configured"
+
+
+def test_webui_llm_judge_uses_hallucination_llm(monkeypatch):
+    captured = {}
+
+    class FakeDetectionResult:
+        def to_dict(self):
+            return {"band": "low", "backend_used": "llm-judge"}
+
+    def fake_run_detection(_text, **kwargs):
+        captured.update(kwargs)
+        return FakeDetectionResult()
+
+    import refchecker.ai_detection as ai_detection
+    from backend.refchecker_wrapper import ProgressRefChecker
+
+    monkeypatch.setattr(ai_detection, "run_detection", fake_run_detection)
+
+    checker = ProgressRefChecker.__new__(ProgressRefChecker)
+    checker.ai_detection_enabled = True
+    checker.ai_detection_backend = "llm-judge"
+    checker.check_id = 42
+    checker.progress_callback = None
+    checker.llm_provider = "anthropic"
+    checker.llm_model = "claude-extraction"
+    checker.api_key = "extraction-key"
+    checker.endpoint = None
+    checker.hallucination_provider = "google"
+    checker.hallucination_model = "gemini-hallucination"
+    checker.hallucination_api_key = "hallucination-key"
+    checker.hallucination_endpoint = "https://hallucination.example"
+
+    result = asyncio.run(checker._run_ai_detection(LONG_PROSE, "Paper"))
+
+    assert result["band"] == "low"
+    assert captured["backend"] == "llm-judge"
+    assert captured["provider"] == "google"
+    assert captured["model"] == "gemini-hallucination"
+    assert captured["api_key"] == "hallucination-key"
+    assert captured["endpoint"] == "https://hallucination.example"
 
 
 def test_api_backend_requires_consent():

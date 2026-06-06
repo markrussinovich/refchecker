@@ -75,6 +75,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     (existingProviderConfig ? useKeyStore.getState().getKey(`llm:${existingProviderConfig.id}`) : null)
   )
   const hasReusableProviderKey = !!existingProviderConfig || !!reusableProviderKey
+  const hasServerEnvironmentKey = existingProviderConfig?.key_source === 'environment' || existingProviderConfig?.env_key_available
 
   useEffect(() => {
     if (!multiuser) return
@@ -138,7 +139,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   // without persisting. Lets users iterate on model+key before committing.
   const handleTestConnection = async () => {
     setTestResult(null)
-    if (selectedProvider?.requiresKey && !formData.api_key.trim() && !reusableProviderKey) {
+    if (selectedProvider?.requiresKey && !formData.api_key.trim() && !hasReusableProviderKey) {
       setTestResult({ ok: false, message: 'Enter an API key first.' })
       return
     }
@@ -454,9 +455,13 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               style={{ color: 'var(--color-text-muted)' }}
             >
               {multiuser
-                ? 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
+                ? hasServerEnvironmentKey && !formData.api_key
+                  ? 'Using the server environment key by default. Enter a key here to override it for this browser.'
+                  : 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
                 : hasReusableProviderKey && !editConfig
-                  ? 'Defaults to the existing encrypted provider key in the local RefChecker database.'
+                  ? hasServerEnvironmentKey
+                    ? 'Defaults to the server environment key. Enter a key here to store a local encrypted override.'
+                    : 'Defaults to the existing encrypted provider key in the local RefChecker database.'
                   : 'Stored encrypted in the local RefChecker database and never shown again.'}
             </p>
           </div>

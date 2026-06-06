@@ -98,7 +98,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const sidebarContent = (
     <>
       {/* New Refcheck button - fixed at top */}
-      <div className="flex-shrink-0 px-3 py-3">
+      <div className="flex-shrink-0 pl-3 pr-11 py-3">
         <button 
           onClick={() => {
             ensureNewRefcheckItem()
@@ -190,32 +190,39 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
           transition: 'width 160ms ease, min-width 160ms ease, max-width 160ms ease',
         }}
       >
-        {/* Collapse / expand toggle — top of the sidebar, always visible
-            so the user can hide or restore the panel from either state.
-            Hidden on mobile (the drawer overlay already handles
-            visibility there). */}
+        {/* Collapse / expand toggle — compact icon control, always visible
+            so the user can hide or restore the panel from either state. */}
         <button
           onClick={toggleCollapsed}
-          className="sidebar-toggle flex items-center justify-center gap-1.5 mt-2 mx-2 px-2 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
+          className="sidebar-toggle absolute top-3 flex items-center justify-center rounded-md cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
           style={{
+            right: collapsed ? '50%' : '12px',
+            transform: collapsed ? 'translateX(50%)' : 'none',
+            width: 30,
+            height: 30,
             color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border)',
+            background: 'transparent',
           }}
           title={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
           aria-label={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
+          aria-pressed={collapsed}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="w-3.5 h-3.5 flex-shrink-0"
+            className="w-5 h-5 flex-shrink-0"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
-            strokeWidth={2}
-            style={{ transform: collapsed ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }}
+            strokeWidth={1.8}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            <rect x="4" y="5" width="16" height="14" rx="2" />
+            <path strokeLinecap="round" d="M10 5v14" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d={collapsed ? 'M14 9l3 3-3 3' : 'M8 9l-3 3 3 3'}
+            />
           </svg>
-          {!collapsed && <span>Hide sidebar</span>}
         </button>
 
         {/* Content. When collapsed the inner content is hidden — only

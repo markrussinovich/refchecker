@@ -66,9 +66,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
-  // Paperclip — same lifecycle as the SS key (Set / Edit / Remove +
-  // server-stored has-key flag). Activates the biomedical full-text
-  // secondary tier when present.
+  // Paperclip — same lifecycle as the SS key (Set / Edit / Remove).
+  // Multi-user keeps it browser-only; single-user stores it locally so
+  // the secondary tier auto-activates after restarts.
   const [pcApiKey, setPcApiKey] = useState('')
   const [pcIsEditing, setPcIsEditing] = useState(false)
   const [pcIsSaving, setPcIsSaving] = useState(false)
@@ -79,6 +79,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [ssError, setSsError] = useState(null)
   const [ssServerHasKey, setSsServerHasKey] = useState(false)
   const ssHasKey = hasKey('semantic_scholar') || ssServerHasKey
+  const pcHasKey = hasKey('paperclip') || pcServerHasKey
 
   // Local DB path state
   const [dbPathLocal, setDbPathLocal] = useState(settings.db_path?.value || '')
@@ -380,7 +381,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }).catch(() => {})
   }, [])
 
-  // Same for Paperclip — server tells us whether a key is on file.
+  // Same for Paperclip — server tells us whether a local key is on file.
+  // In multi-user mode the endpoint returns browser-only/no server key,
+  // while useKeyStore tracks the user's browser-cached key.
   useEffect(() => {
     api.getPaperclipKeyStatus().then(res => {
       setPcServerHasKey(res.data.has_key)
@@ -414,6 +417,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   }, [isSettingsOpen, closeSettings])
 
   if (!isSettingsOpen) return null
+
+  const notifyApiKeyStatusChanged = () => {
+    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch {}
+  }
 
   const handleSettingChange = (key, value) => {
     logger.info('SettingsPanel', `Updating setting ${key} to ${value}`)
@@ -449,6 +456,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         setSsServerHasKey(true)
         logger.info('SettingsPanel', 'SS API key saved to local database')
       }
+      notifyApiKeyStatusChanged()
       setSsIsValidating(false)
       setSsIsEditing(false)
       setSsApiKey('')
@@ -475,6 +483,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setSsIsEditing(false)
       setSsApiKey('')
       setSsError(null)
+      notifyApiKeyStatusChanged()
       logger.info('SettingsPanel', 'SS API key removed')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to delete SS key', err)
@@ -490,9 +499,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   }
 
   // Paperclip key handlers — same shape as SS but no separate
-  // /validate endpoint (Paperclip has no public validate API). The
-  // backend's /api/settings/paperclip PUT also propagates the key
-  // into PAPERCLIP_API_KEY so the next check enables the tier.
+  // /validate endpoint (Paperclip has no public validate API).
   const handlePcSave = async () => {
     if (!pcApiKey.trim()) {
       setPcError('API key cannot be empty')
@@ -501,10 +508,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     try {
       setPcIsSaving(true)
       setPcError(null)
-      await api.setPaperclipKey(pcApiKey.trim())
-      setPcServerHasKey(true)
+      if (multiuser) {
+        setKey('paperclip', pcApiKey.trim())
+        setPcServerHasKey(false)
+      } else {
+        await api.setPaperclipKey(pcApiKey.trim())
+        deleteKey('paperclip')
+        setPcServerHasKey(true)
+      }
       setPcIsEditing(false)
       setPcApiKey('')
+      notifyApiKeyStatusChanged()
       logger.info('SettingsPanel', 'Paperclip API key saved')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to save Paperclip key', err)
@@ -517,11 +531,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const handlePcDelete = async () => {
     setPcIsSaving(true)
     try {
-      await api.deletePaperclipKey()
+      if (multiuser) {
+        deleteKey('paperclip')
+      } else {
+        await api.deletePaperclipKey()
+        deleteKey('paperclip')
+      }
       setPcServerHasKey(false)
       setPcIsEditing(false)
       setPcApiKey('')
       setPcError(null)
+      notifyApiKeyStatusChanged()
       logger.info('SettingsPanel', 'Paperclip API key removed')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to delete Paperclip key', err)
@@ -578,7 +598,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Detection engine</div>
           {[
             ['local', 'Local model (offline, calibrated)', 'desklib DeBERTa — runs on your machine after a one-time download. Recommended for reproducibility.'],
-            ['llm-judge', 'LLM judge (uses your configured LLM)', 'Reuses your LLM provider/key. No download, but scores are uncalibrated.'],
+            ['llm-judge', 'LLM judge (uses hallucination-check LLM)', 'Reuses the same provider, API key, and model selected for hallucination checks. No download, but scores are uncalibrated.'],
             ['api', 'External API (Pangram / GPTZero)', 'Sends manuscript text to a third-party service. Requires a key and explicit consent.'],
           ].map(([id, label, desc]) => (
             <label key={id} className="flex items-start gap-2 py-1.5 cursor-pointer">
@@ -724,8 +744,8 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         {/* LLM-judge note */}
         {backend === 'llm-judge' && (
           <div className="text-sm rounded-lg p-3 border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            Uses the same LLM provider and API key you configured under <strong>LLM</strong> /{' '}
-            <strong>API Keys</strong>. No extra setup needed.
+            Uses the same provider, API key, and model selected for hallucination checks under{' '}
+            <strong>LLM</strong> / <strong>API Keys</strong>. No extra setup needed.
           </div>
         )}
 
@@ -1560,13 +1580,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         )}
       </div>
 
-      {/* Paperclip API Key — OPTIONAL biomedical full-text +
-          arXiv secondary verification tier. Paste a key and the
-          next check auto-activates the tier; no other setup.
-          Hidden in multi-user mode where Paperclip keys aren't
-          stored server-side (the backend rejects PUT/DELETE with
-          410 there). */}
-      {!multiuser && (
+        {/* Paperclip API Key — OPTIONAL biomedical full-text +
+          arXiv secondary verification tier. In multi-user mode the
+          key stays in the browser cache and is sent per request; in
+          single-user mode it is stored locally and restored on restart. */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex items-center justify-between mb-1">
           <div>
@@ -1584,6 +1601,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 style={{ color: 'var(--color-link, #3b82f6)' }}
               >paperclip.gxl.ai/keys</a>.
               {' '}The next check picks it up automatically.
+              {multiuser && ' Stored in this browser only.'}
             </div>
           </div>
           {!pcIsEditing && (
@@ -1593,9 +1611,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 className="text-xs px-2 py-1 rounded cursor-pointer"
                 style={{ color: 'var(--color-accent)' }}
               >
-                {pcServerHasKey ? 'Edit' : 'Set'}
+                {pcHasKey ? 'Edit' : 'Set'}
               </button>
-              {pcServerHasKey && (
+              {pcHasKey && (
                 <button
                   onClick={handlePcDelete}
                   disabled={pcIsSaving}
@@ -1659,7 +1677,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </div>
         )}
       </div>
-      )}
     </div>
   )
 

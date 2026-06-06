@@ -575,6 +575,7 @@ export default function StatusSection() {
   const isCompleted = displayStatus === 'completed'
   const isCancelled = displayStatus === 'cancelled'
   const isError = displayStatus === 'error'
+  const thumbnailRetryPhase = isCompleted ? 'completed' : 'active'
 
   // State for thumbnail loading
   const [thumbnailUrl, setThumbnailUrl] = useState(null)
@@ -594,7 +595,10 @@ export default function StatusSection() {
     return () => document.removeEventListener('keydown', handleEscape)
   }, [showThumbnailOverlay])
 
-  // Fetch thumbnail when check ID changes
+  // Fetch thumbnail when check ID changes, and retry once a check completes.
+  // For URL/PDF checks the first request can happen while the backend is still
+  // downloading/extracting; if that early request fails, clear the error and
+  // re-request after completion so the UI can show the generated thumbnail.
   useEffect(() => {
     if (!selectedCheckId || selectedCheckId === -1) {
       setThumbnailUrl(null)
@@ -610,13 +614,12 @@ export default function StatusSection() {
     setThumbnailLoading(true)
     
     // Set the thumbnail URL - let the img element handle loading
-    const url = `${API_BASE}/api/thumbnail/${selectedCheckId}`
+    const url = `${API_BASE}/api/thumbnail/${selectedCheckId}?phase=${thumbnailRetryPhase}`
     setThumbnailUrl(url)
     // Set the high-resolution preview URL for overlay
-    setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}`)
-    setThumbnailLoading(false)
+    setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}?phase=${thumbnailRetryPhase}`)
     
-  }, [selectedCheckId])
+  }, [selectedCheckId, thumbnailRetryPhase])
 
   // Thumbnail component showing actual PDF first page
   const renderThumbnail = () => {
@@ -669,10 +672,40 @@ export default function StatusSection() {
             height: '100%',
             objectFit: 'cover',
             objectPosition: 'top',
+            opacity: thumbnailLoading ? 0 : 1,
+            transition: 'opacity 0.18s ease',
           }}
-          onError={() => setThumbnailError(true)}
+          onError={() => { setThumbnailError(true); setThumbnailLoading(false) }}
           onLoad={() => setThumbnailLoading(false)}
         />
+      )
+      const loadingElement = (
+        <div
+          className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden"
+          style={{ background: 'var(--color-bg-tertiary)' }}
+          aria-label="Retrieving paper thumbnail"
+        >
+          <div
+            className="absolute inset-x-4 top-5 space-y-2 opacity-60"
+            aria-hidden="true"
+          >
+            <div className="h-2 rounded animate-pulse" style={{ background: 'var(--color-text-muted)' }} />
+            <div className="h-2 w-4/5 rounded animate-pulse" style={{ background: 'var(--color-text-muted)', animationDelay: '120ms' }} />
+            <div className="h-2 w-2/3 rounded animate-pulse" style={{ background: 'var(--color-text-muted)', animationDelay: '240ms' }} />
+          </div>
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center"
+            style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}
+          >
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" style={{ color: 'var(--color-accent, #3b82f6)' }}>
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <div className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            Retrieving preview
+          </div>
+        </div>
       )
       
       // Always use button to show overlay on click
@@ -690,15 +723,16 @@ export default function StatusSection() {
             transition: 'border-color 0.2s, box-shadow 0.2s',
             padding: 0,
             background: 'none',
+            position: 'relative',
           }}
           className="hover:border-blue-400 hover:shadow-md"
         >
-          {thumbnailLoading ? (
-            <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24" style={{ color: 'var(--color-text-muted)' }}>
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          ) : imgElement}
+          {imgElement}
+          {thumbnailLoading && (
+            <div style={{ position: 'absolute', inset: 0 }}>
+              {loadingElement}
+            </div>
+          )}
         </button>
       )
     }

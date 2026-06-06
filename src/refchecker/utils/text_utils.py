@@ -4014,6 +4014,22 @@ def format_authors_for_display(authors):
     return ', '.join(formatted_authors)
 
 
+def is_no_date_placeholder(value) -> bool:
+    """Return True for bibliography no-date placeholders such as ``n.d.``."""
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if not text:
+        return False
+    compact = re.sub(r'\s+', '', text)
+    return compact in {'n.d.', 'n.d', 'nd'} or text in {'no date', 'undated'}
+
+
+def display_reference_value(value):
+    """Return an empty value for placeholders that should not be shown."""
+    return '' if is_no_date_placeholder(value) else value
+
+
 def strip_latex_commands(text):
     """
     Strip LaTeX commands and markup from text
@@ -5255,14 +5271,14 @@ def _extract_corrected_reference_data(error_entry: dict, corrected_data: dict) -
     else:
         correct_authors = str(authors_raw) if authors_raw else ''
         
-    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    correct_year = display_reference_value(error_entry.get('ref_year_correct') or corrected_data.get('year', ''))
     
     # Prioritize the verified URL that was actually used for verification
     correct_url = (error_entry.get('ref_url_correct') or 
                    error_entry.get('ref_verified_url') or 
                    corrected_data.get('url', ''))
     
-    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    correct_venue = display_reference_value(corrected_data.get('journal', '') or corrected_data.get('venue', ''))
     correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
     
     return {
@@ -5343,7 +5359,7 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     elif corrected_journal and not isinstance(corrected_journal, str):
         corrected_journal = str(corrected_journal)
     
-    journal_to_use = original_journal or corrected_journal
+    journal_to_use = display_reference_value(original_journal or corrected_journal)
     
     if journal_to_use and bibtex_type in ['article', 'inproceedings', 'conference']:
         field_name = 'journal' if bibtex_type == 'article' else 'booktitle'
@@ -5355,6 +5371,7 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
         if original_reference.get(field):
             lines.append(f"  {field} = {{{original_reference[field]}}},")
     
+    correct_year = display_reference_value(correct_year)
     if correct_year:
         lines.append(f"  year = {{{correct_year}}},")
     
@@ -5412,6 +5429,7 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     if correct_title:
         citation_parts.append(f"\\textit{{{correct_title}}}")
     
+    correct_venue = display_reference_value(correct_venue)
     if correct_venue:
         citation_parts.append(f"In \\textit{{{correct_venue}}}")
     
@@ -5446,12 +5464,14 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     if correct_authors:
         citation_parts.append(correct_authors)
     
+    correct_year = display_reference_value(correct_year)
     if correct_year:
         citation_parts.append(f"({correct_year})")
     
     if correct_title:
         citation_parts.append(f'"{correct_title}"')
     
+    correct_venue = display_reference_value(correct_venue)
     if correct_venue:
         citation_parts.append(f"In {correct_venue}")
     

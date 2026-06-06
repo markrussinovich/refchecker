@@ -70,6 +70,16 @@ body {
   min-height: 100vh;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer !important;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
 #root {
   min-height: 100vh;
 }

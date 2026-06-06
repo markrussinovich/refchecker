@@ -126,6 +126,7 @@ describe('InputSection bulk mode', () => {
       if (provider === 'anthropic') return 'llm-key'
       if (provider === 'google') return 'hallucination-key'
       if (provider === 'semantic_scholar') return 'ss-key'
+      if (provider === 'paperclip') return 'paperclip-key'
       return null
     })
     mocks.startBatchCheck.mockResolvedValue({
@@ -166,6 +167,7 @@ describe('InputSection bulk mode', () => {
         api_key: 'llm-key',
         hallucination_api_key: 'hallucination-key',
         semantic_scholar_api_key: 'ss-key',
+        paperclip_api_key: 'paperclip-key',
       })
     })
 
