@@ -208,7 +208,8 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
           </div>
         </div>
 
-        <div ref={scrollRef} style={{ overflow: 'auto', padding: '16px 18px' }}>
+        <div ref={scrollRef} style={{ overflow: 'auto', padding: '20px 18px',
+                                      background: 'var(--color-bg-secondary)' }}>
           {state.loading && (<div style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>Extracting document text…</div>)}
           {!state.loading && state.error && (<div style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>{state.error}</div>)}
           {!state.loading && !state.error && !state.available && (
@@ -230,8 +231,18 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                   </ul>
                 </div>
               )}
-              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6,
-                            fontSize: 14, fontFamily: 'var(--font-sans, ui-sans-serif, system-ui)' }}>
+              {/* Render the extracted body as a centered "page" so it reads
+                  like the source document instead of a flat text dump:
+                  a paper-coloured card on the muted desk above, a measured
+                  column, serif type, and comfortable leading. pre-wrap is
+                  kept so the PDF's own line structure is preserved. */}
+              <div style={{ maxWidth: 760, margin: '0 auto', padding: '44px 52px',
+                            background: 'var(--color-bg-primary)',
+                            border: '1px solid var(--color-border)', borderRadius: 4,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 8px 24px rgba(0,0,0,0.06)',
+                            whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.75,
+                            fontSize: 15.5, color: 'var(--color-text-primary)',
+                            fontFamily: 'var(--font-serif, Georgia, "Times New Roman", ui-serif, serif)' }}>
                 {nodes}
               </div>
             </>

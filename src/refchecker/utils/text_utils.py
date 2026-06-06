@@ -3002,17 +3002,23 @@ def _parse_vancouver_surname_initials(name: str):
     if len(raw) < 2:
         return None, None
 
+    def _initials_chars(tok: str) -> str:
+        # Strip the joiners that hyphenated given-name initials use:
+        # 'X-G' / 'X.-G.' (= Xiao-Gang → X.G.) collapse to 'XG'. A hyphenated
+        # SURNAME ('Smith-Jones') keeps lowercase, so it fails the isupper test.
+        return tok.replace(".", "").replace("-", "")
+
     def _is_initials_block(tok: str) -> bool:
-        t = tok.replace(".", "")
+        t = _initials_chars(tok)
         return bool(t) and t.isalpha() and t.isupper() and 1 <= len(t) <= 4
 
     # Initials trailing ('Surname… INITIALS') — preferred.
     if _is_initials_block(raw[-1]):
-        initials = [c.lower() for c in raw[-1].replace(".", "")]
+        initials = [c.lower() for c in _initials_chars(raw[-1])]
         surname_toks = raw[:-1]
     # Initials leading ('INITIALS Surname…') — common in NLM/medical refs.
     elif _is_initials_block(raw[0]):
-        initials = [c.lower() for c in raw[0].replace(".", "")]
+        initials = [c.lower() for c in _initials_chars(raw[0])]
         surname_toks = raw[1:]
     else:
         return None, None

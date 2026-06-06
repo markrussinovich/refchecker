@@ -495,23 +495,25 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   }
 
   const applyAllVisible = async () => {
+    // Compute the target set SYNCHRONOUSLY from the current decisions —
+    // do NOT derive it as a side-effect inside the setDecisions updater,
+    // because React defers that updater to the render phase, leaving
+    // `targets` empty when the optimistic/re-verify block below runs. That
+    // timing bug is why the badge moved on single-fix but never on
+    // "apply all". Skip user-edited rows (their text is authoritative).
     const targets = []
+    filtered.forEach(({ ref }, i) => {
+      const k = keyFor(ref, i)
+      if (decisions[k]?.status === 'edited') return
+      targets.push({ ref, i, k })
+    })
     // Snapshot every targeted ref BEFORE marking decisions, so Restore
     // can roll back any of them. The map is keyed by row key so
     // per-row restore stays independent even after a bulk apply.
-    filtered.forEach(({ ref }, i) => {
-      const k = keyFor(ref, i)
-      snapshotIfMissing(k, ref)
-    })
+    for (const { ref, k } of targets) snapshotIfMissing(k, ref)
     setDecisions(prev => {
       const next = { ...prev }
-      filtered.forEach(({ ref }, i) => {
-        const k = keyFor(ref, i)
-        // Don't clobber a user-edited entry — but do mark pending/rejected as applied.
-        if (next[k]?.status === 'edited') return
-        next[k] = { status: 'applied' }
-        targets.push({ ref, i })
-      })
+      for (const { k } of targets) next[k] = { status: 'applied' }
       return next
     })
     if (selectedCheckId && targets.length) {

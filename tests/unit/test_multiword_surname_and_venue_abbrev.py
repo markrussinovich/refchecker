@@ -80,6 +80,19 @@ def test_middle_name_usage():
     assert enhanced_name_match('LS Lohmander', 'Stefan Lohmander') is True
 
 
+def test_hyphenated_given_name_initials():
+    # Chinese/compound given names cited as hyphenated initials: 'Wu X-G'
+    # (Xiao-Gang → X-G) must match the full 'Wu Xiaogang'; surname-first too.
+    assert enhanced_name_match('Wu X-G', 'Wu Xiaogang') is True
+    assert enhanced_name_match('Wu X.-G.', 'Wu Xiaogang') is True
+    assert enhanced_name_match('Xie J-L', 'Jiang-Lan Xie') is True
+    assert enhanced_name_match('Chen W-Y', 'Wei-yi Chen') is True
+    # A hyphenated SURNAME must NOT be misread as initials.
+    assert enhanced_name_match('Smith-Jones K', 'K. Smith-Jones') is True
+    # Different given initial still mismatches.
+    assert enhanced_name_match('Wu X-G', 'Wu Yanqin') is False
+
+
 def test_surname_first_database_order():
     # Databases return medical author lists surname-FIRST ('Dürr Hans Roland').
     assert enhanced_name_match('Durr HR', 'Dürr Hans Roland') is True

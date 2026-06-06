@@ -44,6 +44,8 @@ function fmtTok(n) {
 export default function BatchSummaryView() {
   const selectedBatch = useHistoryStore(s => s.selectedBatch)
   const isLoadingBatch = useHistoryStore(s => s.isLoadingBatch)
+  const batchError = useHistoryStore(s => s.batchError)
+  const selectedBatchId = useHistoryStore(s => s.selectedBatchId)
   const selectBatch = useHistoryStore(s => s.selectBatch)
   const openBatchChild = useHistoryStore(s => s.openBatchChild)
   const [usage, setUsage] = useState({ input_tokens: 0, output_tokens: 0, cost_usd: 0, by_flow: {}, per_check: {} })
@@ -184,8 +186,34 @@ export default function BatchSummaryView() {
 
   if (isLoadingBatch && !selectedBatch) {
     return (
-      <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="p-6 text-center text-sm flex flex-col items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+        <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
         Loading batch…
+      </div>
+    )
+  }
+  // Error/timeout escape hatch — previously this returned null, leaving the
+  // user on an indefinite "Loading batch…" (if the request hung) or a blank
+  // panel (if it failed). Now a failed/timed-out load is recoverable.
+  if (!selectedBatch && batchError) {
+    return (
+      <div className="p-6 text-center text-sm flex flex-col items-center gap-3" style={{ color: 'var(--color-text-secondary)' }}>
+        <svg className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <p style={{ color: 'var(--color-text-primary)' }}>Couldn’t load this batch</p>
+        <p className="text-xs max-w-xs">{batchError}</p>
+        <button
+          type="button"
+          onClick={() => selectedBatchId && selectBatch(selectedBatchId)}
+          className="px-3 py-1.5 rounded-md border text-xs transition-all"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', background: 'var(--color-bg-tertiary)' }}
+        >
+          Retry
+        </button>
       </div>
     )
   }

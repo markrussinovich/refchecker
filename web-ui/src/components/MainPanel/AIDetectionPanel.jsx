@@ -88,10 +88,14 @@ export default function AIDetectionPanel({ detection, checkId }) {
               <button
                 type="button"
                 onClick={() => setViewerOpen(true)}
-                className="text-xs underline focus:outline-none focus:ring-2 rounded"
-                style={{ color: 'var(--color-accent)', '--tw-ring-color': 'var(--color-accent)' }}
+                className="text-xs px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 font-medium transition-colors focus:outline-none focus:ring-2"
+                style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', '--tw-ring-color': 'var(--color-accent)' }}
                 title="Show the flagged passages highlighted in the document text"
               >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
                 View in document
               </button>
             )}
@@ -100,8 +104,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
               onClick={() => setOpen(o => !o)}
               aria-expanded={open}
               aria-controls="ai-detection-spans"
-              className="text-xs underline focus:outline-none focus:ring-2 rounded"
-              style={{ color: 'var(--color-accent)', '--tw-ring-color': 'var(--color-accent)' }}
+              className="text-xs px-2.5 py-1 rounded-md border inline-flex items-center gap-1 transition-colors focus:outline-none focus:ring-2 hover:bg-[var(--color-bg-tertiary)]"
+              style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', '--tw-ring-color': 'var(--color-accent)' }}
             >
               {open ? 'Hide' : `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`}
             </button>
@@ -168,8 +172,11 @@ export default function AIDetectionPanel({ detection, checkId }) {
                   </div>
                 )}
                 {clickable && (
-                  <div className="text-xs mt-1 underline" style={{ color: 'var(--color-accent)' }}>
-                    View in document →
+                  <div className="text-xs mt-1.5 inline-flex items-center gap-1 font-medium" style={{ color: 'var(--color-accent)' }}>
+                    View in document
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                    </svg>
                   </div>
                 )}
               </div>

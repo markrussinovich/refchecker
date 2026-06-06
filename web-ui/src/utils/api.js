@@ -149,8 +149,11 @@ export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5
   api.post('/papers/similar', { references, paper_title, paper_id, limit }, { timeout: 120000 })
 
 // Real inter-reference citation graph via Semantic Scholar
-export const fetchCitationGraph = ({ references, paper_title }) =>
-  api.post('/papers/citation-graph', { references, paper_title }, { timeout: 120000 })
+export const fetchCitationGraph = ({ references, paper_title, ai_detection = false }) =>
+  // Backend now fans the S2 lookups out concurrently, so this is far faster;
+  // the generous ceiling covers a 60-ref bibliography plus the optional
+  // offline AI-gen pass under slow networks without the old 120s cutoff.
+  api.post('/papers/citation-graph', { references, paper_title, ai_detection }, { timeout: 180000 })
 
 // One-hop expand: a paper's outgoing references for the graph view.
 // `title` is optional — the backend uses it to do a title-search

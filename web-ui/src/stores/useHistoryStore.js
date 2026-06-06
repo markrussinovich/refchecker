@@ -22,6 +22,7 @@ export const useHistoryStore = create((set, get) => ({
   selectedBatchId: null,
   selectedBatch: null, // { batch_id, batch_label?, total, checks: [...] }
   isLoadingBatch: false,
+  batchError: null, // set when selectBatch fails/times out so the view can offer Retry
   isLoading: false,
   isLoadingDetail: false,
   detailCache: {}, // checkId -> { check, fetchedAt }
@@ -607,12 +608,19 @@ export const useHistoryStore = create((set, get) => ({
   // fetches the batch detail so the view can render immediately.
   selectBatch: async (batchId) => {
     if (!batchId) {
-      set({ selectedBatchId: null, selectedBatch: null })
+      set({ selectedBatchId: null, selectedBatch: null, batchError: null })
       return
     }
-    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true })
+    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true, batchError: null })
     try {
-      const resp = await api.getBatch(batchId)
+      // Hard ceiling so a slow/hung backend can never strand the panel on
+      // "Loading batch…" forever — the view surfaces a retryable error
+      // instead. 45s is comfortably above a healthy response yet well
+      // under the axios default, so the user gets feedback either way.
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Batch load timed out — the server may be busy.')), 45000)
+      )
+      const resp = await Promise.race([api.getBatch(batchId), timeoutPromise])
       // v0.7.55 (per full-stack review round 2): only commit the
       // result if `selectedBatchId` is still THIS batch. Without
       // this guard a rapid sidebar click between selectBatch and
@@ -620,7 +628,7 @@ export const useHistoryStore = create((set, get) => ({
       // even after `selectCheck` had nulled `selectedBatchId`,
       // leaving an orphan data object that the UI never showed.
       if (get().selectedBatchId === batchId) {
-        set({ selectedBatch: resp.data, isLoadingBatch: false })
+        set({ selectedBatch: resp.data, isLoadingBatch: false, batchError: null })
       } else {
         set({ isLoadingBatch: false })
       }
@@ -629,9 +637,12 @@ export const useHistoryStore = create((set, get) => ({
       // v0.7.56 (per full-stack review round 3): same race-token
       // guard on the error path. A failed fetch that resolves AFTER
       // the user navigated away should NOT surface its error toast
-      // onto the unrelated view they're now on.
+      // onto the unrelated view they're now on. We write a dedicated
+      // `batchError` (not the shared `error`) so BatchSummaryView can
+      // render a Retry affordance instead of an indefinite spinner.
       if (get().selectedBatchId === batchId) {
-        set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+        const msg = e?.response?.data?.detail || e?.message || 'Failed to load batch'
+        set({ isLoadingBatch: false, batchError: msg })
       } else {
         set({ isLoadingBatch: false })
       }

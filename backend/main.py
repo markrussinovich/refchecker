@@ -2558,6 +2558,28 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _read_cached_paper_text(path: str) -> str:
+    """Read a previously-extracted paper-text blob (blocking; call via to_thread)."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            return fh.read()
+    except Exception:
+        return ""
+
+
+def _write_cached_paper_text(path: str, text: str) -> None:
+    """Atomically persist extracted paper text (blocking; call via to_thread)."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        # Best-effort cache — a write failure must never break the response.
+        pass
+
+
 @app.get("/api/paper-text/{check_id}")
 async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """Return the extracted body text of a check's source document.
@@ -2573,6 +2595,33 @@ async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require
         paper_source = check.get('paper_source', '') or ''
         text = ""
         fmt = "text"
+
+        # ── Per-check extracted-text cache ────────────────────────────────
+        # PDF text extraction is CPU-bound (5-30s on a big paper) and was
+        # re-run on EVERY "View doc" / "View flagged" open — the source of
+        # the "extracting document text…" lag. The extracted body never
+        # changes for a given check, so memoise it to disk keyed by
+        # check_id. First open pays the extraction cost; every later open
+        # is an instant file read.
+        _text_cache_path = None
+        try:
+            _cache_dir = await _get_configured_cache_dir()
+            if _cache_dir:
+                _text_cache_dir = os.path.join(str(_cache_dir), "paper_text")
+                _text_cache_path = os.path.join(_text_cache_dir, f"{check_id}.txt")
+                if os.path.exists(_text_cache_path) and os.path.getsize(_text_cache_path) > 0:
+                    cached = await asyncio.to_thread(_read_cached_paper_text, _text_cache_path)
+                    if cached and cached.strip():
+                        MAX = 600_000
+                        return {
+                            "text": cached[:MAX],
+                            "format": "cached",
+                            "word_count": len(cached.split()),
+                            "truncated": len(cached) > MAX,
+                            "available": True,
+                        }
+        except Exception as _e:
+            logger.debug("paper-text cache read skipped: %s", _e)
 
         def _read_textfile(path):
             try:
@@ -2607,6 +2656,12 @@ async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require
                 logger.debug("paper-text cache lookup failed: %s", _e)
 
         text = text or ""
+        # Persist the freshly-extracted text so the next open is instant.
+        if text.strip() and _text_cache_path:
+            try:
+                await asyncio.to_thread(_write_cached_paper_text, _text_cache_path, text)
+            except Exception as _e:
+                logger.debug("paper-text cache write skipped: %s", _e)
         MAX = 600_000  # cap so a whole book can't bloat the response
         return {
             "text": text[:MAX],
@@ -6120,6 +6175,10 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
 class _CitationGraphRequest(BaseModel):
     references: list  # list of {id?, title, doi?, arxiv_id?, authors?}
     paper_title: Optional[str] = None
+    # When true (and the local model is installed) attach a per-reference
+    # AI-generated-text band to each first-degree node so the graph's AI
+    # ring renders on the bibliography itself, not just expanded nodes.
+    ai_detection: bool = False
 
 
 @app.post("/api/papers/citation-graph")
@@ -6160,43 +6219,66 @@ async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = De
             logger.debug("S2 fetch failed for %s: %s", url, e)
         return None
 
+    want_ai = bool(getattr(req, "ai_detection", False))
+    _node_fields = "paperId,citationCount,references.paperId"
+    if want_ai:
+        _node_fields += ",abstract"
+
     # Cap at 60 — beyond that S2 rate-limits hard and the graph is unreadable.
     refs = refs[:60]
     nodes_out = []
     paperid_to_local = {}  # S2 paperId -> our local ref id
 
+    # Fetch every ref's S2 record CONCURRENTLY (bounded by a semaphore)
+    # instead of one-at-a-time. The old sequential loop spent ~1s per ref
+    # and, on a 60-ref bibliography under any network latency, sailed past
+    # the frontend's 120s timeout ("timeout of 120000ms exceeded"). A
+    # bounded fan-out keeps us polite to S2's per-IP rate limit (smaller
+    # pool when we have no API key) while cutting wall-time roughly Nx.
+    _graph_conc = 8 if api_key else 5
+    _graph_sem = asyncio.Semaphore(_graph_conc)
+
     async with httpx.AsyncClient() as client:
-        # Fetch each ref's citationCount + outgoing references list. We do
-        # this sequentially to be polite to the free-tier rate limit.
-        ref_details = []
-        for i, ref in enumerate(refs):
+        async def _fetch_ref(i, ref):
             local_id = str(ref.get("id") or ref.get("index") or f"ref-{i}")
             ident = s2_id_of(ref)
             paper = None
             references_list = []
             if ident:
-                data = await _fetch(
-                    client,
-                    f"https://api.semanticscholar.org/graph/v1/paper/{ident}",
-                    params={"fields": "paperId,citationCount,references.paperId"},
-                )
+                async with _graph_sem:
+                    data = await _fetch(
+                        client,
+                        f"https://api.semanticscholar.org/graph/v1/paper/{ident}",
+                        params={"fields": _node_fields},
+                    )
                 if data:
                     paper = data
                     references_list = [r.get("paperId") for r in (data.get("references") or []) if r.get("paperId")]
             pid = (paper or {}).get("paperId")
             citation_count = (paper or {}).get("citationCount") or 0
-            ref_details.append({
+            return {
                 "local_id": local_id,
                 "paperId": pid,
                 "citationCount": citation_count,
                 "references": references_list,
-            })
+                "abstract": (paper or {}).get("abstract") or "",
+                "title": ref.get("title") or (paper or {}).get("title") or "",
+            }
+
+        # return_exceptions so one ref's failure can't sink the whole graph.
+        _raw = await asyncio.gather(
+            *[_fetch_ref(i, ref) for i, ref in enumerate(refs)],
+            return_exceptions=True,
+        )
+        ref_details = [d for d in _raw if isinstance(d, dict)]
+        for det in ref_details:
+            pid = det["paperId"]
             if pid:
-                paperid_to_local[pid] = local_id
+                paperid_to_local[pid] = det["local_id"]
             nodes_out.append({
-                "id": local_id,
+                "id": det["local_id"],
                 "paperId": pid,
-                "citationCount": citation_count,
+                "citationCount": det["citationCount"],
             })
 
         edges = []
@@ -6213,7 +6295,51 @@ async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = De
                 seen_edges.add(key)
                 edges.append({"source": src, "target": tgt})
 
-    return {"nodes": nodes_out, "edges": edges}
+    # Optional per-first-degree-node AI-gen band from the abstract (free,
+    # offline). Mirrors the /papers/expand pass so the ring renders on the
+    # bibliography nodes themselves, not only on expanded ones. Bounded by a
+    # semaphore; short abstracts short-circuit before any model load.
+    if want_ai:
+        try:
+            band_by_local = {}
+            from refchecker.ai_detection import run_detection
+            model_ready = False
+            try:
+                from refchecker.ai_detection import model_manager
+                model_ready = model_manager.is_model_installed() and model_manager.deps_available()
+            except Exception:
+                model_ready = False
+
+            if model_ready:
+                _ai_sem = asyncio.Semaphore(4)
+
+                async def _detect_node(det):
+                    abstract = (det.get("abstract") or "").strip()
+                    if not abstract:
+                        band_by_local[det["local_id"]] = {"band": "unavailable", "score": None}
+                        return
+                    async with _ai_sem:
+                        res = await asyncio.to_thread(
+                            run_detection, abstract, title=det.get("title"), backend="local"
+                        )
+                    band_by_local[det["local_id"]] = {"band": res.band, "score": res.overall_score}
+
+                await asyncio.gather(
+                    *[_detect_node(det) for det in ref_details], return_exceptions=True
+                )
+            else:
+                for det in ref_details:
+                    band_by_local[det["local_id"]] = {"band": "unavailable", "score": None}
+
+            for n in nodes_out:
+                b = band_by_local.get(n["id"])
+                if b:
+                    n["ai_detection_band"] = b["band"]
+                    n["ai_detection_score"] = b["score"]
+        except Exception as e:
+            logger.debug("Graph AI-gen (first-degree) skipped: %s", e)
+
+    return {"nodes": nodes_out, "edges": edges, "ai_detection": want_ai}
 
 
 class _ExpandRequest(BaseModel):
