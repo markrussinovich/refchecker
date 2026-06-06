@@ -2057,6 +2057,88 @@ async def get_check_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _render_check_html(check_id: int, current_user: UserInfo) -> tuple[str, str]:
+    """Resolve a check and render it to standalone HTML. Returns (title, html)."""
+    user_id = get_user_id_filter(current_user)
+    check = await db.get_check_by_id(check_id, user_id=user_id)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+    from backend.export import serialize_check_to_html
+    html_str = serialize_check_to_html(check)
+    title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
+    return title, html_str
+
+
+@app.get("/api/export/{check_id}/html")
+async def export_check_html(check_id: int, download: bool = True,
+                            current_user: UserInfo = Depends(require_user)):
+    """Self-contained HTML export of a check's results (references + verdicts +
+    AI-detection summary). The default download path drives 'Share → Download'."""
+    try:
+        title, html_str = await _render_check_html(check_id, current_user)
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{safe}.html"'
+        return HTMLResponse(content=html_str, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting check html: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class _PublishRequest(BaseModel):
+    adapter: str = "github_gist"   # 'github_gist'
+    token: str = ""                 # caller-supplied PAT (gist scope)
+    public: bool = False
+
+
+@app.post("/api/export/{check_id}/publish")
+async def publish_check(check_id: int, req: _PublishRequest,
+                        current_user: UserInfo = Depends(require_user)):
+    """Publish the HTML export to a web host and return a shareable URL.
+
+    Pluggable by adapter. The GitHub-Gist adapter needs a user-supplied token
+    (gist scope) and yields an htmlpreview.github.io link that renders the
+    standalone HTML. No credentials are persisted server-side here — the token
+    is used for this single request only.
+    """
+    title, html_str = await _render_check_html(check_id, current_user)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
+    if req.adapter != "github_gist":
+        raise HTTPException(status_code=400, detail=f"Unknown publish adapter: {req.adapter}")
+    if not req.token:
+        raise HTTPException(status_code=400, detail="A GitHub token (gist scope) is required.")
+    import httpx
+    payload = {
+        "description": f"RefChecker report — {title}",
+        "public": bool(req.public),
+        "files": {f"{safe}.html": {"content": html_str}},
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.github.com/gists",
+                json=payload,
+                headers={"Authorization": f"Bearer {req.token}",
+                         "Accept": "application/vnd.github+json"},
+                timeout=20.0,
+            )
+        if r.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"GitHub gist publish failed ({r.status_code}).")
+        gist = r.json()
+        raw_url = next((f.get("raw_url") for f in (gist.get("files") or {}).values() if f.get("raw_url")), None)
+        # htmlpreview renders the raw HTML in the browser.
+        preview = f"https://htmlpreview.github.io/?{raw_url}" if raw_url else gist.get("html_url")
+        return {"url": preview, "gist_url": gist.get("html_url"), "raw_url": raw_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"publish_check failed: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/thumbnail/{check_id}")
 async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
@@ -6623,6 +6705,70 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     return {"paper_id": pid, "items": items, "ai_detection": want_ai}
 
 
+class _AuthorProfileRequest(BaseModel):
+    author_id: str  # Semantic Scholar author id
+
+
+# Module-level TTL cache for S2 author profiles — the hover tooltip can fire
+# many times for the same author across a bibliography; this keeps us well
+# under S2's per-IP rate limit. {author_id: (fetched_monotonic, payload)}
+_AUTHOR_PROFILE_CACHE: dict = {}
+_AUTHOR_PROFILE_TTL = 6 * 60 * 60  # 6 hours
+
+
+@app.post("/api/authors/profile")
+async def author_profile(req: _AuthorProfileRequest, current_user: UserInfo = Depends(require_user)):
+    """Fetch an enriched Semantic Scholar author profile for the hover card:
+    affiliation, paper/citation counts, h-index, homepage, and a few recent
+    papers. Cached (6h TTL) and soft-failing — returns {available: False} on
+    any error so the tooltip simply falls back to the basic identifiers.
+    """
+    import time as _time
+    author_id = (req.author_id or "").strip()
+    if not author_id:
+        return {"available": False}
+    # Serve from cache when fresh.
+    cached = _AUTHOR_PROFILE_CACHE.get(author_id)
+    if cached and (_time.monotonic() - cached[0]) < _AUTHOR_PROFILE_TTL:
+        return cached[1]
+
+    import httpx
+    api_key = await _resolve_semantic_scholar_api_key(None)
+    headers = {"x-api-key": api_key} if api_key else {}
+    fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
+    url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
+        if r.status_code != 200:
+            payload = {"available": False}
+        else:
+            d = r.json() or {}
+            papers = [
+                {"title": p.get("title"), "year": p.get("year")}
+                for p in (d.get("papers") or [])
+                if p.get("title")
+            ]
+            # Most-recent first, cap to 5 so the tooltip stays compact.
+            papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
+            payload = {
+                "available": True,
+                "name": d.get("name"),
+                "affiliations": d.get("affiliations") or [],
+                "paperCount": d.get("paperCount"),
+                "citationCount": d.get("citationCount"),
+                "hIndex": d.get("hIndex"),
+                "homepage": d.get("homepage"),
+                "papers": papers[:5],
+            }
+    except Exception as e:
+        logger.debug("author_profile fetch failed for %s: %s", author_id, e)
+        payload = {"available": False}
+
+    _AUTHOR_PROFILE_CACHE[author_id] = (_time.monotonic(), payload)
+    return payload
+
+
 @app.get("/api/references/seen")
 async def list_seen_references(
     limit: int = 200,
@@ -6662,6 +6808,24 @@ async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     button on the Seen Refs tab."""
     removed = await db.clear_verified_references()
     return {"removed": removed}
+
+
+@app.get("/api/references/library/graph")
+async def references_library_graph(
+    limit: int = 400,
+    min_times_seen: int = 1,
+    edge_strategy: str = "shared-authors",
+    current_user: UserInfo = Depends(require_user),
+):
+    """Nodes + edges for the Obsidian-style 3D Seen-References graph. Bounded
+    (node cap + edge cull) so a large library stays renderable."""
+    try:
+        return await db.build_reference_graph_data(
+            limit=limit, min_times_seen=min_times_seen, edge_strategy=edge_strategy
+        )
+    except Exception as e:
+        logger.error(f"Error building reference graph: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/references/seen/backfill")

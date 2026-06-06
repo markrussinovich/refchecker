@@ -133,6 +133,18 @@ class AIDetectionResult:
     abstain_detail: Optional[str] = None
     word_count: int = 0
     disclaimer: str = DISCLAIMER
+    # ── Optional richer visualisation payloads (populated by the local
+    # windowed backend; None/empty for backends that don't compute them). All
+    # are DESCRIPTIVE summaries of the model's windowed outputs — never a
+    # posterior probability of authorship. ──────────────────────────────────
+    # {"AI": frac, "Mixed": frac, "Human": frac} — fraction of scored windows
+    # whose score is high / medium / low. NOT P(AI-written).
+    probability_distribution: Optional[Dict[str, float]] = None
+    # Per heuristic ~page chunk: {page, start_word, end_word, score, span_count}.
+    per_page_scores: Optional[List[Dict]] = None
+    # Most/least AI-like sentences: {text, score, is_flagged}. Capped + advisory.
+    top_ai_sentences: Optional[List[Dict]] = None
+    top_human_sentences: Optional[List[Dict]] = None
 
     def to_dict(self) -> Dict:
         return {
@@ -148,6 +160,10 @@ class AIDetectionResult:
             "abstain_detail": self.abstain_detail,
             "word_count": self.word_count,
             "disclaimer": self.disclaimer,
+            "probability_distribution": self.probability_distribution,
+            "per_page_scores": self.per_page_scores,
+            "top_ai_sentences": self.top_ai_sentences,
+            "top_human_sentences": self.top_human_sentences,
         }
 
 

@@ -5,7 +5,34 @@ from refchecker.utils.text_utils import (
     compare_titles_with_latex_cleaning,
     normalize_venue_for_display,
     titles_align_with_subtitle_tolerance,
+    titles_match_with_typo_tolerance,
 )
+
+
+def test_title_typo_tolerance_case_and_single_char():
+    # Reported false positive: same paper (DOI-matched), DB record has a typo
+    # ("Crosssover") and different case. Must NOT flag a title mismatch.
+    assert titles_match_with_typo_tolerance(
+        "The medial crossover toe: a cadaveric dissection",
+        "The Medial Crosssover Toe: a Cadaveric Dissection",
+    ) is True
+    # Pure case difference is fine too.
+    assert titles_match_with_typo_tolerance(
+        "Second metatarsophalangeal joint instability",
+        "SECOND METATARSOPHALANGEAL JOINT INSTABILITY",
+    ) is True
+
+
+def test_title_typo_tolerance_rejects_different_titles():
+    # Genuinely different titles must still mismatch (precision preserved).
+    assert titles_match_with_typo_tolerance(
+        "A study of hip fractures in elderly women",
+        "Regression modeling strategies with applications",
+    ) is False
+    # Short titles differing by a whole word are NOT typos.
+    assert titles_match_with_typo_tolerance(
+        "Foot biomechanics review", "Hand biomechanics review"
+    ) is False
 
 
 def test_field_scramble_body_text_merged_into_title():

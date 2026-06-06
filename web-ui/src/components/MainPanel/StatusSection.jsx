@@ -4,6 +4,8 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { ZoomControls } from '../common/ViewerControls'
+import ShareModal from '../Modals/ShareModal'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
@@ -23,8 +25,18 @@ const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight:
 function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
   const [pageCount, setPageCount] = useState(null)
   const [activePage, setActivePage] = useState(0)
+  const [zoom, setZoom] = useState(1)
   const scrollRef = useRef(null)
   const pageRefs = useRef([])
+
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
+  const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
+  const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
+  // Image sizing: at 100% fit to viewport; when zoomed, grow past the
+  // viewport and let the (now two-axis) scroll container pan.
+  const imgStyle = zoom === 1
+    ? { maxWidth: '95vw', maxHeight: '92vh', objectFit: 'contain' }
+    : { width: `${Math.round(zoom * 90)}vw`, maxWidth: 'none', height: 'auto', objectFit: 'contain' }
 
   useEffect(() => {
     let cancelled = false
@@ -80,6 +92,9 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose()
+      else if (e.key === '+' || e.key === '=') { zoomIn() }
+      else if (e.key === '-' || e.key === '_') { zoomOut() }
+      else if (e.key === '0') { setZoom(1) }
       else if (e.key === 'ArrowDown' || e.key === 'PageDown') {
         if (pageCount > 1) jumpToPage(Math.min(activePage + 1, pageCount - 1))
       } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
@@ -143,10 +158,27 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
         </div>
       )}
 
+      {/* Zoom controls (bottom-center) */}
+      <div
+        className="absolute bottom-5 left-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full"
+        style={{ transform: 'translateX(-50%)', background: 'rgba(255,255,255,0.12)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ZoomControls
+          zoom={zoom}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={() => setZoom(1)}
+          min={ZOOM_MIN}
+          max={ZOOM_MAX}
+          dark
+        />
+      </div>
+
       {/* Pages */}
       <div
         ref={scrollRef}
-        className="w-full h-full overflow-y-auto"
+        className={`w-full h-full ${zoom > 1 ? 'overflow-auto' : 'overflow-y-auto'}`}
         style={{ scrollBehavior: 'smooth' }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
@@ -163,7 +195,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
                 src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
                 alt={`Page ${i + 1} of ${pageCount}`}
                 loading="lazy"
-                style={{ maxWidth: '95vw', maxHeight: '92vh', objectFit: 'contain' }}
+                style={imgStyle}
                 className="rounded-lg shadow-2xl bg-white"
               />
             ))}
@@ -177,7 +209,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
             <img
               src={previewUrl || thumbnailUrl}
               alt="Paper preview"
-              style={{ maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain' }}
+              style={imgStyle}
               className="rounded-lg shadow-2xl"
               onError={(e) => {
                 if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
@@ -582,6 +614,7 @@ export default function StatusSection() {
   const [thumbnailError, setThumbnailError] = useState(false)
   const [thumbnailLoading, setThumbnailLoading] = useState(false)
   const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
+  const [showShare, setShowShare] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   
   // Close thumbnail overlay on Escape key
@@ -1045,6 +1078,21 @@ export default function StatusSection() {
               {displayTitle}
             </h3>
           )}
+          {isViewingCheck && displayStatus === 'completed' && (
+            <button
+              type="button"
+              onClick={() => setShowShare(true)}
+              className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+              style={{ border: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+              title="Share or export these results (HTML, link, or video)"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+              </svg>
+              Share
+            </button>
+          )}
           {/* Hide source info for pasted text since it shows the file path or text content */}
           {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 
@@ -1247,6 +1295,13 @@ export default function StatusSection() {
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
           onClose={() => setShowThumbnailOverlay(false)}
+        />
+      )}
+      {showShare && (
+        <ShareModal
+          checkId={selectedCheckId}
+          title={displayTitle}
+          onClose={() => setShowShare(false)}
         />
       )}
     </div>

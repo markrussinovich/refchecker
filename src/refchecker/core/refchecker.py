@@ -3109,10 +3109,17 @@ class ArxivReferenceChecker:
             # v0.7.68: subtitle tolerance — "X: subtitle" vs "X" is the
             # same paper, not a Title mismatch. We landed here via DOI/ID
             # match so the records are confirmed-same.
-            from refchecker.utils.text_utils import titles_align_with_subtitle_tolerance
+            from refchecker.utils.text_utils import (
+                titles_align_with_subtitle_tolerance,
+                titles_match_with_typo_tolerance,
+            )
             _subtitle_ok = titles_align_with_subtitle_tolerance(title, paper_data.get('title'))
+            # We reached verify_db_reference via a DOI/ID match, so the records
+            # are confirmed-same paper. Tolerate small OCR/typo differences
+            # (e.g. an extra letter in the DB title) instead of flagging them.
+            _typo_ok = titles_match_with_typo_tolerance(title, paper_data.get('title'))
 
-            if normalized_title != db_title and not _subtitle_ok:
+            if normalized_title != db_title and not _subtitle_ok and not _typo_ok:
                 from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(title)

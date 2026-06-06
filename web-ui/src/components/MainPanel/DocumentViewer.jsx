@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getPaperText } from '../../utils/api'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
+import { ZoomControls, FindBar } from '../common/ViewerControls'
 
 /**
  * In-document highlighter. Fetches the extracted body text of a check's source
@@ -86,7 +87,16 @@ function mergeRanges(ranges) {
 
 export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose }) {
   const [state, setState] = useState({ loading: true, text: '', error: null, available: true, truncated: false })
+  const [zoom, setZoom] = useState(1)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [currentMatch, setCurrentMatch] = useState(0)
   const scrollRef = useRef(null)
+  const findInputRef = useRef(null)
+
+  const ZOOM_MIN = 0.7, ZOOM_MAX = 2.2, ZOOM_STEP = 0.15
+  const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
+  const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
 
   useEffect(() => {
     let alive = true
@@ -109,9 +119,9 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     return () => { alive = false }
   }, [checkId])
 
-  const { nodes, located, missing, spanToMark } = useMemo(() => {
+  const { nodes, located, missing, spanToMark, findCount } = useMemo(() => {
     const text = state.text || ''
-    if (!text) return { nodes: [text], located: 0, missing: spans.length, spanToMark: {} }
+    if (!text) return { nodes: [text], located: 0, missing: spans.length, spanToMark: {}, findCount: 0 }
     const ranges = []
     let foundCount = 0
     spans.forEach((sp, si) => {
@@ -121,25 +131,60 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     const merged = mergeRanges(ranges)
     const spanToMark = {}
     merged.forEach((mk, mi) => mk.spans.forEach((si) => { spanToMark[si] = mi }))
+
+    // Find-in-document matches (case-insensitive, non-overlapping).
+    const findMatches = []
+    const q = (findQuery || '').trim()
+    if (q.length >= 2) {
+      const lower = text.toLowerCase()
+      const lq = q.toLowerCase()
+      let i = 0
+      while ((i = lower.indexOf(lq, i)) !== -1) { findMatches.push([i, i + lq.length]); i += lq.length }
+    }
+
+    // Build a sorted set of segment boundaries from BOTH AI marks and find
+    // matches, then emit one node per maximal segment — so a find highlight
+    // and an AI highlight can coexist without clobbering each other.
+    const points = new Set([0, text.length])
+    merged.forEach((m) => { points.add(m.start); points.add(m.end) })
+    findMatches.forEach(([s, e]) => { points.add(s); points.add(e) })
+    const bounds = Array.from(points).sort((a, b) => a - b)
+
+    const markIndexAt = (s, e) => merged.findIndex((m) => s >= m.start && e <= m.end)
+    const findIndexAt = (s, e) => findMatches.findIndex(([fs, fe]) => s >= fs && e <= fe)
+
     const out = []
-    let cursor = 0
-    merged.forEach((mk, i) => {
-      if (mk.start > cursor) out.push(...[].concat(linkify(text.slice(cursor, mk.start), `t${i}`)))
+    for (let k = 0; k < bounds.length - 1; k++) {
+      const s = bounds[k], e = bounds[k + 1]
+      if (s >= e) continue
+      const slice = text.slice(s, e)
+      const mi = markIndexAt(s, e)
+      const fi = findIndexAt(s, e)
+      const isAi = mi !== -1
+      const isFind = fi !== -1
+      if (!isAi && !isFind) { out.push(...[].concat(linkify(slice, `t${k}`))); continue }
+      const isCurrentFind = isFind && fi === currentMatch
+      const style = {
+        color: 'inherit', borderRadius: 3, padding: '0 1px',
+        ...(isAi ? { backgroundColor: 'var(--color-mark-bg, rgba(239,68,68,0.22))', boxShadow: 'inset 0 -2px 0 rgba(239,68,68,0.5)' } : {}),
+        ...(isFind ? {
+          backgroundColor: isCurrentFind ? 'var(--color-accent, #3b82f6)' : 'rgba(250, 204, 21, 0.55)',
+          color: isCurrentFind ? '#fff' : 'inherit',
+          boxShadow: isCurrentFind ? '0 0 0 1px var(--color-accent, #3b82f6)' : 'none',
+        } : {}),
+      }
       out.push(
         <mark
-          key={`m${i}`}
-          id={`docmark-${i}`}
-          style={{ backgroundColor: 'var(--color-mark-bg, rgba(239,68,68,0.22))', color: 'inherit',
-                   borderRadius: 3, padding: '0 1px', boxShadow: 'inset 0 -2px 0 rgba(239,68,68,0.5)' }}
+          key={`seg${k}`}
+          id={isFind ? `docfind-${fi}` : (isAi ? `docmark-${mi}` : undefined)}
+          style={style}
         >
-          {text.slice(mk.start, mk.end)}
+          {slice}
         </mark>
       )
-      cursor = mk.end
-    })
-    if (cursor < text.length) out.push(...[].concat(linkify(text.slice(cursor), 'tail')))
-    return { nodes: out, located: foundCount, missing: spans.length - foundCount, spanToMark }
-  }, [state.text, spans])
+    }
+    return { nodes: out, located: foundCount, missing: spans.length - foundCount, spanToMark, findCount: findMatches.length }
+  }, [state.text, spans, findQuery, currentMatch])
 
   // Scroll to + briefly flash the focused passage once the text is rendered.
   useEffect(() => {
@@ -156,6 +201,40 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     }, 120)
     return () => clearTimeout(t)
   }, [state.loading, focusSpanIndex, spanToMark])
+
+  // Keep the active find match in range and scroll to it.
+  useEffect(() => { setCurrentMatch(0) }, [findQuery])
+  useEffect(() => {
+    if (!findQuery || findCount === 0) return
+    const t = setTimeout(() => {
+      const el = document.getElementById(`docfind-${currentMatch}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 30)
+    return () => clearTimeout(t)
+  }, [currentMatch, findQuery, findCount])
+
+  const gotoFind = (dir) => {
+    if (!findCount) return
+    setCurrentMatch((c) => (c + dir + findCount) % findCount)
+  }
+
+  // Ctrl/Cmd+F opens the find bar; Esc closes it (or the viewer).
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault(); setFindOpen(true)
+        setTimeout(() => findInputRef.current?.focus(), 0)
+      } else if (e.key === 'Escape' && findOpen) {
+        e.preventDefault(); setFindOpen(false); setFindQuery('')
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault(); zoomIn()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault(); zoomOut()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [findOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const markEls = () => Array.from(scrollRef.current?.querySelectorAll('mark') || [])
   const gotoMark = (dir) => {
@@ -198,6 +277,26 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {!state.loading && state.available && (
+              findOpen ? (
+                <FindBar
+                  value={findQuery}
+                  onChange={setFindQuery}
+                  matchCount={findCount}
+                  currentMatch={currentMatch}
+                  onPrev={() => gotoFind(-1)}
+                  onNext={() => gotoFind(1)}
+                  onClose={() => { setFindOpen(false); setFindQuery('') }}
+                  inputRef={findInputRef}
+                />
+              ) : (
+                <button type="button" onClick={() => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 0) }}
+                  style={btn} title="Find in document (⌘F)">⌕ Find</button>
+              )
+            )}
+            {!state.loading && state.available && (
+              <ZoomControls zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={() => setZoom(1)} min={ZOOM_MIN} max={ZOOM_MAX} />
+            )}
             {!state.loading && state.available && located > 1 && (
               <>
                 <button type="button" onClick={() => gotoMark(-1)} style={btn} title="Previous passage">↑</button>
@@ -236,12 +335,12 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                   a paper-coloured card on the muted desk above, a measured
                   column, serif type, and comfortable leading. pre-wrap is
                   kept so the PDF's own line structure is preserved. */}
-              <div style={{ maxWidth: 760, margin: '0 auto', padding: '44px 52px',
+              <div style={{ maxWidth: 760 * zoom, margin: '0 auto', padding: '44px 52px',
                             background: 'var(--color-bg-primary)',
                             border: '1px solid var(--color-border)', borderRadius: 4,
                             boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 8px 24px rgba(0,0,0,0.06)',
                             whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.75,
-                            fontSize: 15.5, color: 'var(--color-text-primary)',
+                            fontSize: 15.5 * zoom, color: 'var(--color-text-primary)',
                             fontFamily: 'var(--font-serif, Georgia, "Times New Roman", ui-serif, serif)' }}>
                 {nodes}
               </div>

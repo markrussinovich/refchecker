@@ -547,6 +547,45 @@ def _extract_clause_containing_marker(sentence, marker):
     return clause
 
 
+def _title_phrase_contexts(ref, sentences, limit=2):
+    """Fallback context finder for references with no in-text marker.
+
+    Matches a reference by a 5-consecutive-word slice of its title appearing
+    verbatim in a body sentence — i.e. a narrative / title-mention citation
+    ("Building on <Exact Title Phrase>, we ..."). The 5-word window keeps this
+    conservative: a single shared keyword can't trigger it, so it adds
+    coverage without fabricating contexts. Returns up to ``limit`` contexts in
+    the same ``{sentence, marker, before, after}`` shape as the marker passes.
+    """
+    title = (ref.get("title") or "").strip()
+    if not title:
+        return []
+    norm = re.sub(r"[^a-z0-9 ]+", " ", title.lower())
+    words = [w for w in norm.split() if w]
+    if len(words) < 5:
+        return []
+    grams = {" ".join(words[i:i + 5]) for i in range(0, len(words) - 4)}
+    out = []
+    for i, sent in enumerate(sentences):
+        s = (sent or "").strip()
+        # _is_header_noise is local to _attach_citation_contexts; a 5-word
+        # title phrase almost never lands in a running header anyway, so the
+        # module-level table-noise guard plus a length floor is enough here.
+        if not s or len(s) < 25 or _is_table_noise(s):
+            continue
+        sl = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", s.lower()))
+        if any(g in sl for g in grams):
+            out.append({
+                "sentence": s[:400],
+                "marker": "(title mention)",
+                "before": (sentences[i - 1].strip()[:160] if i > 0 else ""),
+                "after": (sentences[i + 1].strip()[:160] if i + 1 < len(sentences) else ""),
+            })
+            if len(out) >= limit:
+                break
+    return out
+
+
 def _attach_citation_contexts(references, paper_text):
     """Find the sentences in the paper where each reference is cited.
 
@@ -937,6 +976,7 @@ def _attach_citation_contexts(references, paper_text):
                     })
 
     for ref in references:
+        ref.setdefault("is_inline_cited", False)
         try:
             idx = int(ref.get("index") or 0)
         except Exception:
@@ -945,9 +985,19 @@ def _attach_citation_contexts(references, paper_text):
             continue
         hits = by_index.get(idx)
         if not hits:
-            continue
+            # Fallback for references that carry no numeric / author-year
+            # marker in the body — narrative or title-mention citations
+            # ("As demonstrated in <Title>, ..."). Conservative: requires a
+            # 5-consecutive-word slice of the reference title to appear in a
+            # sentence, so we don't fabricate contexts.
+            hits = _title_phrase_contexts(ref, sentences)
+            if not hits:
+                continue
         ref["citation_contexts"] = hits
         ref["citation_count"] = len(hits)
+        # A reference is "inline cited" when we located it anywhere in the
+        # body (marker- or title-based). Powers the verified-cited badge.
+        ref["is_inline_cited"] = True
         # Legacy single-string field — kept so consumers that don't yet
         # know about citation_contexts still see something useful.
         ref["citation_context"] = " … ".join(h["sentence"][:240] for h in hits[:2])
@@ -1363,7 +1413,10 @@ class ProgressRefChecker:
         formatted_suggestions = []
         for err in sanitized:
             err_obj = {
-                "error_type": err.get('error_type', 'unknown'),
+                # Preserve warning_type if error_type is absent — otherwise a
+                # typed warning (e.g. 'venue') with no explicit error_type key
+                # collapses to the meaningless "Unknown mismatch" badge.
+                "error_type": err.get('error_type') or err.get('warning_type') or 'unknown',
                 "error_details": err.get('error_details', ''),
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value')

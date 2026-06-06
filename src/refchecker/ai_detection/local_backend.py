@@ -149,6 +149,14 @@ class LocalDetectorBackend(DetectionBackend):
 
         spans = _agreeing_spans(windows, probs, orig_idx) if band_rank(band) >= band_rank(BAND_MEDIUM) else []
 
+        # Descriptive visualisation payloads (donut distribution, per-page
+        # bands, representative sentences). Best-effort — never fail the result.
+        dist = per_page = top_ai = top_human = None
+        try:
+            dist, per_page, top_ai, top_human = _viz_payloads(engine, body, windows, probs, orig_idx)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("AI-detection viz payload skipped: %s", exc)
+
         return AIDetectionResult(
             band=band,
             overall_score=surfaced_score,
@@ -160,6 +168,10 @@ class LocalDetectorBackend(DetectionBackend):
             operating_point=OPERATING_POINT,
             word_count=wc,
             disclaimer=DISCLAIMER,
+            probability_distribution=dist,
+            per_page_scores=per_page,
+            top_ai_sentences=top_ai,
+            top_human_sentences=top_human,
         )
 
 
@@ -199,6 +211,93 @@ def _agreeing_spans(windows: List[str], probs: List[float],
         if len(spans) >= 6:
             break
     return spans
+
+
+def _viz_payloads(engine, body: str, windows: List[str], probs: List[float],
+                  orig_idx: List[int]):
+    """Build the descriptive visualisation payloads from the windowed scores.
+
+    Returns (probability_distribution, per_page_scores, top_ai_sentences,
+    top_human_sentences). Everything here DESCRIBES the model's windowed
+    outputs — none of it is a probability that a human wrote the text.
+    """
+    import re as _re
+
+    n = len(probs)
+    if not n:
+        return None, None, None, None
+
+    # 1) Distribution over windows by band (donut + pills).
+    hi = sum(1 for p in probs if band_from_probability(p) == BAND_HIGH)
+    med = sum(1 for p in probs if band_from_probability(p) == BAND_MEDIUM)
+    low = n - hi - med
+    dist = {"AI": round(hi / n, 3), "Mixed": round(med / n, 3), "Human": round(low / n, 3)}
+
+    # 2) Per heuristic ~500-word page. Window position is approximated from its
+    #    original (pre-filter) index order — windows are emitted in reading
+    #    order with 50% overlap, so order tracks position well enough for a bar.
+    PAGE_WORDS = 500
+    total_words = max(1, len(body.split()))
+    num_pages = max(1, (total_words + PAGE_WORDS - 1) // PAGE_WORDS)
+    max_idx = max(orig_idx) if orig_idx else 1
+    page_acc = {}
+    for i, p in enumerate(probs):
+        frac = (orig_idx[i] / max_idx) if max_idx else 0.0
+        pg = min(num_pages - 1, int(frac * num_pages))
+        page_acc.setdefault(pg, []).append(p)
+    per_page = []
+    for pg in range(num_pages):
+        ps = page_acc.get(pg)
+        if not ps:
+            continue
+        score = round(sum(ps) / len(ps), 3)
+        per_page.append({
+            "page": pg + 1,
+            "score": score,
+            "band": band_from_probability(score),
+            "window_count": len(ps),
+        })
+
+    # 3) Representative sentences. Re-score actual sentences (bounded: a few
+    #    sentences from the highest- and lowest-scoring windows) so the lists
+    #    show real per-sentence model scores, not the window aggregate.
+    order = sorted(range(n), key=lambda i: probs[i])
+    low_windows = [windows[i] for i in order[:3]]
+    high_windows = [windows[i] for i in reversed(order[-3:])]
+
+    def _sentences(w):
+        out = []
+        for s in _re.split(r"(?<=[.!?])\s+", w):
+            s = s.strip()
+            if 40 <= len(s) <= 320:
+                out.append(s)
+            if len(out) >= 3:
+                break
+        return out
+
+    seen = set()
+
+    def _score_sentences(ws, cap=10):
+        out = []
+        for w in ws:
+            for s in _sentences(w):
+                if s in seen:
+                    continue
+                seen.add(s)
+                try:
+                    sc = float(engine.score(s))
+                except Exception:
+                    continue
+                out.append({"text": s, "score": round(sc, 3),
+                            "is_flagged": band_from_probability(sc) == BAND_HIGH})
+                if len(out) >= cap:
+                    return out
+        return out
+
+    scored = _score_sentences(high_windows + low_windows, cap=12)
+    top_ai = sorted(scored, key=lambda x: x["score"], reverse=True)[:6]
+    top_human = sorted(scored, key=lambda x: x["score"])[:6]
+    return dist, per_page, top_ai, top_human
 
 
 def _summary(band: str, score, n_windows: int) -> str:

@@ -2433,6 +2433,143 @@ class Database:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
 
+    async def build_reference_graph_data(
+        self,
+        limit: int = 400,
+        min_times_seen: int = 1,
+        edge_strategy: str = "shared-authors",
+        max_edges: int = 4000,
+    ) -> Dict[str, Any]:
+        """Build {nodes, links, meta} for the 3D Seen-References library graph.
+
+        Nodes are the deduped verified references (size ∝ times_seen, colour by
+        status). Edges connect references that share a derivation signal:
+          - 'shared-authors'  : ≥1 normalized surname in common
+          - 'shared-venue'    : same normalized venue
+        Cliques per author/venue are capped and the lowest-weight edges culled
+        past ``max_edges`` so a huge library can't produce an unrenderable hairball.
+        """
+        import json as _json
+        import re as _re
+
+        limit = max(1, min(2000, int(limit or 400)))
+        min_times_seen = max(1, int(min_times_seen or 1))
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT identity_key, title, authors, year, venue, status,
+                       times_seen, doi, arxiv_id
+                FROM verified_reference_identity
+                WHERE times_seen >= ?
+                ORDER BY times_seen DESC, last_seen DESC
+                LIMIT ?
+                """,
+                (min_times_seen, limit),
+            )
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        def _surnames(raw):
+            if not raw:
+                return []
+            names = []
+            parsed = None
+            if isinstance(raw, str):
+                s = raw.strip()
+                if s.startswith("[") or s.startswith("{"):
+                    try:
+                        parsed = _json.loads(s)
+                    except Exception:
+                        parsed = None
+                if parsed is None:
+                    parsed = _re.split(r";|,| and | & ", s)
+            elif isinstance(raw, list):
+                parsed = raw
+            out = []
+            for a in (parsed or []):
+                name = a.get("name") if isinstance(a, dict) else str(a)
+                if not name:
+                    continue
+                toks = _re.sub(r"[^a-z\s\-]", "", name.lower()).split()
+                toks = [t for t in toks if len(t) > 1]
+                if toks:
+                    out.append(toks[-1])  # surname = last token
+            return out
+
+        def _norm_venue(v):
+            if not v:
+                return ""
+            return _re.sub(r"[^a-z0-9]", "", str(v).lower())
+
+        nodes = []
+        author_index: Dict[str, list] = {}
+        venue_index: Dict[str, list] = {}
+        for i, r in enumerate(rows):
+            nid = r["identity_key"] or f"ref-{i}"
+            nodes.append({
+                "id": nid,
+                "label": (r.get("title") or "(untitled)")[:120],
+                "times_seen": int(r.get("times_seen") or 1),
+                "status": r.get("status") or "unverified",
+                "year": r.get("year"),
+                "venue": r.get("venue"),
+                "doi": r.get("doi"),
+                "arxiv_id": r.get("arxiv_id"),
+            })
+            for sn in set(_surnames(r.get("authors"))):
+                author_index.setdefault(sn, []).append(nid)
+            nv = _norm_venue(r.get("venue"))
+            if nv:
+                venue_index.setdefault(nv, []).append(nid)
+
+        # Accumulate edge weights between node pairs.
+        weights: Dict[tuple, float] = {}
+
+        def _add_clique(members, w, cap=40):
+            members = members[:cap]
+            for a in range(len(members)):
+                for b in range(a + 1, len(members)):
+                    key = (members[a], members[b]) if members[a] < members[b] else (members[b], members[a])
+                    if key[0] == key[1]:
+                        continue
+                    weights[key] = weights.get(key, 0.0) + w
+
+        want_authors = edge_strategy in ("shared-authors", "both", "all")
+        want_venue = edge_strategy in ("shared-venue", "both", "all")
+        if want_authors:
+            for members in author_index.values():
+                if len(members) > 1:
+                    _add_clique(members, 1.0)
+        if want_venue:
+            for members in venue_index.values():
+                if len(members) > 1:
+                    _add_clique(members, 0.4)
+
+        links = [
+            {"source": k[0], "target": k[1], "weight": round(w, 2)}
+            for k, w in weights.items()
+        ]
+        culled = 0
+        if len(links) > max_edges:
+            links.sort(key=lambda e: e["weight"], reverse=True)
+            culled = len(links) - max_edges
+            links = links[:max_edges]
+
+        total = await self.count_verified_references()
+        return {
+            "nodes": nodes,
+            "links": links,
+            "meta": {
+                "total_refs": total,
+                "shown_refs": len(nodes),
+                "total_edges": len(links),
+                "culled_edges": culled,
+                "edge_strategy": edge_strategy,
+                "min_times_seen": min_times_seen,
+            },
+        }
+
     async def verified_references_recent_growth(self) -> Dict[str, int]:
         """Return how many NEW Seen-Refs rows landed in the last 24h / 7d.
 

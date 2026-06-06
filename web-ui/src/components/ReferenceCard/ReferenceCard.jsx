@@ -15,6 +15,7 @@ import {
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import { fetchAuthorProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
 import {
   shouldSuppressVenueWarning,
@@ -531,7 +532,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // is a false positive. Suppression runs at render time, so flipping
   // the style dropdown re-evaluates instantly.
   const displayWarnings = baseDisplayWarnings.filter(w => {
-    const t = (w.warning_type || w.error_type || '').toLowerCase()
+    // Drop content-free warnings. A warning with no details, no cited/actual
+    // values, and no usable type renders as a meaningless "Unknown mismatch"
+    // on an otherwise cleanly-verified reference — that's the confusing badge
+    // the user asked about. If it carries no information, don't show it.
+    const details = w.error_details || w.warning_details
+    const hasValues = w.cited_value != null || w.actual_value != null
+    const rawType = (w.warning_type || w.error_type || '').toLowerCase()
+    if (!details && !hasValues && (!rawType || rawType === 'unknown')) return false
+    const t = rawType
     if (t !== 'venue') return true
     return !shouldSuppressVenueWarning({
       cited_value: reference.venue,
@@ -584,6 +593,17 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               style={{ color: 'var(--color-text-primary)' }}
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
+              {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (
+                <span
+                  title="Cited inline — this reference is mentioned in the body text"
+                  className="inline-flex items-center align-middle ml-1.5"
+                  style={{ color: 'var(--color-accent, #3b82f6)' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-label="Cited inline">
+                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
+                  </svg>
+                </span>
+              )}
             </div>
 
             {/* Export button */}
@@ -1333,16 +1353,37 @@ function AuthorsLine({ authors, enrichedAuthors }) {
  * / Semantic Scholar author IDs, and first affiliation. Click opens
  * the profile link in the system browser.
  */
+// Session-scoped cache of S2 author profiles so re-hovering the same author
+// (common across a bibliography) never refetches.
+const _authorProfileCache = new Map()
+
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const [open, setOpen] = useState(false)
+  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id) || null)
   const wrapperRef = useRef(null)
   const enterTimer = useRef(null)
   const leaveTimer = useRef(null)
+
+  // Lazily pull the richer Semantic Scholar profile the first time the card
+  // opens for an author that has an S2 id. Soft-fails to the basic card.
+  const loadProfile = () => {
+    const id = e?.s2_author_id
+    if (!id || profile) return
+    if (_authorProfileCache.has(id)) { setProfile(_authorProfileCache.get(id)); return }
+    fetchAuthorProfile(id)
+      .then(res => {
+        const data = res?.data || { available: false }
+        _authorProfileCache.set(id, data)
+        setProfile(data)
+      })
+      .catch(() => { /* keep basic card */ })
+  }
+
   // 250ms hover delay so brushing past names doesn't flash the popover.
   const onEnter = () => {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
     if (!e) return
-    enterTimer.current = setTimeout(() => setOpen(true), 250)
+    enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
   const onLeave = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
@@ -1403,9 +1444,53 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{e.name || name}</div>
-          {Array.isArray(e.institutions) && e.institutions.length > 0 && (
-            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
-              {e.institutions.slice(0, 2).join(' · ')}
+          {(() => {
+            // Prefer the richer S2 affiliations when loaded, else the basic ones.
+            const affs = (profile?.available && Array.isArray(profile.affiliations) && profile.affiliations.length)
+              ? profile.affiliations
+              : (Array.isArray(e.institutions) ? e.institutions : [])
+            return affs.length > 0 ? (
+              <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
+                {affs.slice(0, 2).join(' · ')}
+              </div>
+            ) : null
+          })()}
+          {profile?.available && (profile.paperCount != null || profile.citationCount != null || profile.hIndex != null) && (
+            <div className="flex gap-3 mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {profile.paperCount != null && (
+                <span title="Publications"><strong>{profile.paperCount.toLocaleString()}</strong> papers</span>
+              )}
+              {profile.citationCount != null && (
+                <span title="Total citations"><strong>{profile.citationCount.toLocaleString()}</strong> cites</span>
+              )}
+              {profile.hIndex != null && (
+                <span title="h-index">h-<strong>{profile.hIndex}</strong></span>
+              )}
+            </div>
+          )}
+          {profile?.available && Array.isArray(profile.papers) && profile.papers.length > 0 && (
+            <div className="mb-1.5">
+              <div style={{ color: 'var(--color-text-muted)', marginBottom: 2 }}>Recent papers</div>
+              <ul style={{ margin: 0, paddingLeft: 14, listStyle: 'disc' }}>
+                {profile.papers.slice(0, 4).map((p, i) => (
+                  <li key={i} style={{ color: 'var(--color-text-secondary)', marginBottom: 1 }}>
+                    <span>{p.title}</span>{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> ({p.year})</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {profile?.available && profile.homepage && (
+            <div className="mb-1">
+              <a
+                href={profile.homepage}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(profile.homepage) } }}
+                style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+              >
+                Homepage
+              </a>
             </div>
           )}
           <div className="space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>

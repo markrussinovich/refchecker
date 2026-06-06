@@ -5596,6 +5596,44 @@ def titles_align_with_subtitle_tolerance(cited_title: str, actual_title: str) ->
     return False
 
 
+def titles_match_with_typo_tolerance(cited_title: str, actual_title: str, max_distance: int = 3) -> bool:
+    """Conservative OCR/typo tolerance for title comparison.
+
+    Intended ONLY where the two records are already confirmed to be the SAME
+    paper (e.g. matched by DOI / arXiv ID during DB verification). In that
+    setting a one-to-few character difference is almost always a typo/OCR
+    artefact in one of the records — e.g.
+
+        cited:  "The medial crossover toe: a cadaveric dissection"
+        actual: "The Medial Crosssover Toe: a Cadaveric Dissection"  (extra 's')
+
+    — not a genuinely different title. Returns True when the normalized titles
+    are identical or differ by only a few edits relative to their length;
+    returns False for genuinely distinct titles so real mismatches still
+    surface. Case is already neutralized by normalize_paper_title().
+    """
+    if not cited_title or not actual_title:
+        return False
+    n1 = normalize_paper_title(cited_title)
+    n2 = normalize_paper_title(actual_title)
+    if not n1 or not n2:
+        return False
+    if n1 == n2:
+        return True
+    try:
+        from refchecker.utils.author_utils import levenshtein_distance
+        dist = levenshtein_distance(n1, n2)
+    except Exception:
+        return False
+    longer = max(len(n1), len(n2))
+    # Allow at most `max_distance` edits, and never more than ~1 edit per 25
+    # normalized chars — so short titles stay strict while a handful of OCR
+    # slips in a long title are tolerated. 'crossover'→'crosssover' (1 edit on
+    # a 41-char title) passes; two genuinely different titles do not.
+    allowed = min(max_distance, max(1, longer // 25))
+    return dist <= allowed
+
+
 def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) -> float:
     """
     Compare two titles with proper LaTeX cleaning for accurate similarity scoring.

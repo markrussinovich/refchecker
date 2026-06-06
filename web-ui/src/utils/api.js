@@ -161,6 +161,20 @@ export const fetchCitationGraph = ({ references, paper_title, ai_detection = fal
 export const expandPaper = ({ paper_id, limit = 8, title = null, ai_detection = false }) =>
   api.post('/papers/expand', { paper_id, limit, title, ai_detection })
 
+// Enriched Semantic Scholar author profile for the hover card (cached server-side).
+export const fetchAuthorProfile = (authorId) =>
+  api.post('/authors/profile', { author_id: String(authorId) }, { timeout: 15000 })
+
+// Nodes + edges for the 3D Seen-References library graph.
+export const fetchReferenceLibraryGraph = ({ limit = 400, min_times_seen = 1, edge_strategy = 'shared-authors' } = {}) =>
+  api.get('/references/library/graph', { params: { limit, min_times_seen, edge_strategy }, timeout: 60000 })
+
+// Share / export.
+export const exportCheckHtml = (checkId) =>
+  api.get(`/export/${checkId}/html`, { responseType: 'blob', timeout: 30000 })
+export const publishCheck = (checkId, { adapter = 'github_gist', token = '', public: isPublic = false } = {}) =>
+  api.post(`/export/${checkId}/publish`, { adapter, token, public: isPublic }, { timeout: 30000 })
+
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>
   api.post(`/history/${checkId}/references`, payload)

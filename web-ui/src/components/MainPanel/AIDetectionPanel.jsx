@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DocumentViewer from './DocumentViewer'
+import AIDetectionVisuals from './AIDetectionVisuals'
 
 /**
  * Document-level AI-generated-text detection result for a single manuscript.
@@ -133,6 +134,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
           </div>
         )}
       </div>
+
+      {!isAbstain && <AIDetectionVisuals detection={detection} />}
 
       {open && spans.length > 0 && (
         <div id="ai-detection-spans" className="px-3 pb-2 space-y-2">
