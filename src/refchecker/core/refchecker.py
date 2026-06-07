@@ -4473,7 +4473,21 @@ class ArxivReferenceChecker:
                     print(f"🚩 Total likely hallucinated: {flagged_count}")
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and total_unverified == 0:
                     print(f"✅ All references verified successfully!")
-                
+
+                # Citation-health grade — qualitative, derived only from the real
+                # aggregate verdicts (no fabricated precise %; the exact score is
+                # in the app/report).
+                if self.total_references_processed > 0:
+                    if flagged_count > 0:
+                        grade = "Critical — likely hallucinations present"
+                    elif self.total_errors_found > 0:
+                        grade = "Poor — errors need correction"
+                    elif self.total_warnings_found > 0 or total_unverified > 0:
+                        grade = "Fair — minor warnings / unverified"
+                    else:
+                        grade = "Excellent — all verified"
+                    print(f"🏅 Citation health: {grade}")
+
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
@@ -4502,7 +4516,19 @@ class ArxivReferenceChecker:
                 if flagged_count > 0:
                     print(f"🚩 Total likely hallucinated: {flagged_count}")
                     self._print_hallucination_console_summary(payload=structured_payload)
-                
+
+                # Citation-health grade for the batch (qualitative, real aggregates).
+                if self.total_references_processed > 0:
+                    if flagged_count > 0:
+                        grade = "Critical — likely hallucinations present"
+                    elif self.total_errors_found > 0:
+                        grade = "Poor — errors need correction"
+                    elif self.total_warnings_found > 0 or total_unverified > 0:
+                        grade = "Fair — minor warnings / unverified"
+                    else:
+                        grade = "Excellent — all verified"
+                    print(f"🏅 Citation health: {grade}")
+
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")

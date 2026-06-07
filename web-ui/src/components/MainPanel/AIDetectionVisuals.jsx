@@ -55,6 +55,61 @@ function Pills({ dist }) {
   )
 }
 
+// Three confidence dots (low · mixed · AI); the dot at the sentence's band is
+// filled + colored, mirroring the GPTZero per-sentence indicator.
+function SentenceDots({ band }) {
+  const idx = band === 'high' ? 2 : band === 'medium' ? 1 : 0
+  const color = band === 'high' ? SEG.AI : band === 'medium' ? SEG.Mixed : SEG.Human
+  return (
+    <span className="inline-flex gap-1 flex-shrink-0" title={`${band} likelihood`}>
+      {[0, 1, 2].map((i) => (
+        <span key={i} style={{
+          width: 8, height: 8, borderRadius: 8,
+          background: i === idx ? color : 'transparent',
+          border: `1.5px solid ${i === idx ? color : 'var(--color-border)'}`,
+        }} />
+      ))}
+    </span>
+  )
+}
+
+// One page row: a band bar that expands to per-sentence dots for that page.
+function PageRow({ p }) {
+  const [open, setOpen] = useState(false)
+  const sentences = Array.isArray(p.sentences) ? p.sentences : []
+  const pct = Math.round((p.score || 0) * 100)
+  const color = BAND_COLOR[p.band] || 'var(--color-text-muted)'
+  return (
+    <div>
+      <button type="button" onClick={() => sentences.length && setOpen((o) => !o)}
+        className="flex items-center gap-2 w-full text-left"
+        style={{ cursor: sentences.length ? 'pointer' : 'default' }}>
+        <span className="inline-flex items-center" style={{ width: 12, color: 'var(--color-text-muted)' }}>
+          {sentences.length > 0 && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
+              style={{ transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 150ms ease' }}><polyline points="6 9 12 15 18 9" /></svg>
+          )}
+        </span>
+        <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)', minWidth: 44 }}>Page {p.page}</span>
+        <span className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
+          <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: color }} />
+        </span>
+        <span className="text-xs tabular-nums" style={{ color, minWidth: 26, textAlign: 'right' }}>{pct}</span>
+      </button>
+      {open && sentences.length > 0 && (
+        <div className="mt-1.5 mb-2 ml-6 space-y-1.5">
+          {sentences.map((s, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <SentenceDots band={s.band || (s.is_flagged ? 'high' : 'low')} />
+              <span style={{ color: 'var(--color-text-secondary)' }}>{s.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SentenceList({ sentences, accent }) {
   if (!sentences?.length) return <div className="text-xs px-1 py-2" style={{ color: 'var(--color-text-muted)' }}>No sentences to show.</div>
   return (
@@ -107,19 +162,11 @@ export default function AIDetectionVisuals({ detection }) {
       {pages.length > 0 && (
         <div>
           <div className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Page-by-page <span title="Heuristic ~500-word pages, not exact PDF pages">(≈500-word pages)</span>
+            Page-by-page <span title="Heuristic ~500-word pages, not exact PDF pages">(≈500-word pages)</span> · click a page for its sentences
           </div>
           <div className="space-y-1">
             {pages.map((p) => (
-              <div key={p.page} className="flex items-center gap-2">
-                <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)', minWidth: 48 }}>Page {p.page}</span>
-                <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
-                  <div style={{ width: `${Math.round((p.score || 0) * 100)}%`, height: '100%', background: BAND_COLOR[p.band] || 'var(--color-text-muted)' }} />
-                </div>
-                <span className="text-xs tabular-nums" style={{ color: BAND_COLOR[p.band] || 'var(--color-text-muted)', minWidth: 30, textAlign: 'right' }}>
-                  {Math.round((p.score || 0) * 100)}
-                </span>
-              </div>
+              <PageRow key={p.page} p={p} />
             ))}
           </div>
         </div>

@@ -17,6 +17,7 @@ import {
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import { fetchAuthorProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import {
   shouldSuppressVenueWarning,
   acronymFor,
@@ -269,6 +270,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // when the user changes the style picker on the References tab.
   const activeFormat = useStyleStore(s => s.format)
   const activeStyleOptions = useStyleStore(s => s.styleOptions)
+
+  // "View in document": ask the preview overlay to locate + highlight this
+  // citation context on the native PDF page (same machinery as AI highlights).
+  const requestCitation = useDocViewerStore(s => s.requestCitation)
+  const viewContextInDoc = (ctx, i) => {
+    const text = (ctx?.sentence || ctx?.text || '').trim()
+    if (!text) return
+    requestCitation({ text, label: ctx?.marker || `Excerpt ${i + 1}` })
+  }
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -893,6 +903,20 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                                   {marker}
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
+                                title="Open this passage in the document and highlight it"
+                                style={{
+                                  marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
+                                  borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
+                                  color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
+                                }}
+                              >
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                                View in document
+                              </button>
                             </div>
                             <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
                               {ctx.before && (
@@ -1357,6 +1381,23 @@ function AuthorsLine({ authors, enrichedAuthors }) {
 // (common across a bibliography) never refetches.
 const _authorProfileCache = new Map()
 
+// Initials from a display name ("H.B. Guruprasad" -> "HG", "Jane Doe" -> "JD").
+function _authorInitials(name) {
+  const parts = String(name || '').replace(/[^A-Za-z\s.\-]/g, '').split(/[\s.\-]+/).filter(Boolean)
+  if (!parts.length) return '?'
+  const first = parts[0][0] || ''
+  const last = parts.length > 1 ? (parts[parts.length - 1][0] || '') : ''
+  return (first + last).toUpperCase() || '?'
+}
+// Deterministic avatar colour from the name (stable across renders, no PRNG).
+function _authorColor(name) {
+  const palette = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#16a34a', '#db2777']
+  let h = 0
+  const s = String(name || '')
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return palette[h % palette.length]
+}
+
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const [open, setOpen] = useState(false)
   const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id) || null)
@@ -1425,92 +1466,108 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
       ) : (
         <span title={tooltipFallback || undefined}>{name}</span>
       )}
-      {open && e && (
+      {open && e && (() => {
+        const dispName = e.name || name
+        const initials = _authorInitials(dispName)
+        const avatarBg = _authorColor(dispName)
+        const affs = (profile?.available && Array.isArray(profile.affiliations) && profile.affiliations.length)
+          ? profile.affiliations
+          : (Array.isArray(e.institutions) ? e.institutions : [])
+        const hasMetrics = profile?.available && (profile.paperCount != null || profile.citationCount != null || profile.hIndex != null)
+        const loading = !!e.s2_author_id && !profile
+        const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
+        const chip = (label, val, title) => (
+          <span title={title} className="inline-flex flex-col items-center px-2.5 py-1 rounded-lg"
+            style={{ background: 'var(--color-bg-tertiary)', minWidth: 56 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-text-primary)' }}>{val}</span>
+            <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
+          </span>
+        )
+        const profileLinks = [
+          orcidUrl && { label: 'ORCID', url: orcidUrl },
+          openalexUrl && { label: 'OpenAlex', url: openalexUrl },
+          s2Url && { label: 'Semantic Scholar', url: s2Url },
+        ].filter(Boolean)
+        return (
         <div
           role="tooltip"
-          className="rounded-md shadow-lg p-2 text-xs"
+          className="rounded-xl text-xs overflow-hidden"
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            marginTop: 6,
-            zIndex: 60,
-            minWidth: 260,
-            maxWidth: 360,
+            position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 60,
+            minWidth: 300, maxWidth: 380,
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
             whiteSpace: 'normal',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{e.name || name}</div>
-          {(() => {
-            // Prefer the richer S2 affiliations when loaded, else the basic ones.
-            const affs = (profile?.available && Array.isArray(profile.affiliations) && profile.affiliations.length)
-              ? profile.affiliations
-              : (Array.isArray(e.institutions) ? e.institutions : [])
-            return affs.length > 0 ? (
-              <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
-                {affs.slice(0, 2).join(' · ')}
-              </div>
-            ) : null
-          })()}
-          {profile?.available && (profile.paperCount != null || profile.citationCount != null || profile.hIndex != null) && (
-            <div className="flex gap-3 mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-              {profile.paperCount != null && (
-                <span title="Publications"><strong>{profile.paperCount.toLocaleString()}</strong> papers</span>
-              )}
-              {profile.citationCount != null && (
-                <span title="Total citations"><strong>{profile.citationCount.toLocaleString()}</strong> cites</span>
-              )}
-              {profile.hIndex != null && (
-                <span title="h-index">h-<strong>{profile.hIndex}</strong></span>
+          {/* Header: avatar + name + affiliation */}
+          <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
+            <span className="flex-shrink-0 inline-flex items-center justify-center rounded-full"
+              style={{ width: 36, height: 36, background: avatarBg, color: '#fff', fontWeight: 700, fontSize: 13 }}>
+              {initials}
+            </span>
+            <div className="min-w-0">
+              <div style={{ fontWeight: 600, lineHeight: 1.25 }}>{dispName}</div>
+              {affs.length > 0 && (
+                <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
+                  {affs.slice(0, 2).join(' · ')}
+                </div>
               )}
             </div>
-          )}
-          {profile?.available && Array.isArray(profile.papers) && profile.papers.length > 0 && (
-            <div className="mb-1.5">
-              <div style={{ color: 'var(--color-text-muted)', marginBottom: 2 }}>Recent papers</div>
-              <ul style={{ margin: 0, paddingLeft: 14, listStyle: 'disc' }}>
-                {profile.papers.slice(0, 4).map((p, i) => (
-                  <li key={i} style={{ color: 'var(--color-text-secondary)', marginBottom: 1 }}>
-                    <span>{p.title}</span>{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> ({p.year})</span> : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {profile?.available && profile.homepage && (
-            <div className="mb-1">
-              <a
-                href={profile.homepage}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(profile.homepage) } }}
-                style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
-              >
-                Homepage
-              </a>
-            </div>
-          )}
-          <div className="space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {orcidUrl && (
-              <ProfileRow label="ORCID" value={e.orcid} href={orcidUrl} />
-            )}
-            {openalexUrl && (
-              <ProfileRow label="OpenAlex" value={e.openalex_id} href={openalexUrl} />
-            )}
-            {s2Url && !orcidUrl && !openalexUrl && (
-              <ProfileRow label="Semantic Scholar" value={e.s2_author_id} href={s2Url} />
-            )}
           </div>
-          {(orcidUrl || openalexUrl || s2Url) && (
-            <div className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-              Click name to open profile in browser
+
+          {/* Metric chips */}
+          {hasMetrics && (
+            <div className="flex gap-1.5 px-3 pb-2.5">
+              {profile.paperCount != null && chip('papers', fmt(profile.paperCount), 'Publications')}
+              {profile.citationCount != null && chip('citations', fmt(profile.citationCount), 'Total citations')}
+              {profile.hIndex != null && chip('h-index', profile.hIndex, 'h-index')}
+            </div>
+          )}
+
+          {/* Recent papers */}
+          {profile?.available && Array.isArray(profile.papers) && profile.papers.length > 0 && (
+            <div className="px-3 pb-2.5">
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Recent work</div>
+              <div className="space-y-1.5">
+                {profile.papers.slice(0, 3).map((p, i) => (
+                  <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                    {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="px-3 pb-2.5" style={{ color: 'var(--color-text-muted)' }}>Loading profile…</div>
+          )}
+
+          {/* Footer: profile links */}
+          {(profileLinks.length > 0 || (profile?.available && profile.homepage)) && (
+            <div className="flex items-center gap-2 flex-wrap px-3 py-2"
+              style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+              {profile?.available && profile.homepage && (
+                <a href={profile.homepage} target="_blank" rel="noopener noreferrer"
+                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(profile.homepage) } }}
+                  className="px-2 py-0.5 rounded-md" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  Homepage
+                </a>
+              )}
+              {profileLinks.map((pl) => (
+                <a key={pl.label} href={pl.url} target="_blank" rel="noopener noreferrer"
+                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(pl.url) } }}
+                  className="px-2 py-0.5 rounded-md" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  {pl.label}
+                </a>
+              ))}
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
     </span>
   )
 }

@@ -1,7 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import anime from 'animejs'
 import { filterIssuesForStyle } from '../../utils/formatters'
 import { useStyleStore } from '../../stores/useStyleStore'
 import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /**
  * Minimal "Citation health" chip. Live — recomputes on every edit because
@@ -73,6 +77,25 @@ export default function HealthBadge({ references }) {
   const activeFormat = useStyleStore(s => s.format)
   const stats = useMemo(() => computeScore(references, activeFormat), [references, activeFormat])
   const color = colorFor(stats.score)
+
+  // anime.js count-up: the score ticks from its previous value to the new one
+  // when references change (e.g. after "apply all fixes"). Reduced-motion users
+  // see the final number immediately. Snapshot kept in a ref to avoid re-anim
+  // on unrelated re-renders.
+  const [shown, setShown] = useState(stats.score)
+  const prev = useRef(stats.score)
+  useEffect(() => {
+    const target = stats.score
+    if (target == null) { setShown(null); prev.current = null; return undefined }
+    if (prefersReducedMotion() || prev.current == null) { setShown(target); prev.current = target; return undefined }
+    const obj = { v: prev.current }
+    const anim = anime({
+      targets: obj, v: target, duration: 650, easing: 'easeOutCubic', round: 1,
+      update: () => setShown(Math.round(obj.v)),
+      complete: () => { prev.current = target },
+    })
+    return () => anim.pause()
+  }, [stats.score])
   const tooltip = stats.total === 0
     ? 'No references checked yet'
     : `${stats.verified || 0} verified · ${stats.warnings || 0} warning${stats.warnings === 1 ? '' : 's'} · ${stats.errors || 0} error${stats.errors === 1 ? '' : 's'}${stats.halluc ? ` · ${stats.halluc} likely hallucinated` : ''} · ${stats.total} total`
@@ -94,7 +117,7 @@ export default function HealthBadge({ references }) {
       />
       <span style={{ color: 'var(--color-text-secondary)' }}>Citation health</span>
       <span style={{ color, fontWeight: 600 }}>
-        {stats.score == null ? '—' : `${stats.score}%`}
+        {shown == null ? '—' : `${shown}%`}
       </span>
     </span>
   )

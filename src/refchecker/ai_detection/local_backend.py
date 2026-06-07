@@ -240,30 +240,13 @@ def _viz_payloads(engine, body: str, windows: List[str], probs: List[float],
     total_words = max(1, len(body.split()))
     num_pages = max(1, (total_words + PAGE_WORDS - 1) // PAGE_WORDS)
     max_idx = max(orig_idx) if orig_idx else 1
-    page_acc = {}
+    page_probs = {}
+    page_wins = {}
     for i, p in enumerate(probs):
         frac = (orig_idx[i] / max_idx) if max_idx else 0.0
         pg = min(num_pages - 1, int(frac * num_pages))
-        page_acc.setdefault(pg, []).append(p)
-    per_page = []
-    for pg in range(num_pages):
-        ps = page_acc.get(pg)
-        if not ps:
-            continue
-        score = round(sum(ps) / len(ps), 3)
-        per_page.append({
-            "page": pg + 1,
-            "score": score,
-            "band": band_from_probability(score),
-            "window_count": len(ps),
-        })
-
-    # 3) Representative sentences. Re-score actual sentences (bounded: a few
-    #    sentences from the highest- and lowest-scoring windows) so the lists
-    #    show real per-sentence model scores, not the window aggregate.
-    order = sorted(range(n), key=lambda i: probs[i])
-    low_windows = [windows[i] for i in order[:3]]
-    high_windows = [windows[i] for i in reversed(order[-3:])]
+        page_probs.setdefault(pg, []).append(p)
+        page_wins.setdefault(pg, []).append(i)
 
     def _sentences(w):
         out = []
@@ -271,32 +254,62 @@ def _viz_payloads(engine, body: str, windows: List[str], probs: List[float],
             s = s.strip()
             if 40 <= len(s) <= 320:
                 out.append(s)
-            if len(out) >= 3:
+            if len(out) >= 4:
                 break
         return out
 
-    seen = set()
+    # 3) Per-PAGE sentence scoring. For each page, re-score a handful of real
+    #    sentences from that page's windows (highest-scoring windows first so
+    #    flagged sentences surface) — giving genuine per-sentence model scores,
+    #    not the window aggregate. A global budget caps total inferences so a
+    #    long document can't explode the cost; local inference is free but
+    #    serialized, so we keep it bounded.
+    sent_seen = set()
+    sent_budget = [160]
 
-    def _score_sentences(ws, cap=10):
+    def _score_page_sentences(win_indices, cap=4):
         out = []
-        for w in ws:
-            for s in _sentences(w):
-                if s in seen:
+        for i in sorted(win_indices, key=lambda j: probs[j], reverse=True):
+            for s in _sentences(windows[i]):
+                if s in sent_seen or sent_budget[0] <= 0:
                     continue
-                seen.add(s)
+                sent_seen.add(s)
+                sent_budget[0] -= 1
                 try:
                     sc = float(engine.score(s))
                 except Exception:
                     continue
                 out.append({"text": s, "score": round(sc, 3),
+                            "band": band_from_probability(sc),
                             "is_flagged": band_from_probability(sc) == BAND_HIGH})
                 if len(out) >= cap:
                     return out
         return out
 
-    scored = _score_sentences(high_windows + low_windows, cap=12)
-    top_ai = sorted(scored, key=lambda x: x["score"], reverse=True)[:6]
-    top_human = sorted(scored, key=lambda x: x["score"])[:6]
+    per_page = []
+    all_sentences = []
+    for pg in range(num_pages):
+        ps = page_probs.get(pg)
+        if not ps:
+            continue
+        score = round(sum(ps) / len(ps), 3)
+        psent = _score_page_sentences(page_wins.get(pg, []), cap=4)
+        all_sentences.extend(psent)
+        per_page.append({
+            "page": pg + 1,
+            "score": score,
+            "band": band_from_probability(score),
+            "window_count": len(ps),
+            # Per-sentence scores for this page (dotted breakdown) + this page's
+            # most-AI / most-human sentences.
+            "sentences": psent,
+            "top_ai": sorted(psent, key=lambda x: x["score"], reverse=True)[:2],
+            "top_human": sorted(psent, key=lambda x: x["score"])[:2],
+        })
+
+    # Document-level top AI/Human derived from the union of per-page sentences.
+    top_ai = sorted(all_sentences, key=lambda x: x["score"], reverse=True)[:6]
+    top_human = sorted(all_sentences, key=lambda x: x["score"])[:6]
     return dist, per_page, top_ai, top_human
 
 

@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useRef } from 'react'
 
 /**
  * An in-modal animated walkthrough of the check results, drawn live on a
- * <canvas> (no MediaRecorder, no download). Shown while the shareable HTML is
- * being generated so the wait feels purposeful — the "html-to-video" feel,
- * in-page. Loops until unmounted.
+ * <canvas>. Shown while the shareable HTML is being generated, and reused as
+ * the source for the "walkthrough video" export (the parent records this very
+ * canvas via captureStream + MediaRecorder). Loops until unmounted. The canvas
+ * element is forwarded so the parent can capture it.
  */
 const C = {
   bg: '#0f1117', fg: '#f3f4f6', muted: '#9aa0ad',
@@ -13,10 +14,15 @@ const C = {
 }
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 
-export default function ShareAnimationCanvas({ title, stats = {}, aiBand, aiScore, height = 220 }) {
+const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, stats = {}, aiBand, aiScore, height = 220 }, fwdRef) {
   const ref = useRef(null)
   const rafRef = useRef(0)
   const startRef = useRef(0)
+  const setCanvas = (el) => {
+    ref.current = el
+    if (typeof fwdRef === 'function') fwdRef(el)
+    else if (fwdRef) fwdRef.current = el
+  }
 
   useEffect(() => {
     const canvas = ref.current
@@ -87,10 +93,12 @@ export default function ShareAnimationCanvas({ title, stats = {}, aiBand, aiScor
 
   return (
     <canvas
-      ref={ref}
+      ref={setCanvas}
       width={460}
       height={height}
       style={{ width: '100%', borderRadius: 10, border: '1px solid var(--color-border)', display: 'block' }}
     />
   )
-}
+})
+
+export default ShareAnimationCanvas

@@ -5,6 +5,7 @@ import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
 import CorrectionsView from './CorrectionsView'
 import OnboardingBanner from './OnboardingBanner'
+import FieldGuide from './FieldGuide'
 import GlobalDropZone from './GlobalDropZone'
 import SeenReferencesView from './SeenReferencesView'
 import BatchSummaryView from './BatchSummaryView'
@@ -12,6 +13,8 @@ import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
 import AIDetectionPanel from './AIDetectionPanel'
 import HealthBadge from './HealthBadge'
+import RetractionCheck from './RetractionCheck'
+import GapFinder from './GapFinder'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -317,6 +320,7 @@ export default function MainPanel() {
             onOpenSettings={(section) => useSettingsStore.getState().openSettings(section)}
           />
         )}
+        {showInput && <FieldGuide />}
 
         {/* Input Section */}
         {showInput && <InputSection />}
@@ -341,6 +345,20 @@ export default function MainPanel() {
               </>
             }
           />
+        )}
+
+        {/* On-demand retraction check (OpenAlex is_retracted, real signal) */}
+        {showContent && isComplete && (
+          <div className="flex flex-wrap items-start gap-2">
+            <RetractionCheck
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+              references={displayRefs}
+            />
+            <GapFinder
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+              references={displayRefs}
+            />
+          </div>
         )}
 
         {/* Document-level AI-generated-text detection (opt-in) */}

@@ -169,11 +169,31 @@ export const fetchAuthorProfile = (authorId) =>
 export const fetchReferenceLibraryGraph = ({ limit = 400, min_times_seen = 1, edge_strategy = 'shared-authors' } = {}) =>
   api.get('/references/library/graph', { params: { limit, min_times_seen, edge_strategy }, timeout: 60000 })
 
+// Locate target texts (AI-flagged passages / citation contexts) in the native
+// PDF -> per-target page + normalized rects, for highlight overlays.
+export const locatePdfSpans = (checkId, targets) =>
+  api.post(`/preview/${checkId}/locate`, { targets }, { timeout: 30000 })
+
 // Share / export.
 export const exportCheckHtml = (checkId) =>
   api.get(`/export/${checkId}/html`, { responseType: 'blob', timeout: 30000 })
+// Multi-format export: fmt ∈ html|pdf|md|docx; corrections toggles suggested
+// fixes; include = array of sections (summary,ai,issues,references) to keep.
+const _exportParams = ({ fmt = 'html', corrections = false, include } = {}) => {
+  const p = new URLSearchParams({ fmt, corrections: corrections ? 'true' : 'false' })
+  if (Array.isArray(include) && include.length) p.set('include', include.join(','))
+  return p.toString()
+}
+export const exportCheckFile = (checkId, opts = {}) =>
+  api.get(`/export/${checkId}/file?${_exportParams(opts)}`, { responseType: 'blob', timeout: 60000 })
+export const exportBatchFile = (batchId, opts = {}) =>
+  api.get(`/export/batch/${batchId}/file?${_exportParams(opts)}`, { responseType: 'blob', timeout: 120000 })
 export const publishCheck = (checkId, { adapter = 'github_gist', token = '', public: isPublic = false } = {}) =>
   api.post(`/export/${checkId}/publish`, { adapter, token, public: isPublic }, { timeout: 30000 })
+// Citation health + retraction (real signals).
+export const getCheckHealth = (checkId) => api.get(`/check/${checkId}/health`, { timeout: 15000 })
+export const getCheckRetractions = (checkId) => api.get(`/check/${checkId}/retractions`, { timeout: 45000 })
+export const getCheckGaps = (checkId) => api.get(`/check/${checkId}/gaps`, { timeout: 60000 })
 
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>

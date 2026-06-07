@@ -3,6 +3,7 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { openExternal } from '../../utils/tauriBridge'
+import ShareModal from '../Modals/ShareModal'
 
 /**
  * Batch summary view (v0.7.45) — the dedicated MainPanel page that
@@ -51,6 +52,7 @@ export default function BatchSummaryView() {
   const [usage, setUsage] = useState({ input_tokens: 0, output_tokens: 0, cost_usd: 0, by_flow: {}, per_check: {} })
   const [isCancelling, setIsCancelling] = useState(false)
   const [filter, setFilter] = useState('all') // all | error | hallucinated | in_progress | completed
+  const [showShare, setShowShare] = useState(false)
 
   const batchId = selectedBatch?.batch_id
   const checks = selectedBatch?.checks || []
@@ -258,6 +260,21 @@ export default function BatchSummaryView() {
               {agg.cancelled > 0 && <span style={{ color: STATUS_COLOR.cancelled }}> · {agg.cancelled} cancelled</span>}
             </div>
           </div>
+          {agg.completed > 0 && (
+            <button
+              onClick={() => setShowShare(true)}
+              className="px-3 py-1 rounded text-xs font-semibold inline-flex items-center gap-1.5"
+              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
+              type="button"
+              title="Export one report for this batch — overview plus each paper (HTML, PDF, Markdown or Word)"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+              </svg>
+              Share batch
+            </button>
+          )}
           {agg.inProgress > 0 && (
             <button
               onClick={handleCancelAll}
@@ -505,6 +522,13 @@ export default function BatchSummaryView() {
           )}
         </div>
       </div>
+      {showShare && (
+        <ShareModal
+          batchId={batchId}
+          title={selectedBatch.batch_label || `Batch of ${agg.total} ${agg.total === 1 ? 'paper' : 'papers'}`}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   )
 }

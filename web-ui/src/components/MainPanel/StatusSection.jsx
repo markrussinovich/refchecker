@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
@@ -22,9 +23,21 @@ const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight:
  *     usable overlay.
  *   - Page jump strip: top-left chip "Page N / total" plus prev/next.
  */
-function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
+// AI-band highlight fill (translucent) for native-page overlays.
+const _BAND_HL = {
+  high: 'rgba(239,68,68,0.30)', medium: 'rgba(245,158,11,0.30)', low: 'rgba(34,197,94,0.22)',
+}
+// Citation-context highlight fill (distinct blue, so it never reads as AI).
+const _CITE_HL = 'rgba(59,130,246,0.32)'
+
+function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, citationTarget, onClose }) {
   const [pageCount, setPageCount] = useState(null)
   const [activePage, setActivePage] = useState(0)
+  const [highlights, setHighlights] = useState({}) // pageIndex -> [{rects,band,score,reason,key}]
+  const [citeHl, setCiteHl] = useState({})         // pageIndex -> [{rects,label,key}]
+  const [citeStatus, setCiteStatus] = useState(null) // 'locating' | 'found' | 'missing' | null
+  const [findHl, setFindHl] = useState({})         // pageIndex -> [rects] for the query
+  const [hoverHl, setHoverHl] = useState(null)
   const [zoom, setZoom] = useState(1)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -65,6 +78,63 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     return () => { cancelled = true }
   }, [checkId])
 
+  // Locate AI-flagged passages on the native pages (PyMuPDF search -> rects),
+  // so we can overlay real highlights on the page images with hover AI data.
+  useEffect(() => {
+    let alive = true
+    setHighlights({})
+    const spans = Array.isArray(aiDetection?.spans) ? aiDetection.spans : []
+    if (!checkId || checkId === -1 || !pageCount || spans.length === 0) return undefined
+    const band = aiDetection?.band
+    const targets = spans
+      .filter((s) => s && s.quote)
+      .map((s, i) => ({ text: s.quote, span_index: i, span_type: 'ai', band, model_score: s.model_score, reason: s.reason }))
+    if (!targets.length) return undefined
+    api.locatePdfSpans(checkId, targets)
+      .then((res) => {
+        if (!alive) return
+        const byPage = {}
+        for (const r of (res.data?.results || [])) {
+          if (!r.found) continue
+          ;(byPage[r.page] = byPage[r.page] || []).push({
+            rects: r.rects, band: r.band, score: r.model_score, reason: r.reason,
+            key: `ai-${r.span_index}`,
+          })
+        }
+        setHighlights(byPage)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [checkId, pageCount, aiDetection])
+
+  // Locate the requested citation context on the native pages and highlight it
+  // (distinct blue), reusing the same PyMuPDF search. Auto-jump to its page.
+  useEffect(() => {
+    let alive = true
+    setCiteHl({}); setCiteStatus(null)
+    const text = citationTarget?.text
+    if (!checkId || checkId === -1 || !pageCount || !text) return undefined
+    setCiteStatus('locating')
+    api.locatePdfSpans(checkId, [{ text, span_index: 0, span_type: 'citation', reason: citationTarget?.label }])
+      .then((res) => {
+        if (!alive) return
+        const byPage = {}
+        let firstPage = null
+        for (const r of (res.data?.results || [])) {
+          if (!r.found) continue
+          if (firstPage === null) firstPage = r.page
+          ;(byPage[r.page] = byPage[r.page] || []).push({
+            rects: r.rects, label: citationTarget?.label || 'Citation context', key: `cite-${r.span_index}`,
+          })
+        }
+        setCiteHl(byPage)
+        setCiteStatus(firstPage === null ? 'missing' : 'found')
+        if (firstPage !== null) setTimeout(() => jumpToPage(firstPage), 140)
+      })
+      .catch(() => { if (alive) setCiteStatus('missing') })
+    return () => { alive = false }
+  }, [checkId, pageCount, citationTarget]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch the extracted body text once so Find can locate words. The pages are
   // rasterized images (no text layer), so we search the extracted text and jump
   // to the estimated page rather than highlight on the image.
@@ -96,6 +166,33 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     setMatches(out)
     setCurrentMatch(0)
   }, [findQuery, pageCount])
+
+  // Show WHERE the query is on the page (not just which page): locate it on the
+  // native pages via PyMuPDF search and highlight the rects (debounced).
+  useEffect(() => {
+    const q = (findQuery || '').trim()
+    setFindHl({})
+    if (!checkId || checkId === -1 || !pageCount || q.length < 3) return undefined
+    let alive = true
+    const t = setTimeout(() => {
+      api.locatePdfSpans(checkId, [{ text: q, span_index: 0, span_type: 'find' }])
+        .then((res) => {
+          if (!alive) return
+          const byPage = {}
+          let firstPage = null
+          for (const r of (res.data?.results || [])) {
+            if (r.found && Array.isArray(r.rects)) {
+              if (firstPage === null) firstPage = r.page
+              byPage[r.page] = (byPage[r.page] || []).concat(r.rects)
+            }
+          }
+          setFindHl(byPage)
+          if (firstPage !== null) setTimeout(() => jumpToPage(firstPage), 60)
+        })
+        .catch(() => {})
+    }, 350)
+    return () => { alive = false; clearTimeout(t) }
+  }, [findQuery, checkId, pageCount])
 
   // Track which page is centered in the viewport so the "Page N / total"
   // chip updates as the user scrolls. Uses IntersectionObserver for
@@ -250,6 +347,18 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
         </button>
       )}
 
+      {/* Citation-locate status (honest: say when it can't be placed). */}
+      {citeStatus && citeStatus !== 'found' && (
+        <div
+          className="absolute top-16 left-1/2 z-30 px-3 py-1.5 rounded-full text-xs text-white"
+          style={{ transform: 'translateX(-50%)', background: citeStatus === 'missing' ? 'rgba(120,53,15,0.92)' : 'rgba(30,58,138,0.92)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {citeStatus === 'locating' ? 'Locating citation context…'
+            : 'Citation context could not be located on the page (PDF layout differences).'}
+        </div>
+      )}
+
       {/* Pages */}
       <div
         ref={scrollRef}
@@ -263,16 +372,85 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
             onClick={(e) => e.stopPropagation()}
           >
             {Array.from({ length: pageCount }, (_, i) => (
-              <img
-                key={i}
-                ref={(el) => { pageRefs.current[i] = el }}
-                data-page-index={i}
-                src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
-                alt={`Page ${i + 1} of ${pageCount}`}
-                loading="lazy"
-                style={imgStyle}
-                className="rounded-lg shadow-2xl bg-white"
-              />
+              <div key={i} ref={(el) => { pageRefs.current[i] = el }} data-page-index={i}
+                style={{ position: 'relative', ...imgStyle, height: 'auto', lineHeight: 0 }}>
+                <img
+                  src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
+                  alt={`Page ${i + 1} of ${pageCount}`}
+                  loading="lazy"
+                  style={{ display: 'block', width: '100%', height: 'auto' }}
+                  className="rounded-lg shadow-2xl bg-white"
+                />
+                {/* Native-page AI highlight overlay (normalized rects -> %). */}
+                {(highlights[i] || []).flatMap((hl) =>
+                  (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
+                    <div
+                      key={`${hl.key}-${ri}`}
+                      onMouseEnter={() => setHoverHl(hl)}
+                      onMouseLeave={() => setHoverHl((h) => (h === hl ? null : h))}
+                      title="AI-flagged passage"
+                      style={{
+                        position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
+                        width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+                        background: _BAND_HL[(hl.band || '').toLowerCase()] || _BAND_HL.medium,
+                        borderRadius: 2, cursor: 'help', mixBlendMode: 'multiply',
+                      }}
+                    >
+                      {hoverHl === hl && ri === 0 && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
+                          background: 'rgba(17,24,39,0.96)', color: '#fff', fontSize: 11,
+                          padding: '6px 8px', borderRadius: 6, width: 240, lineHeight: 1.4,
+                          pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+                        }}>
+                          <strong style={{ color: '#fca5a5' }}>AI-likelihood: {hl.band || 'flagged'}</strong>
+                          {typeof hl.score === 'number' ? ` · ${Math.round(hl.score * 100)}` : ''}
+                          {hl.reason ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>{hl.reason}</div> : null}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {/* Citation-context highlight overlay (blue), with hover label. */}
+                {(citeHl[i] || []).flatMap((hl) =>
+                  (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
+                    <div
+                      key={`${hl.key}-${ri}`}
+                      onMouseEnter={() => setHoverHl(hl)}
+                      onMouseLeave={() => setHoverHl((h) => (h === hl ? null : h))}
+                      title="Citation context"
+                      style={{
+                        position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
+                        width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+                        background: _CITE_HL, borderRadius: 2, cursor: 'help',
+                        mixBlendMode: 'multiply', boxShadow: '0 0 0 1px rgba(37,99,235,0.55)',
+                      }}
+                    >
+                      {hoverHl === hl && ri === 0 && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
+                          background: 'rgba(17,24,39,0.96)', color: '#fff', fontSize: 11,
+                          padding: '6px 8px', borderRadius: 6, width: 240, lineHeight: 1.4,
+                          pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+                        }}>
+                          <strong style={{ color: '#93c5fd' }}>Citation context</strong>
+                          {hl.label ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>Marker: {hl.label}</div> : null}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {/* Find-query highlight overlay (yellow) — shows where it is. */}
+                {(findHl[i] || []).map(([x0, y0, x1, y1], ri) => (
+                  <div key={`find-${ri}`} title="Search match"
+                    style={{
+                      position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
+                      width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+                      background: 'rgba(250,204,21,0.45)', borderRadius: 2,
+                      mixBlendMode: 'multiply', boxShadow: '0 0 0 1px rgba(202,138,4,0.7)',
+                    }} />
+                ))}
+              </div>
             ))}
           </div>
         ) : (
@@ -561,6 +739,7 @@ export default function StatusSection() {
     currentCheckId,
     sessionId,
     stats: checkStoreStats,
+    aiDetection: checkStoreAiDetection,
     cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore(useShallow(s => ({
@@ -573,6 +752,7 @@ export default function StatusSection() {
     currentCheckId: s.currentCheckId,
     sessionId: s.sessionId,
     stats: s.stats,
+    aiDetection: s.aiDetection,
     cancelCheck: s.cancelCheck,
     setError: s.setError,
   })))
@@ -691,7 +871,19 @@ export default function StatusSection() {
   const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
-  
+  const [citationTarget, setCitationTarget] = useState(null)
+
+  // A ReferenceCard can request "show this citation context in the document".
+  // Open the native preview overlay and pass the target to locate + highlight.
+  const citationRequest = useDocViewerStore((s) => s.citation)
+  const clearCitationRequest = useDocViewerStore((s) => s.clearCitation)
+  useEffect(() => {
+    if (citationRequest?.text) {
+      setCitationTarget(citationRequest)
+      setShowThumbnailOverlay(true)
+    }
+  }, [citationRequest?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Close thumbnail overlay on Escape key
   useEffect(() => {
     const handleEscape = (e) => {
@@ -1141,33 +1333,37 @@ export default function StatusSection() {
         {/* Thumbnail */}
         {renderThumbnail()}
         <div className="flex-1 min-w-0">
-          {displayTitle && (
-            <h3 
-              className="font-medium"
-              style={{ 
-                color: 'var(--color-text-primary)',
-                wordBreak: 'break-word',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {displayTitle}
-            </h3>
-          )}
-          {isViewingCheck && displayStatus === 'completed' && (
-            <button
-              type="button"
-              onClick={() => setShowShare(true)}
-              className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
-              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
-              title="Share or export these results — HTML report or a public link"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-                <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
-              </svg>
-              Share results
-            </button>
-          )}
+          {/* Title row: title on the left, Share pinned to the far right of the
+              outline (to the right of the thumbnail/title), per request. */}
+          <div className="flex items-start justify-between gap-3">
+            {displayTitle && (
+              <h3
+                className="font-medium"
+                style={{
+                  color: 'var(--color-text-primary)',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {displayTitle}
+              </h3>
+            )}
+            {isViewingCheck && displayStatus === 'completed' && (
+              <button
+                type="button"
+                onClick={() => setShowShare(true)}
+                className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
+                style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
+                title="Share or export these results — HTML, PDF, Markdown or Word; or a public link"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                  <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+                </svg>
+                Share results
+              </button>
+            )}
+          </div>
           {/* Hide source info for pasted text since it shows the file path or text content */}
           {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 
@@ -1369,7 +1565,9 @@ export default function StatusSection() {
           checkId={selectedCheckId}
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
-          onClose={() => setShowThumbnailOverlay(false)}
+          aiDetection={selectedCheck?.ai_detection || (isCurrentSessionCheck ? checkStoreAiDetection : null)}
+          citationTarget={citationTarget}
+          onClose={() => { setShowThumbnailOverlay(false); setCitationTarget(null); clearCitationRequest() }}
         />
       )}
       {showShare && (

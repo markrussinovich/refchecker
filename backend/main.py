@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic.fields import FieldInfo
 from pydantic import BaseModel
@@ -2100,6 +2100,161 @@ class _PublishRequest(BaseModel):
     public: bool = False
 
 
+@app.get("/api/check/{check_id}/health")
+async def get_check_health(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Citation-health score for a check (same formula as the in-app badge)."""
+    try:
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        from backend import export as _export
+        m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
+        return {"check_id": check_id, **m["health"], "stats": m["stats"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing health for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/retractions")
+async def get_check_retractions(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Flag cited references that OpenAlex reports as retracted (real signal only).
+
+    On-demand (one batched OpenAlex query). References with no DOI -> 'no_doi';
+    DOIs not found -> 'unknown'; never a fabricated retraction.
+    """
+    try:
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        from backend import export as _export
+        from backend.retraction import check_retractions
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        result = await asyncio.to_thread(check_retractions, refs)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking retractions for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/gaps")
+async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """"Did you miss these?" — works frequently co-cited by the bibliography's own
+    references but absent from it (OpenAlex). Advisory discovery aid, real data only."""
+    try:
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        from backend import export as _export
+        from backend.gap_finder import find_gaps
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        result = await asyncio.to_thread(find_gaps, refs)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding gaps for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/badge.svg")
+async def get_check_badge(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """A self-contained citation-health SVG badge (embeddable in reports/READMEs)."""
+    try:
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        from backend import export as _export
+        m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
+        h = m["health"]
+        svg = _export.render_badge_svg(h.get("score"), h.get("grade", "n/a"), h.get("color", "#6b7280"))
+        return Response(content=svg, media_type="image/svg+xml",
+                        headers={"Cache-Control": "no-cache"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering badge for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _export_filename(title: str, check_id: int, ext: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title or "")[:80].strip("-") or f"refchecker-{check_id}"
+    return f"{safe}.{ext}"
+
+
+@app.get("/api/export/{check_id}/file")
+async def export_check_file(check_id: int, fmt: str = "html", corrections: bool = False,
+                            include: Optional[str] = None, download: bool = True,
+                            current_user: UserInfo = Depends(require_user)):
+    """Multi-format export of one check: html | md | pdf | docx.
+
+    Query params drive the share-dialog controls:
+      * fmt          — output format.
+      * corrections  — include the stored corrected-reference suggestions.
+      * include      — comma list of sections to keep (summary,ai,issues,references).
+      * download     — attach a Content-Disposition filename.
+    """
+    try:
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        from backend import export as _export
+        content, media_type, ext = _export.render_export(
+            check, fmt, corrections=corrections, include=include)
+        title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{_export_filename(title, check_id, ext)}"'
+        return Response(content=content, media_type=media_type, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting check {check_id} as {fmt}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/export/batch/{batch_id}/file")
+async def export_batch_file(batch_id: str, fmt: str = "html", corrections: bool = False,
+                            include: Optional[str] = None, download: bool = True,
+                            current_user: UserInfo = Depends(require_user)):
+    """Multi-format batch report: one-page overview + each paper separately."""
+    try:
+        summary, rows = await _get_owned_batch_or_404(batch_id, current_user)
+        user_id = get_user_id_filter(current_user)
+        checks: list[dict] = []
+        for row in rows:
+            cid = row.get("id") or row.get("check_id")
+            if cid is None:
+                continue
+            full = await db.get_check_by_id(int(cid), user_id=user_id)
+            if full:
+                checks.append(full)
+        if not checks:
+            raise HTTPException(status_code=404, detail="No completed checks in this batch")
+        label = summary.get("batch_label") or f"Batch {batch_id[:8]}"
+        from backend import export as _export
+        content, media_type, ext = _export.render_batch_export(
+            checks, fmt, corrections=corrections, include=include, label=label)
+        headers = {}
+        if download:
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label)[:80].strip("-") or "batch-report"
+            headers["Content-Disposition"] = f'attachment; filename="{safe}.{ext}"'
+        return Response(content=content, media_type=media_type, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting batch {batch_id} as {fmt}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/export/{check_id}/publish")
 async def publish_check(check_id: int, req: _PublishRequest,
                         current_user: UserInfo = Depends(require_user)):
@@ -2112,11 +2267,35 @@ async def publish_check(check_id: int, req: _PublishRequest,
     """
     title, html_str = await _render_check_html(check_id, current_user)
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
+    import httpx
+
+    # Quick link: zero-config anonymous host (no domain, no token). Uploads the
+    # standalone HTML to an ephemeral public file host and returns the link.
+    # The report is then PUBLIC to anyone with the URL and expires — surfaced as
+    # such in the UI. No credentials involved.
+    if req.adapter == "quick_link":
+        try:
+            files = {"file": (f"{safe}.html", html_str.encode("utf-8"), "text/html")}
+            async with httpx.AsyncClient() as client:
+                r = await client.post("https://tmpfiles.org/api/v1/upload", files=files, timeout=30.0)
+            if r.status_code not in (200, 201):
+                raise HTTPException(status_code=502, detail=f"Quick-link host returned {r.status_code}.")
+            url = ((r.json() or {}).get("data") or {}).get("url")
+            if not url:
+                raise HTTPException(status_code=502, detail="Quick-link host did not return a URL.")
+            # tmpfiles serves a direct file via /dl/ ; rewrite for a clean view.
+            view = url.replace("tmpfiles.org/", "tmpfiles.org/dl/", 1) if "/dl/" not in url else url
+            return {"url": view, "page_url": url, "ephemeral": True, "adapter": "quick_link"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"quick_link publish failed: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Quick-link failed: {e}")
+
     if req.adapter != "github_gist":
         raise HTTPException(status_code=400, detail=f"Unknown publish adapter: {req.adapter}")
     if not req.token:
         raise HTTPException(status_code=400, detail="A GitHub token (gist scope) is required.")
-    import httpx
     payload = {
         "description": f"RefChecker report — {title}",
         "public": bool(req.public),
@@ -2558,6 +2737,108 @@ async def get_preview_page(
         media_type="image/png",
         headers=_private_artifact_headers(),
     )
+
+
+class _LocateTarget(BaseModel):
+    text: str
+    span_index: Optional[int] = None
+    span_type: Optional[str] = "ai"   # 'ai' | 'citation'
+    band: Optional[str] = None
+    reason: Optional[str] = None
+    model_score: Optional[float] = None
+
+
+class _LocateRequest(BaseModel):
+    targets: List[_LocateTarget] = []
+
+
+@app.post("/api/preview/{check_id}/locate")
+async def locate_preview_spans(
+    check_id: int,
+    req: _LocateRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Locate target texts (AI-flagged passages / citation-context sentences)
+    inside this check's source PDF and return their page + normalized rects so
+    the frontend can highlight them ON the native page image. Returns
+    found=False per target that can't be located (never a fabricated position)."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        return {"available": False, "results": []}
+    targets = [t.model_dump() for t in (req.targets or [])]
+    if not targets:
+        return {"available": True, "results": []}
+    from backend.thumbnail import locate_text_spans_in_pdf
+    results = await asyncio.to_thread(locate_text_spans_in_pdf, pdf_path, targets)
+    return {"available": True, "results": results}
+
+
+@app.get("/api/preview/{check_id}/annotated-pdf")
+async def get_annotated_pdf(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return the source PDF with the AI-flagged passages highlighted as real
+    PDF annotations (PyMuPDF) — a downloadable native-highlighted artifact."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF source for this check")
+    ai = check.get("ai_detection") or {}
+    spans = ai.get("spans") if isinstance(ai, dict) else None
+    targets = [
+        {"text": s.get("quote") or "", "band": ai.get("band"), "model_score": s.get("model_score")}
+        for s in (spans or []) if isinstance(s, dict) and s.get("quote")
+    ]
+    if not targets:
+        raise HTTPException(status_code=404, detail="No flagged passages to annotate")
+    out_path = await asyncio.to_thread(_annotate_pdf_highlights, pdf_path, targets, str(cache_dir or ""), check_id)
+    if not out_path or not os.path.exists(out_path):
+        raise HTTPException(status_code=500, detail="Could not annotate PDF")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (check.get("paper_title") or f"refchecker-{check_id}"))[:80].strip("-")
+    return FileResponse(out_path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}-highlighted.pdf"'})
+
+
+def _annotate_pdf_highlights(pdf_path, targets, cache_dir, check_id):
+    """Add real PyMuPDF highlight annotations on the located target rects."""
+    try:
+        import fitz
+        from backend.thumbnail import locate_text_spans_in_pdf
+        located = locate_text_spans_in_pdf(pdf_path, targets)
+        doc = fitz.open(pdf_path)
+        band_rgb = {"high": (0.96, 0.45, 0.45), "medium": (0.98, 0.75, 0.18), "low": (0.55, 0.86, 0.6)}
+        added = 0
+        for r in located:
+            if not r.get("found"):
+                continue
+            page = doc.load_page(r["page"])
+            pw, ph = float(page.rect.width), float(page.rect.height)
+            color = band_rgb.get((r.get("band") or "").lower(), (0.98, 0.75, 0.18))
+            for nx0, ny0, nx1, ny1 in r["rects"]:
+                rect = fitz.Rect(nx0 * pw, ny0 * ph, nx1 * pw, ny1 * ph)
+                annot = page.add_highlight_annot(rect)
+                try:
+                    annot.set_colors(stroke=color)
+                    annot.update()
+                except Exception:
+                    pass
+                added += 1
+        if not added:
+            doc.close()
+            return None
+        out_dir = os.path.join(cache_dir or os.path.dirname(pdf_path), "annotated")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{check_id}-highlighted.pdf")
+        doc.save(out_path, garbage=3, deflate=True)
+        doc.close()
+        return out_path
+    except Exception as e:
+        logger.warning("PDF annotation failed: %s", e)
+        return None
 
 
 @app.get("/api/text/{check_id}")

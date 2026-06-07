@@ -868,3 +868,79 @@ def cleanup_old_thumbnails(cache_dir: str, max_age_days: int = 30):
                 
     except Exception as e:
         logger.error(f"Error cleaning up thumbnails: {e}")
+
+
+def locate_text_spans_in_pdf(pdf_path, targets, max_pages=80):
+    """Locate target texts inside a PDF and return normalized rectangles.
+
+    For each target ({text, span_index, span_type, band, reason, model_score})
+    search the PDF with PyMuPDF, returning the page index and rect(s) in
+    normalized 0..1 page coordinates (render-independent, so the frontend can
+    overlay them on the page image at any display size). Uses progressively
+    shorter needles (full text, first sentence, first N words) to tolerate the
+    whitespace/hyphenation differences between extracted text and the PDF.
+    Never fabricates a position: a target that cannot be found returns found=False.
+    """
+    import re as _re
+    out = []
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return [{"span_index": t.get("span_index"), "found": False, "page": None, "rects": []} for t in targets]
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception:
+        return [{"span_index": t.get("span_index"), "found": False, "page": None, "rects": []} for t in targets]
+    try:
+        npages = min(doc.page_count, max_pages)
+        pages = [doc.load_page(p) for p in range(npages)]
+        for t in targets:
+            text = (t.get("text") or "").strip()
+            res = {
+                "span_index": t.get("span_index"),
+                "span_type": t.get("span_type"),
+                "band": t.get("band"),
+                "reason": t.get("reason"),
+                "model_score": t.get("model_score"),
+                "found": False, "page": None, "rects": [],
+            }
+            if len(text) < 8:
+                out.append(res)
+                continue
+            cands = [text]
+            first_sent = _re.split(r"(?<=[.!?])\s+", text)[0].strip()
+            if first_sent and first_sent != text and len(first_sent) >= 12:
+                cands.append(first_sent)
+            words = text.split()
+            if len(words) > 10:
+                cands.append(" ".join(words[:10]))
+            if len(words) > 5:
+                cands.append(" ".join(words[:5]))
+            done = False
+            for pno, page in enumerate(pages):
+                pw = float(page.rect.width) or 1.0
+                ph = float(page.rect.height) or 1.0
+                rects = []
+                for needle in cands:
+                    if len(needle) < 8:
+                        continue
+                    try:
+                        hits = page.search_for(needle)
+                    except Exception:
+                        hits = []
+                    if hits:
+                        for r in hits[:12]:
+                            rects.append([round(r.x0 / pw, 4), round(r.y0 / ph, 4),
+                                          round(r.x1 / pw, 4), round(r.y1 / ph, 4)])
+                        break
+                if rects:
+                    res.update(found=True, page=pno, rects=rects)
+                    done = True
+                    break
+            out.append(res)
+        return out
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass

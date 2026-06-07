@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { exportCheckHtml, publishCheck } from '../../utils/api'
+import { useMemo, useRef, useState } from 'react'
+import { exportCheckFile, exportBatchFile, publishCheck } from '../../utils/api'
 import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -14,23 +14,37 @@ function downloadBlob(blob, filename) {
 
 const safeName = (t) => (t || 'refchecker-report').replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 80).replace(/^-+|-+$/g, '') || 'refchecker-report'
 
+const FORMATS = [
+  { id: 'html', label: 'HTML', ext: 'html', hint: 'Self-contained webpage' },
+  { id: 'pdf', label: 'PDF', ext: 'pdf', hint: 'Print-ready document' },
+  { id: 'md', label: 'Markdown', ext: 'md', hint: 'LLM-ingestible text' },
+  { id: 'docx', label: 'Word', ext: 'docx', hint: 'Editable .docx' },
+]
+
 /**
- * "Share this document" — self-contained HTML export (always), an opt-in
- * publish-to-web (GitHub Gist → htmlpreview link), and an in-app video
- * walkthrough export. Mirrors the GPTZero share dialog.
+ * "Share this document" — multi-format export (HTML / PDF / Markdown / DOCX)
+ * with include/exclude section checkboxes and an optional "suggested
+ * corrections" pass, plus opt-in publish-to-web (GitHub Gist → htmlpreview).
+ * GPTZero-style: minor year warnings are downweighted server-side, errors and
+ * hallucinations elevated. Every option maps to real report content.
  */
-export default function ShareModal({ checkId, title, onClose }) {
+export default function ShareModal({ checkId, batchId, title, onClose }) {
+  const isBatch = !!batchId
   const checkStore = useCheckStore()
   const selectedCheck = useHistoryStore((s) => s.selectedCheck)
-  const [busy, setBusy] = useState(null) // 'html' | 'video' | 'publish'
+  const [busy, setBusy] = useState(null) // 'download' | 'publish'
+  const [fmt, setFmt] = useState('html')
+  const [corrections, setCorrections] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
   const [token, setToken] = useState(() => localStorage.getItem('refchecker.githubToken') || '')
   const [isPublic, setIsPublic] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [videoOpen, setVideoOpen] = useState(false)
+  const canvasRef = useRef(null)
 
-  // Best-effort summary for the included-scans list + the video animation.
+  // Best-effort summary for the included-scans state + the build animation.
   const summary = useMemo(() => {
     const refs = selectedCheck?.references || checkStore.references || []
     const ai = selectedCheck?.ai_detection || checkStore.aiDetection || null
@@ -41,30 +55,68 @@ export default function ShareModal({ checkId, title, onClose }) {
       warnings: refs.filter((r) => status(r) === 'warning').length,
       errors: refs.filter((r) => status(r) === 'error' || (r.errors?.length)).length,
     }
-    return { refs, ai, stats }
-  }, [selectedCheck, checkStore.references, checkStore.aiDetection])
+    const aiOn = isBatch || (!!ai && ai.band !== 'unavailable' && ai.band !== 'inconclusive')
+    return { refs, ai, stats, aiOn }
+  }, [selectedCheck, checkStore.references, checkStore.aiDetection, isBatch])
 
-  const scans = [
-    { name: 'Reference verification', on: summary.refs.length > 0 },
-    { name: 'AI-text detection', on: !!summary.ai && summary.ai.band !== 'unavailable' },
-    { name: 'Citation contexts', on: summary.refs.some((r) => (r.citation_contexts?.length || 0) > 0) },
-  ].filter((s) => s.on)
+  // Section include/exclude checkboxes (the export "what to include" controls).
+  const [sections, setSections] = useState({ summary: true, ai: true, issues: true, references: true })
+  const toggleSection = (k) => setSections((s) => ({ ...s, [k]: !s[k] }))
+  const includeList = Object.entries(sections).filter(([, v]) => v).map(([k]) => k)
 
-  const handleDownloadHtml = async () => {
-    setBusy('html'); setError('')
-    // Keep the build animation on screen for a beat even when the export is
-    // instant, so the "generating report" moment reads intentionally.
-    const minShow = new Promise((r) => setTimeout(r, 2600))
+  const SECTION_DEFS = [
+    { id: 'summary', label: 'Summary & verdict', always: false },
+    { id: 'ai', label: 'AI-text detection', disabled: !summary.aiOn },
+    { id: 'issues', label: 'Issues to address', always: false },
+    { id: 'references', label: 'Full reference list', always: false },
+  ]
+
+  const handleDownload = async () => {
+    setBusy('download'); setError('')
+    const minShow = new Promise((r) => setTimeout(r, 1800))
     try {
-      const [res] = await Promise.all([exportCheckHtml(checkId), minShow])
-      downloadBlob(res.data, `${safeName(title)}.html`)
+      const opts = { fmt, corrections, include: includeList.length ? includeList : undefined }
+      const req = isBatch ? exportBatchFile(batchId, opts) : exportCheckFile(checkId, opts)
+      const [res] = await Promise.all([req, minShow])
+      const ext = FORMATS.find((f) => f.id === fmt)?.ext || 'html'
+      downloadBlob(res.data, `${safeName(title || (isBatch ? 'batch-report' : 'report'))}.${ext}`)
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Export failed')
     } finally { setBusy(null) }
   }
 
+  // Record the live walkthrough canvas to a real .webm via MediaRecorder —
+  // a genuine "html-to-video" of the report (no external service).
+  const recordVideo = () => {
+    const canvas = canvasRef.current
+    if (!canvas || typeof canvas.captureStream !== 'function' || typeof window.MediaRecorder === 'undefined') {
+      setError('Video capture is not supported in this browser. Try the PDF/HTML export.')
+      return
+    }
+    setError(''); setBusy('video')
+    try {
+      const stream = canvas.captureStream(30)
+      const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+        .find((m) => window.MediaRecorder.isTypeSupported(m)) || 'video/webm'
+      const rec = new window.MediaRecorder(stream, { mimeType: mime })
+      const chunks = []
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data) }
+      rec.onstop = () => {
+        downloadBlob(new Blob(chunks, { type: 'video/webm' }), `${safeName(title)}.webm`)
+        setBusy(null)
+      }
+      rec.start()
+      // One full animation loop (~5.2s) plus a beat.
+      setTimeout(() => { try { rec.stop() } catch { /* already stopped */ } }, 5600)
+    } catch (e) {
+      setError(e?.message || 'Video recording failed'); setBusy(null)
+    }
+  }
+
+  const [shareNote, setShareNote] = useState('')
+
   const handlePublish = async () => {
-    setBusy('publish'); setError(''); setShareUrl('')
+    setBusy('publish'); setError(''); setShareUrl(''); setShareNote('')
     try {
       localStorage.setItem('refchecker.githubToken', token)
       const res = await publishCheck(checkId, { adapter: 'github_gist', token, public: isPublic })
@@ -74,46 +126,88 @@ export default function ShareModal({ checkId, title, onClose }) {
     } finally { setBusy(null) }
   }
 
+  // Quick link: zero-config anonymous host — no domain, no token.
+  const handleQuickLink = async () => {
+    setBusy('quicklink'); setError(''); setShareUrl(''); setShareNote('')
+    try {
+      const res = await publishCheck(checkId, { adapter: 'quick_link' })
+      setShareUrl(res.data?.url || '')
+      setShareNote('Anonymous ephemeral link — public to anyone with the URL, and expires after a while. No account or domain needed.')
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Quick link failed')
+    } finally { setBusy(null) }
+  }
+
   const copy = () => {
     if (!shareUrl) return
     navigator.clipboard?.writeText(shareUrl)
     setCopied(true); setTimeout(() => setCopied(false), 1500)
   }
 
+  const pill = (active) => ({
+    background: active ? 'var(--color-accent)' : 'var(--color-bg-secondary)',
+    color: active ? '#fff' : 'var(--color-text-primary)',
+    borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
+  })
+
   return (
     <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
         className="w-full rounded-xl overflow-hidden"
-        style={{ maxWidth: 560, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+        style={{ maxWidth: 580, maxHeight: '92vh', overflowY: 'auto', background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
         {/* Header */}
         <div className="px-5 pt-5 pb-4 text-center relative" style={{ borderBottom: '1px solid var(--color-border)' }}>
           <button type="button" onClick={onClose} className="absolute top-3 right-3 p-1" style={{ color: 'var(--color-text-muted)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
-          <h2 className="text-lg font-bold" style={{ color: 'var(--color-text-primary)' }}>Share this document</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--color-text-primary)' }}>{isBatch ? 'Share this batch' : 'Share this document'}</h2>
           <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-            Export a self-contained report, or publish a link anyone can view.
+            {isBatch
+              ? 'Export one report: an overview of every paper, then each paper in detail.'
+              : 'Export a self-contained report, or publish a link anyone can view.'}
           </p>
         </div>
 
         <div className="px-5 py-4 space-y-4">
-          {/* Scans included */}
+          {/* Format selector */}
           <div>
-            <div className="text-sm mb-2" style={{ color: 'var(--color-text-secondary)' }}>The following scans will be included:</div>
-            <ul className="space-y-1.5">
-              {scans.map((s) => (
-                <li key={s.name} className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                  {s.name}
-                </li>
+            <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>Format</div>
+            <div className="grid grid-cols-4 gap-2">
+              {FORMATS.map((f) => (
+                <button key={f.id} type="button" onClick={() => setFmt(f.id)} title={f.hint}
+                  className="px-2 py-2 rounded-md text-sm font-medium border text-center transition-colors"
+                  style={pill(fmt === f.id)}>
+                  {f.label}
+                </button>
               ))}
-              {scans.length === 0 && <li className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No completed scans yet.</li>}
-            </ul>
+            </div>
+          </div>
+
+          {/* Section include/exclude */}
+          <div>
+            <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>Include sections</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              {SECTION_DEFS.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 text-sm"
+                  style={{ color: s.disabled ? 'var(--color-text-muted)' : 'var(--color-text-primary)', opacity: s.disabled ? 0.5 : 1 }}>
+                  <input type="checkbox" disabled={s.disabled}
+                    checked={!s.disabled && sections[s.id]}
+                    onChange={() => toggleSection(s.id)} />
+                  {s.label}
+                  {s.id === 'ai' && !summary.aiOn && <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>(none)</span>}
+                </label>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm mt-2.5 pt-2.5" style={{ color: 'var(--color-text-primary)', borderTop: '1px solid var(--color-border)' }}>
+              <input type="checkbox" checked={corrections} onChange={(e) => setCorrections(e.target.checked)} />
+              Include suggested corrections
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>(verified-source fixes)</span>
+            </label>
           </div>
 
           {/* Live results animation while the report is being generated. */}
-          {busy === 'html' && (
+          {busy === 'download' && (
             <div>
               <ShareAnimationCanvas
                 title={title}
@@ -122,29 +216,74 @@ export default function ShareModal({ checkId, title, onClose }) {
                 aiScore={summary.ai?.overall_score}
               />
               <div className="text-xs mt-1.5 text-center" style={{ color: 'var(--color-text-muted)' }}>
-                Building your shareable report…
+                Building your {FORMATS.find((f) => f.id === fmt)?.label} report…
               </div>
             </div>
           )}
 
           {/* Export actions */}
           <div className="flex gap-2 flex-wrap">
-            <button type="button" onClick={handleDownloadHtml} disabled={busy === 'html'}
+            <button type="button" onClick={handleDownload} disabled={busy === 'download' || includeList.length === 0}
               className="px-3 py-2 rounded-md text-sm font-medium inline-flex items-center gap-1.5"
-              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', opacity: busy === 'html' ? 0.6 : 1 }}>
+              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', opacity: (busy === 'download' || includeList.length === 0) ? 0.6 : 1 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              {busy === 'html' ? 'Preparing…' : 'Download HTML'}
+              {busy === 'download' ? 'Preparing…' : `Download ${FORMATS.find((f) => f.id === fmt)?.label}`}
             </button>
-            <button type="button" onClick={() => setPublishOpen((v) => !v)}
-              className="px-3 py-2 rounded-md text-sm inline-flex items-center gap-1.5 border"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
-              Publish to web
-            </button>
+            {!isBatch && (
+              <button type="button" onClick={handleQuickLink} disabled={busy === 'quicklink'}
+                className="px-3 py-2 rounded-md text-sm inline-flex items-center gap-1.5 border"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: busy === 'quicklink' ? 0.6 : 1 }}
+                title="Get an instant anonymous link — no domain or token needed (ephemeral, public)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+                {busy === 'quicklink' ? 'Creating link…' : 'Quick link'}
+              </button>
+            )}
+            {!isBatch && (
+              <button type="button" onClick={() => setPublishOpen((v) => !v)}
+                className="px-3 py-2 rounded-md text-sm inline-flex items-center gap-1.5 border"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+                Publish to web
+              </button>
+            )}
           </div>
 
+          {/* Walkthrough video (.webm) — records the live animated summary */}
+          {!isBatch && (
+            <div>
+              <button type="button" onClick={() => setVideoOpen((v) => !v)} aria-expanded={videoOpen}
+                className="flex items-center gap-1.5 text-xs font-medium"
+                style={{ color: 'var(--color-text-secondary)' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ transform: videoOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 160ms ease' }}><polyline points="6 9 12 15 18 9" /></svg>
+                Walkthrough video (.webm)
+              </button>
+              {videoOpen && (
+                <div className="mt-2">
+                  <ShareAnimationCanvas
+                    ref={canvasRef}
+                    title={title}
+                    stats={summary.stats}
+                    aiBand={summary.ai?.band}
+                    aiScore={summary.ai?.overall_score}
+                    height={200}
+                  />
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <button type="button" onClick={recordVideo} disabled={busy === 'video'}
+                      className="px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-1.5"
+                      style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', opacity: busy === 'video' ? 0.6 : 1 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                      {busy === 'video' ? 'Recording…' : 'Record & download (~6s)'}
+                    </button>
+                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>A short animated summary for slides or social.</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Publish panel */}
-          {publishOpen && (
+          {!isBatch && publishOpen && (
             <div className="rounded-lg p-3 space-y-2" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
               <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Publishes the HTML to a GitHub Gist and returns a viewable link. Needs a personal access token with <code>gist</code> scope (stored locally, used only for this request).
@@ -170,6 +309,7 @@ export default function ShareModal({ checkId, title, onClose }) {
           )}
 
           {/* Share URL */}
+          {shareNote && <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{shareNote}</div>}
           {shareUrl && (
             <div className="flex items-center gap-2">
               <input readOnly value={shareUrl}
