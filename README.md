@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <img alt="Extract → Verify → Detect → Share" src="assets/flow.svg" width="100%">
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
   <a href="#web-ui">Web UI</a> •
@@ -125,6 +129,24 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 
 ---
 
+## 🆕 Recent updates
+
+<details open>
+<summary><strong>Latest release highlights</strong> (desktop app)</summary>
+
+<br>
+
+- **v0.8.0** — **Modern CLI banner** (block-pixel `REFCHECKER` wordmark, gradient, grouped command / environment / help panels); the AI-detection panel and **Top AI / Human sentences** are now **collapsible**; refreshed README with animated SVGs.
+- **v0.7.99** — **Detection run-mode**: run **references only**, **AI detection only**, or **both**. In-app **citation** of the local detection model (desklib, Hugging Face). Animated README banners.
+- **v0.7.98** — **AI-detection visualizations** (confidence donut, AI/Mixed/Human pills, page-by-page bands, Top AI/Human sentences) · **Share this document** (self-contained HTML, publish link, video) · **3D Seen-References library graph** · document-viewer **zoom + find** · richer **author hover** cards · inline-**cited ✓ badge** · title-typo & "unknown mismatch" fixes.
+- **v0.7.96** — Upstream sync with [markrussinovich/refchecker](https://github.com/markrussinovich/refchecker) · sidebar **expand/collapse-all** for batches.
+
+See the [full release list](https://github.com/ArioMoniri/refchecker/releases) for every build.
+
+</details>
+
+---
+
 ## Contents
 
 - [Quick Start](#quick-start)
@@ -221,28 +243,34 @@ plain when piped). `--help` lists the full options and examples.
 <details><summary>Plain-text banner</summary>
 
 ```
-   ___      __ ___ _           _
-  / _ \___ / _/ __| |_  ___ __| |_____ _ _
- / , _/ -_) _| (__| ' \/ -_) _| / / -_) '_|
-/_/|_|\__/_|  \___|_||_\___\__|_\_\___|_|
+  ███  ████ ████  ███ █  █ ████  ███ █  █ ████ ███
+  █  █ █    █    █    █  █ █    █    █ █  █    █  █
+  ███  ███  ███  █    ████ ███  █    ██   ███  ███
+  █ █  █    █    █    █  █ █    █    █ █  █    █ █
+  █  █ ████ █     ███ █  █ ████  ███ █  █ ████ █  █
 
-  RefChecker vX.Y.Z  ·  academic reference verification + AI-text detection
-  by Mark Russinovich & agentic AI assistants
+  academic reference verification  +  AI-text detection   vX.Y.Z
+
+  academic-refchecker <input> [options]   ·   add --help for the full list
+
+  Check
+    --paper        one paper — ArXiv ID, URL, PDF, .tex, .bib, or text
+    --paper-list   many papers from a newline-delimited file
+    --openreview   fetch + scan an entire OpenReview venue
+
+  AI-text detection  · opt-in, advisory — never proof of misconduct
+    local          ● desklib DeBERTa — offline & calibrated (download in Settings)
+    llm-judge      reuse your configured LLM provider (uncalibrated)
+    external       Pangram / GPTZero — key + explicit consent
+
+  Output
+    --report-file  structured report — json · jsonl · csv · text
+    --output-file  human-readable error list
 
   Environment
-    python    3.x.y   ·   Darwin 25.4.0 (arm64)
-    runtime   ● torch/onnx   ● transformers   ● llm sdks
-
-  Verification engines
-    · Semantic Scholar   · OpenAlex   · Crossref   · DBLP
-    · ACL Anthology      · arXiv      · OpenReview · local DBs
-
-  AI-text detection (opt-in, advisory — never proof of misconduct)
-    ● local (desklib DeBERTa)   · LLM-judge   · external API
-
-  Quick start
-    academic-refchecker --paper <arxiv-id|url|pdf|.bib>
-    academic-refchecker --help   · full options
+    python 3.11+  ·  macOS / Linux / Windows
+    runtime  ● torch/onnx   ● transformers   ● llm sdks
+    sources  Semantic Scholar · OpenAlex · Crossref · DBLP · ACL Anthology · arXiv · OpenReview
 ```
 
 </details>

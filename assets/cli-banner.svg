@@ -1,38 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="430" viewBox="0 0 760 430" role="img" aria-label="RefChecker CLI banner">
-  <defs><clipPath id="r"><rect width="760" height="430" rx="12"/></clipPath></defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="486" viewBox="0 0 780 486" role="img" aria-label="RefChecker CLI banner">
+  <defs><clipPath id="r"><rect width="780" height="486" rx="12"/></clipPath></defs>
   <g clip-path="url(#r)" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">
-    <rect width="760" height="430" fill="#0d1117"/>
+    <rect width="780" height="486" fill="#0d1117"/>
     <!-- window chrome -->
-    <rect width="760" height="30" fill="#161b22"/>
+    <rect width="780" height="30" fill="#161b22"/>
     <circle cx="18" cy="15" r="5" fill="#ff5f56"/>
     <circle cx="36" cy="15" r="5" fill="#ffbd2e"/>
     <circle cx="54" cy="15" r="5" fill="#27c93f"/>
-    <text x="380" y="19" text-anchor="middle" fill="#8b949e" font-size="11">academic-refchecker — banner</text>
+    <text x="390" y="19" text-anchor="middle" fill="#8b949e" font-size="11">academic-refchecker</text>
+
+    <g xml:space="preserve" font-size="13">
+      <!-- REFCHECKER block wordmark, cyan→green vertical gradient -->
+      <text x="22" y="58"  fill="#22d3ee">███  ████ ████  ███ █  █ ████  ███ █  █ ████ ███ </text>
+      <text x="22" y="74"  fill="#26d2d2">█  █ █    █    █    █  █ █    █    █ █  █    █  █</text>
+      <text x="22" y="90"  fill="#2bd2bd">███  ███  ███  █    ████ ███  █    ██   ███  ███ </text>
+      <text x="22" y="106" fill="#2fd2ab">█ █  █    █    █    █  █ █    █    █ █  █    █ █ </text>
+      <text x="22" y="122" fill="#34d399">█  █ ████ █     ███ █  █ ████  ███ █  █ ████ █  █</text>
+    </g>
 
     <g xml:space="preserve">
-      <!-- ASCII logo -->
-      <text x="22" y="58"  fill="#7c9cff">   ___      __ ___ _           _</text>
-      <text x="22" y="75"  fill="#7c9cff">  / _ \___ / _/ __| |_  ___ __| |_____ _ _</text>
-      <text x="22" y="92"  fill="#22d3ee"> / , _/ -_) _| (__| ' \/ -_) _| / / -_) '_|</text>
-      <text x="22" y="109" fill="#34d399">/_/|_|\__/_|  \___|_||_\___\__|_\_\___|_|</text>
+      <text x="22" y="152" fill="#8b949e">  academic reference verification  <tspan fill="#34d399">+</tspan>  AI-text detection   <tspan fill="#34d399">v0.8.0</tspan></text>
+      <text x="22" y="176" fill="#e6edf3" font-weight="700">  academic-refchecker <tspan fill="#8b949e" font-weight="400">&lt;input&gt; [options]</tspan>   <tspan fill="#8b949e" font-weight="400">·   add</tspan> <tspan fill="#22d3ee" font-weight="400">--help</tspan> <tspan fill="#8b949e" font-weight="400">for the full list</tspan></text>
 
-      <text x="22" y="140" fill="#e6edf3" font-weight="700">  RefChecker <tspan fill="#34d399">v0.7.99</tspan>  ·  academic reference verification + AI-text detection</text>
-      <text x="22" y="158" fill="#8b949e">  by Mark Russinovich &amp; agentic AI assistants</text>
+      <text x="22" y="206" fill="#d96cff" font-weight="700">  Check</text>
+      <text x="22" y="223" fill="#e6edf3">    <tspan fill="#22d3ee">--paper      </tspan> one paper — ArXiv ID, URL, PDF, .tex, .bib, or text</text>
+      <text x="22" y="240" fill="#e6edf3">    <tspan fill="#22d3ee">--paper-list </tspan> many papers from a newline-delimited file</text>
+      <text x="22" y="257" fill="#e6edf3">    <tspan fill="#22d3ee">--openreview </tspan> fetch + scan an entire OpenReview venue</text>
 
-      <text x="22" y="188" fill="#58a6ff" font-weight="700">  Environment</text>
-      <text x="22" y="205" fill="#adbac7">    python    3.11+   ·   macOS / Linux / Windows</text>
-      <text x="22" y="222" fill="#adbac7">    runtime   <tspan fill="#34d399">●</tspan> torch/onnx   <tspan fill="#34d399">●</tspan> transformers   <tspan fill="#34d399">●</tspan> llm sdks</text>
+      <text x="22" y="287" fill="#d96cff" font-weight="700">  AI-text detection  <tspan fill="#8b949e" font-weight="400">· opt-in, advisory — never proof of misconduct</tspan></text>
+      <text x="22" y="304" fill="#e6edf3">    <tspan fill="#22d3ee">local        </tspan> <tspan fill="#34d399">●</tspan> desklib DeBERTa — offline &amp; calibrated</text>
+      <text x="22" y="321" fill="#e6edf3">    <tspan fill="#22d3ee">llm-judge    </tspan> reuse your configured LLM provider (uncalibrated)</text>
+      <text x="22" y="338" fill="#e6edf3">    <tspan fill="#22d3ee">external     </tspan> Pangram / GPTZero — key + explicit consent</text>
 
-      <text x="22" y="252" fill="#58a6ff" font-weight="700">  Verification engines</text>
-      <text x="22" y="269" fill="#adbac7">    · Semantic Scholar   · OpenAlex   · Crossref   · DBLP</text>
-      <text x="22" y="286" fill="#adbac7">    · ACL Anthology      · arXiv      · OpenReview · local DBs</text>
+      <text x="22" y="368" fill="#d96cff" font-weight="700">  Output</text>
+      <text x="22" y="385" fill="#e6edf3">    <tspan fill="#22d3ee">--report-file</tspan> structured report — json · jsonl · csv · text</text>
+      <text x="22" y="402" fill="#e6edf3">    <tspan fill="#22d3ee">--output-file</tspan> human-readable error list</text>
 
-      <text x="22" y="316" fill="#58a6ff" font-weight="700">  AI-text detection <tspan fill="#8b949e" font-weight="400">(opt-in, advisory — never proof of misconduct)</tspan></text>
-      <text x="22" y="333" fill="#adbac7">    <tspan fill="#34d399">●</tspan> local (desklib DeBERTa)   · LLM-judge   · external API</text>
-
-      <text x="22" y="363" fill="#58a6ff" font-weight="700">  Quick start</text>
-      <text x="22" y="380" fill="#a5d6ff">    academic-refchecker --paper &lt;arxiv-id|url|pdf|.bib&gt;</text>
-      <text x="22" y="397" fill="#a5d6ff">    academic-refchecker --help   <tspan fill="#8b949e">· full options</tspan></text>
+      <text x="22" y="432" fill="#d96cff" font-weight="700">  Environment</text>
+      <text x="22" y="449" fill="#8b949e">    python <tspan fill="#e6edf3">3.11+</tspan>  ·  <tspan fill="#e6edf3">macOS / Linux / Windows</tspan>     runtime <tspan fill="#34d399">●</tspan> torch/onnx <tspan fill="#34d399">●</tspan> transformers <tspan fill="#34d399">●</tspan> llm sdks</text>
+      <text x="22" y="466" fill="#8b949e">    sources  Semantic Scholar · OpenAlex · Crossref · DBLP · ACL Anthology · arXiv · OpenReview</text>
     </g>
   </g>
 </svg>

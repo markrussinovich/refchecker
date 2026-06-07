@@ -80,6 +80,7 @@ function SentenceList({ sentences, accent }) {
 
 export default function AIDetectionVisuals({ detection }) {
   const [tab, setTab] = useState('ai') // 'ai' | 'human'
+  const [showSentences, setShowSentences] = useState(false) // collapsed by default
   const dist = detection?.probability_distribution
   const pages = detection?.per_page_scores || []
   const topAi = detection?.top_ai_sentences || []
@@ -124,9 +125,25 @@ export default function AIDetectionVisuals({ detection }) {
         </div>
       )}
 
-      {/* Top AI / Human sentences */}
+      {/* Top AI / Human sentences — collapsible (off by default to reduce clutter) */}
       {(topAi.length > 0 || topHuman.length > 0) && (
         <div>
+          <button
+            type="button"
+            onClick={() => setShowSentences(s => !s)}
+            aria-expanded={showSentences}
+            className="flex items-center gap-1.5 text-xs font-medium mb-2"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transform: showSentences ? 'none' : 'rotate(-90deg)', transition: 'transform 160ms ease' }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+            Top AI / Human sentences
+            <span style={{ color: 'var(--color-text-muted)' }}>({topAi.length + topHuman.length})</span>
+          </button>
+          {showSentences && (
+          <>
           <div className="flex items-center gap-1.5 mb-2">
             <button type="button" onClick={() => setTab('ai')}
               className="text-xs px-2.5 py-1 rounded-full border transition-colors"
@@ -148,6 +165,8 @@ export default function AIDetectionVisuals({ detection }) {
           {tab === 'ai'
             ? <SentenceList sentences={topAi} accent={SEG.AI} />
             : <SentenceList sentences={topHuman} accent={SEG.Human} />}
+          </>
+          )}
         </div>
       )}
     </div>

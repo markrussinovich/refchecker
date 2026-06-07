@@ -56,6 +56,7 @@ const ABSTAIN_REASONS = {
 
 export default function AIDetectionPanel({ detection, checkId }) {
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [focusIdx, setFocusIdx] = useState(null)
   if (!detection) return null
@@ -77,8 +78,22 @@ export default function AIDetectionPanel({ detection, checkId }) {
     >
       <div className="flex items-center justify-between gap-2 px-3 py-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setCollapsed(c => !c)}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expand AI-text detection' : 'Collapse AI-text detection'}
+            className="p-0.5 -ml-1 rounded hover:bg-[var(--color-bg-tertiary)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 160ms ease' }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
           <span
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold cursor-pointer"
+            onClick={() => setCollapsed(c => !c)}
             style={{ backgroundColor: style.bg, color: style.fg }}
           >
             <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: style.dot }} />
@@ -96,7 +111,7 @@ export default function AIDetectionPanel({ detection, checkId }) {
             {detection.model_version ? ` · ${detection.model_version}` : ''}
           </span>
         </div>
-        {spans.length > 0 && !isAbstain && (
+        {spans.length > 0 && !isAbstain && !collapsed && (
           <div className="flex items-center gap-3">
             {checkId != null && (
               <button
@@ -135,6 +150,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
         />
       )}
 
+      {!collapsed && (
+      <>
       <div className="px-3 pb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         {isAbstain ? (reason || detection.summary) : detection.summary}
         {detection.abstain_detail && (
@@ -199,6 +216,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
             )
           })}
         </div>
+      )}
+      </>
       )}
 
       {/* Permanent, non-dismissable honesty disclaimer + model attribution. */}
