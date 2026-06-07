@@ -33,6 +33,29 @@ export function ZoomControls({ zoom, onZoomIn, onZoomOut, onReset, min = 0.5, ma
   )
 }
 
+export function VerticalZoomControls({ zoom, onZoomIn, onZoomOut, onReset, min = 0.5, max = 3, dark = false }) {
+  const fg = dark ? '#fff' : 'var(--color-text-primary)'
+  const border = dark ? 'rgba(255,255,255,0.25)' : 'var(--color-border)'
+  const bg = dark ? 'rgba(255,255,255,0.12)' : 'var(--color-bg-secondary)'
+  const btn = { ...iconBtn, width: 34, height: 34, color: fg, background: bg, border: `1px solid ${border}` }
+  return (
+    <div className="flex flex-col items-stretch gap-1" onClick={(e) => e.stopPropagation()}>
+      <button type="button" style={{ ...btn, opacity: zoom >= max ? 0.4 : 1 }}
+        disabled={zoom >= max} onClick={onZoomIn} title="Zoom in (+)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+      </button>
+      <button type="button" onClick={onReset} title="Reset zoom / fit"
+        style={{ width: 34, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: 11, color: fg, background: bg, border: `1px solid ${border}` }}>
+        {Math.round(zoom * 100)}%
+      </button>
+      <button type="button" style={{ ...btn, opacity: zoom <= min ? 0.4 : 1 }}
+        disabled={zoom <= min} onClick={onZoomOut} title="Zoom out (−)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+      </button>
+    </div>
+  )
+}
+
 export function FindBar({ value, onChange, matchCount, currentMatch, onPrev, onNext, onClose, inputRef }) {
   return (
     <div className="flex items-center gap-1 px-1.5 py-1 rounded-md"

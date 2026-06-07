@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { exportCheckHtml, publishCheck } from '../../utils/api'
-import { recordResultVideo } from '../../utils/resultVideo'
+import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 
@@ -52,27 +52,14 @@ export default function ShareModal({ checkId, title, onClose }) {
 
   const handleDownloadHtml = async () => {
     setBusy('html'); setError('')
+    // Keep the build animation on screen for a beat even when the export is
+    // instant, so the "generating report" moment reads intentionally.
+    const minShow = new Promise((r) => setTimeout(r, 2600))
     try {
-      const res = await exportCheckHtml(checkId)
+      const [res] = await Promise.all([exportCheckHtml(checkId), minShow])
       downloadBlob(res.data, `${safeName(title)}.html`)
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Export failed')
-    } finally { setBusy(null) }
-  }
-
-  const handleVideo = async () => {
-    setBusy('video'); setError('')
-    try {
-      const blob = await recordResultVideo({
-        title,
-        stats: summary.stats,
-        aiBand: summary.ai?.band,
-        aiScore: summary.ai?.overall_score,
-      })
-      if (!blob) { setError('Video recording is not supported in this environment.'); return }
-      downloadBlob(blob, `${safeName(title)}.webm`)
-    } catch (e) {
-      setError(e?.message || 'Video export failed')
     } finally { setBusy(null) }
   }
 
@@ -125,6 +112,21 @@ export default function ShareModal({ checkId, title, onClose }) {
             </ul>
           </div>
 
+          {/* Live results animation while the report is being generated. */}
+          {busy === 'html' && (
+            <div>
+              <ShareAnimationCanvas
+                title={title}
+                stats={summary.stats}
+                aiBand={summary.ai?.band}
+                aiScore={summary.ai?.overall_score}
+              />
+              <div className="text-xs mt-1.5 text-center" style={{ color: 'var(--color-text-muted)' }}>
+                Building your shareable report…
+              </div>
+            </div>
+          )}
+
           {/* Export actions */}
           <div className="flex gap-2 flex-wrap">
             <button type="button" onClick={handleDownloadHtml} disabled={busy === 'html'}
@@ -132,12 +134,6 @@ export default function ShareModal({ checkId, title, onClose }) {
               style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', opacity: busy === 'html' ? 0.6 : 1 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               {busy === 'html' ? 'Preparing…' : 'Download HTML'}
-            </button>
-            <button type="button" onClick={handleVideo} disabled={busy === 'video'}
-              className="px-3 py-2 rounded-md text-sm inline-flex items-center gap-1.5 border"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: busy === 'video' ? 0.6 : 1 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
-              {busy === 'video' ? 'Recording…' : 'Download video'}
             </button>
             <button type="button" onClick={() => setPublishOpen((v) => !v)}
               className="px-3 py-2 rounded-md text-sm inline-flex items-center gap-1.5 border"

@@ -136,6 +136,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 
 <br>
 
+- **v0.8.1** — Fixes: **Share → Download HTML** now produces a complete report (was 500 / empty references); **AI detection no longer skipped** for some papers in bulk; author-matching tolerates **surname typos** (`Guruprasad`↔`Guruprashad`) and a **small omission** in an otherwise-correct author list; the **session token/$ meter** no longer resets mid-run. UX: PDF viewer **zoom moved to the side** + **⌘F / Ctrl+F find**; the Share dialog shows an **in-page results animation** while building the report (the downloadable-video button was removed) and the **Share button** is now a prominent action.
 - **v0.8.0** — **Modern CLI banner** (block-pixel `REFCHECKER` wordmark, gradient, grouped command / environment / help panels); the AI-detection panel and **Top AI / Human sentences** are now **collapsible**; refreshed README with animated SVGs.
 - **v0.7.99** — **Detection run-mode**: run **references only**, **AI detection only**, or **both**. In-app **citation** of the local detection model (desklib, Hugging Face). Animated README banners.
 - **v0.7.98** — **AI-detection visualizations** (confidence donut, AI/Mixed/Human pills, page-by-page bands, Top AI/Human sentences) · **Share this document** (self-contained HTML, publish link, video) · **3D Seen-References library graph** · document-viewer **zoom + find** · richer **author hover** cards · inline-**cited ✓ badge** · title-typo & "unknown mismatch" fixes.
@@ -237,48 +238,15 @@ Running the CLI prints an environment + capabilities banner (colourised on a TTY
 plain when piped). `--help` lists the full options and examples.
 
 <p align="center">
-  <img alt="RefChecker CLI startup banner" src="assets/cli-banner.svg" width="720">
+  <img alt="RefChecker CLI startup banner" src="assets/cli-banner.svg" width="760">
 </p>
 
-<details><summary>Plain-text banner</summary>
+<p align="center">
+  <sub>The banner prints to <strong>stderr</strong> (so machine-readable stdout like <code>--report-format json</code> stays clean). <code>NO_COLOR=1</code> disables colour · <code>FORCE_COLOR=1</code> forces it.</sub>
+</p>
 
-```
-  ███  ████ ████  ███ █  █ ████  ███ █  █ ████ ███
-  █  █ █    █    █    █  █ █    █    █ █  █    █  █
-  ███  ███  ███  █    ████ ███  █    ██   ███  ███
-  █ █  █    █    █    █  █ █    █    █ █  █    █ █
-  █  █ ████ █     ███ █  █ ████  ███ █  █ ████ █  █
-
-  academic reference verification  +  AI-text detection   vX.Y.Z
-
-  academic-refchecker <input> [options]   ·   add --help for the full list
-
-  Check
-    --paper        one paper — ArXiv ID, URL, PDF, .tex, .bib, or text
-    --paper-list   many papers from a newline-delimited file
-    --openreview   fetch + scan an entire OpenReview venue
-
-  AI-text detection  · opt-in, advisory — never proof of misconduct
-    local          ● desklib DeBERTa — offline & calibrated (download in Settings)
-    llm-judge      reuse your configured LLM provider (uncalibrated)
-    external       Pangram / GPTZero — key + explicit consent
-
-  Output
-    --report-file  structured report — json · jsonl · csv · text
-    --output-file  human-readable error list
-
-  Environment
-    python 3.11+  ·  macOS / Linux / Windows
-    runtime  ● torch/onnx   ● transformers   ● llm sdks
-    sources  Semantic Scholar · OpenAlex · Crossref · DBLP · ACL Anthology · arXiv · OpenReview
-```
-
-</details>
-
-The banner goes to **stderr**, so machine-readable stdout (e.g. `--report-format json`)
-stays clean. Set `NO_COLOR=1` to disable colour, `FORCE_COLOR=1` to force it.
-
-### CLI — Single Paper
+<details>
+<summary><strong>CLI output — single-paper scan</strong> (errors, warnings, summary)</summary>
 
 ```
 📄 Processing: Attention Is All You Need
@@ -302,7 +270,10 @@ stays clean. Set `NO_COLOR=1` to disable colour, `FORCE_COLOR=1` to force it.
 ❌ Total errors: 55  ⚠️ Total warnings: 16  ❓ Unverified: 15
 ```
 
-### CLI — Hallucination Flagging
+</details>
+
+<details>
+<summary><strong>CLI output — hallucination flagging</strong></summary>
 
 ```
 [5/7] Efficient Neural Network Pruning Using Iterative Sparse Retraining
@@ -313,6 +284,10 @@ stays clean. Set `NO_COLOR=1` to disable colour, `FORCE_COLOR=1` to force it.
          academic database. The paper does not appear in ICML 2019 proceedings,
          indicating it is probably fabricated.
 ```
+
+</details>
+
+> Full CLI usage, flags, and examples are in the [CLI](#cli) section below.
 
 ---
 

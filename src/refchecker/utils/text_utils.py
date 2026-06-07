@@ -2750,6 +2750,23 @@ def surname_similarity(surname1: str, surname2: str) -> bool:
         if s1_clean in s2_clean or s2_clean in s1_clean:
             return True
 
+    # Small OCR/typo tolerance — e.g. cited 'Guruprasad' vs DB 'Guruprashad'
+    # (one extra letter) is the same person. surname_similarity is only
+    # consulted once the initials already agree, so a one-character surname
+    # slip is almost always a typo, not a different author. Kept conservative:
+    # only for surnames >= 7 chars (short names like Chen/Shen stay strict),
+    # at most 1 edit (2 for long surnames >= 20 chars).
+    longer = max(len(s1_clean), len(s2_clean))
+    if longer >= 7:
+        try:
+            from refchecker.utils.author_utils import levenshtein_distance
+            dist = levenshtein_distance(s1_clean, s2_clean)
+            allowed = 2 if longer >= 20 else 1
+            if dist <= allowed:
+                return True
+        except Exception:
+            pass
+
     return False
 
 
@@ -3725,6 +3742,37 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         
         # For all count mismatches, show the count mismatch error
         if len(cleaned_cited) < len(correct_names):
+            # Strict-subset tolerance: if the citation lists a strict subset of
+            # the real authors — every cited author matches a DISTINCT real
+            # author — and EXACTLY ONE author is omitted from an otherwise-
+            # substantial list (>= 3 cited), treat it as a match with a note
+            # rather than a hard "count mismatch" error. Cited 6 of the paper's
+            # 7 authors is a minor slip, not a wrong/fabricated reference. The
+            # bounds are deliberately tight (one missing author, >= 3 cited) so
+            # genuine omissions — two+ missing, or a lone first author standing
+            # in for a whole team — still flag.
+            if (len(correct_names) - len(cleaned_cited)) == 1 and len(cleaned_cited) >= 3:
+                _used = set()
+                _all_matched = True
+                for _c in cleaned_cited:
+                    _found = None
+                    for _i, _correct in enumerate(correct_names):
+                        if _i in _used:
+                            continue
+                        if enhanced_name_match(_correct, _c):
+                            _found = _i
+                            break
+                    if _found is None:
+                        _all_matched = False
+                        break
+                    _used.add(_found)
+                if _all_matched:
+                    _omitted = len(correct_names) - len(cleaned_cited)
+                    return True, (
+                        f"Authors match (citation omitted {_omitted} author"
+                        f"{'s' if _omitted != 1 else ''}; all {len(cleaned_cited)} "
+                        f"cited authors verified against the {len(correct_names)} on record)"
+                    )
             from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)

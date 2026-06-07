@@ -4,7 +4,7 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
-import { ZoomControls } from '../common/ViewerControls'
+import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import ShareModal from '../Modals/ShareModal'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
@@ -26,6 +26,12 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
   const [pageCount, setPageCount] = useState(null)
   const [activePage, setActivePage] = useState(0)
   const [zoom, setZoom] = useState(1)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [matches, setMatches] = useState([])     // [{page}], page 0-indexed
+  const [currentMatch, setCurrentMatch] = useState(0)
+  const docTextRef = useRef('')                  // extracted body text (for find)
+  const findInputRef = useRef(null)
   const scrollRef = useRef(null)
   const pageRefs = useRef([])
 
@@ -59,6 +65,38 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     return () => { cancelled = true }
   }, [checkId])
 
+  // Fetch the extracted body text once so Find can locate words. The pages are
+  // rasterized images (no text layer), so we search the extracted text and jump
+  // to the estimated page rather than highlight on the image.
+  useEffect(() => {
+    let alive = true
+    docTextRef.current = ''
+    if (!checkId || checkId === -1) return undefined
+    fetch(`${API_BASE}/api/paper-text/${checkId}`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d && d.available !== false) docTextRef.current = d.text || '' })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [checkId])
+
+  // Recompute matches when the query changes. Estimate each match's page from
+  // its character offset (chars are roughly evenly distributed across pages).
+  useEffect(() => {
+    const q = (findQuery || '').trim().toLowerCase()
+    const text = docTextRef.current
+    if (q.length < 2 || !text) { setMatches([]); setCurrentMatch(0); return }
+    const lower = text.toLowerCase()
+    const pages = Math.max(1, pageCount || 1)
+    const out = []
+    let i = 0
+    while ((i = lower.indexOf(q, i)) !== -1 && out.length < 2000) {
+      out.push({ page: Math.min(pages - 1, Math.floor((i / lower.length) * pages)) })
+      i += q.length
+    }
+    setMatches(out)
+    setCurrentMatch(0)
+  }, [findQuery, pageCount])
+
   // Track which page is centered in the viewport so the "Page N / total"
   // chip updates as the user scrolls. Uses IntersectionObserver for
   // O(1) per scroll-tick rather than scroll-position math.
@@ -86,12 +124,21 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const gotoFind = (dir) => {
+    if (!matches.length) return
+    const next = (currentMatch + dir + matches.length) % matches.length
+    setCurrentMatch(next)
+    jumpToPage(matches[next].page)
+  }
+  const openFind = () => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 0) }
+
   // Close on Esc — the parent already wires this for the legacy single
   // image case, but the multi-page list is its own component so it
   // needs its own listener.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(); return }
+      if (e.key === 'Escape') { if (findOpen) { setFindOpen(false); setFindQuery('') } else onClose() }
       else if (e.key === '+' || e.key === '=') { zoomIn() }
       else if (e.key === '-' || e.key === '_') { zoomOut() }
       else if (e.key === '0') { setZoom(1) }
@@ -103,7 +150,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activePage, pageCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activePage, pageCount, findOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const multiPage = pageCount && pageCount > 1
 
@@ -158,13 +205,13 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
         </div>
       )}
 
-      {/* Zoom controls (bottom-center) */}
+      {/* Zoom controls — vertical, on the right edge (out of the way). */}
       <div
-        className="absolute bottom-5 left-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full"
-        style={{ transform: 'translateX(-50%)', background: 'rgba(255,255,255,0.12)' }}
+        className="absolute right-4 top-1/2 z-20 flex flex-col gap-2 p-1.5 rounded-xl"
+        style={{ transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.10)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <ZoomControls
+        <VerticalZoomControls
           zoom={zoom}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
@@ -174,6 +221,34 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
           dark
         />
       </div>
+
+      {/* Find bar (top-center) — searches the extracted text and jumps to the
+          estimated page (images have no text layer, so no in-image highlight). */}
+      {findOpen ? (
+        <div className="absolute top-4 left-1/2 z-30" style={{ transform: 'translateX(-50%)' }} onClick={(e) => e.stopPropagation()}>
+          <FindBar
+            value={findQuery}
+            onChange={setFindQuery}
+            matchCount={matches.length}
+            currentMatch={currentMatch}
+            onPrev={() => gotoFind(-1)}
+            onNext={() => gotoFind(1)}
+            onClose={() => { setFindOpen(false); setFindQuery('') }}
+            inputRef={findInputRef}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); openFind() }}
+          className="absolute top-4 right-20 z-20 px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5"
+          style={{ background: 'rgba(255,255,255,0.12)' }}
+          title="Find in document (⌘F / Ctrl+F)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+          Find
+        </button>
+      )}
 
       {/* Pages */}
       <div
@@ -1082,15 +1157,15 @@ export default function StatusSection() {
             <button
               type="button"
               onClick={() => setShowShare(true)}
-              className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
-              style={{ border: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
-              title="Share or export these results (HTML, link, or video)"
+              className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
+              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
+              title="Share or export these results — HTML report or a public link"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
                 <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
               </svg>
-              Share
+              Share results
             </button>
           )}
           {/* Hide source info for pasted text since it shows the file path or text content */}

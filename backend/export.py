@@ -12,6 +12,7 @@ anything heavy into the PyInstaller sidecar.
 from __future__ import annotations
 
 import html
+import json
 from typing import Any, Dict, List, Optional
 
 _STATUS_COLOR = {
@@ -151,11 +152,41 @@ def _ref_row(ref: Dict[str, Any]) -> str:
       </li>"""
 
 
+def _as_list(v: Any) -> List[Dict[str, Any]]:
+    """Coerce a references value into a list of dicts, tolerating a JSON string."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        try:
+            v = json.loads(v) if v.strip() else []
+        except Exception:
+            return []
+    if not isinstance(v, list):
+        return []
+    return [r for r in v if isinstance(r, dict)]
+
+
+def _as_dict(v: Any):
+    """Coerce an ai_detection value into a dict or None, tolerating a JSON string."""
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            d = json.loads(v)
+            return d if isinstance(d, dict) else None
+        except Exception:
+            return None
+    return None
+
+
 def serialize_check_to_html(check: Dict[str, Any]) -> str:
     """Render a check dict (as returned by get_check_by_id) into standalone HTML."""
     title = check.get("paper_title") or check.get("custom_label") or "RefChecker results"
-    refs: List[Dict[str, Any]] = check.get("references") or []
-    ai = check.get("ai_detection") or None
+    # get_check_by_id parses the persisted references under the "results" key;
+    # older/alternate paths may use "references". Accept either, and tolerate a
+    # raw JSON string or stray non-dict entries so a single odd row can't 500.
+    refs: List[Dict[str, Any]] = _as_list(check.get("results")) or _as_list(check.get("references"))
+    ai = _as_dict(check.get("ai_detection"))
     ts = check.get("timestamp") or ""
 
     n = len(refs)

@@ -1817,13 +1817,14 @@ class ProgressRefChecker:
         ai_detection_task = None
 
         try:
-            # Reset per-check counters so the UI token meter reflects what
-            # THIS check spent, not lifetime totals across the session.
-            try:
-                from . import usage_tracker as _usage
-                _usage.reset_usage()
-            except Exception as _e:
-                logger.debug("Could not reset usage tracker: %s", _e)
+            # NOTE: do NOT reset the process-wide backend.usage_tracker here.
+            # That tracker holds the LIFETIME (session) token/$ totals shown on
+            # the cumulative meter; the per-CHECK badge is already reset above
+            # via usage_tracker.reset(self.check_id). Calling reset_usage() at
+            # every check start wiped the session totals on each run and — in a
+            # concurrent batch — let each child clear the shared totals, making
+            # the lifetime meter unreliable. The session meter is only cleared
+            # by the explicit "reset meter" action, never per check.
             self._global_cache_writes = 0
 
             # Step 1: Get paper content
@@ -2503,11 +2504,15 @@ class ProgressRefChecker:
                 # references were found — a bibliography-less manuscript with
                 # real prose is exactly the case the feature is wanted for.
                 # paper_text is live here; it is dropped from the return dict.
-                try:
-                    no_ref_detection = await self._run_ai_detection(paper_text, paper_title)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("AI detection (no-refs path) failed (non-fatal): %s", e)
-                    no_ref_detection = None
+                # Explicit gate (mirrors the with-references path) so the intent
+                # is clear; _run_ai_detection also self-gates internally.
+                no_ref_detection = None
+                if self.ai_detection_enabled and self.detection_mode != "references":
+                    try:
+                        no_ref_detection = await self._run_ai_detection(paper_text, paper_title)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("AI detection (no-refs path) failed (non-fatal): %s", e)
+                        no_ref_detection = None
                 await self.emit_progress("completed", {
                     "total_refs": 0,
                     "errors_count": 0,
@@ -2865,6 +2870,13 @@ class ProgressRefChecker:
             logger.debug("ai_detection phase emit skipped: %s", e)
 
         try:
+            # The local engine serializes inference behind a process-wide lock,
+            # so in a BULK run every child's detection queues on the same lock.
+            # A tight 150s budget meant the later children in a large batch
+            # timed out before their turn — surfacing as "AI detection didn't
+            # load for some articles". Give serialized batch inference real
+            # headroom (it's best-effort and runs concurrently with reference
+            # checking, so it never blocks the reference results from streaming).
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     run_detection,
@@ -2874,7 +2886,7 @@ class ProgressRefChecker:
                     check_id=self.check_id,
                     **opts,
                 ),
-                timeout=150,
+                timeout=480,
             )
             payload = result.to_dict()
         except asyncio.TimeoutError:
