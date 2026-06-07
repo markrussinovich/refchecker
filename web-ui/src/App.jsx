@@ -9,6 +9,7 @@ import UserMenu from './components/Auth/UserMenu'
 import { logger } from './utils/logger'
 import { useAuthStore } from './stores/useAuthStore'
 import { isTauri, openExternal } from './utils/tauriBridge'
+import { useStyleStore } from './stores/useStyleStore'
 
 const UPSTREAM_GITHUB_URL = 'https://github.com/markrussinovich/refchecker'
 import { useHistoryStore } from './stores/useHistoryStore'
@@ -21,11 +22,18 @@ function App() {
 
   // Auth state
   const { user, authRequired, isLoading: authLoading, init: initAuth } = useAuthStore()
+  const loadStylePreferences = useStyleStore(s => s.loadPreferences)
 
   // Initialise auth once on mount
   useEffect(() => {
     initAuth()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (authLoading) return
+    if (authRequired && !user) return
+    loadStylePreferences({ seedFromLocal: !authRequired })
+  }, [authLoading, authRequired, user, loadStylePreferences])
 
   useEffect(() => {
     logger.debug('App', `Theme changed to: ${theme}`)

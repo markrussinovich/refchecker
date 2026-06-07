@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -4038,6 +4039,73 @@ async def delete_paperclip_key(current_user: UserInfo = Depends(require_user)):
 
 class SettingUpdate(BaseModel):
     value: str
+
+
+class UserPreferencesUpdate(BaseModel):
+    citation_format: Optional[str] = None
+    citation_style_options: Optional[Dict[str, Any]] = None
+
+
+CITATION_FORMATS = {
+    "bibtex",
+    "plaintext",
+    "apa",
+    "mla",
+    "chicago",
+    "ieee",
+    "vancouver",
+    "bibitem",
+}
+
+
+async def _get_user_preferences_payload(user_id: int) -> Dict[str, Any]:
+    citation_format = await db.get_user_preference(user_id, "citation_format")
+    raw_style_options = await db.get_user_preference(user_id, "citation_style_options")
+    style_options: Dict[str, Any] = {}
+    if raw_style_options:
+        try:
+            parsed = json.loads(raw_style_options)
+            if isinstance(parsed, dict):
+                style_options = parsed
+        except Exception:
+            style_options = {}
+
+    return {
+        "citation_format": citation_format or "plaintext",
+        "citation_style_options": style_options,
+        "has_citation_format": citation_format is not None,
+    }
+
+
+@app.get("/api/user/preferences")
+async def get_user_preferences(current_user: UserInfo = Depends(require_user)):
+    """Get user-scoped UI preferences."""
+    return await _get_user_preferences_payload(current_user.id)
+
+
+@app.put("/api/user/preferences")
+async def update_user_preferences(
+    update: UserPreferencesUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Update user-scoped UI preferences."""
+    if update.citation_format is not None:
+        citation_format = update.citation_format.strip()
+        if not (
+            citation_format in CITATION_FORMATS
+            or citation_format.startswith("custom:")
+        ):
+            raise HTTPException(status_code=400, detail="Unknown citation format")
+        await db.set_user_preference(current_user.id, "citation_format", citation_format)
+
+    if update.citation_style_options is not None:
+        await db.set_user_preference(
+            current_user.id,
+            "citation_style_options",
+            json.dumps(update.citation_style_options),
+        )
+
+    return await _get_user_preferences_payload(current_user.id)
 
 
 @app.get("/api/settings")
