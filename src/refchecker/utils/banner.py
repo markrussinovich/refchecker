@@ -13,21 +13,24 @@ import platform
 import sys
 import shutil
 
-# ── Block-pixel font (5 rows tall, 4 cols wide per glyph) ──────────────────
+# ── Block-pixel font (5 rows tall, 5 cols wide per glyph) ──────────────────
+# Wider glyphs with clear internal counters so each letter is unmistakable at a
+# glance (the older 4-wide forms ran together under the gradient).
 _B = "█"
 _GLYPHS = {
-    "R": ["███ ", "█  █", "███ ", "█ █ ", "█  █"],
-    "E": ["████", "█   ", "███ ", "█   ", "████"],
-    "F": ["████", "█   ", "███ ", "█   ", "█   "],
-    "C": [" ███", "█   ", "█   ", "█   ", " ███"],
-    "H": ["█  █", "█  █", "████", "█  █", "█  █"],
-    "K": ["█  █", "█ █ ", "██  ", "█ █ ", "█  █"],
+    "R": ["████ ", "█   █", "████ ", "█  █ ", "█   █"],
+    "E": ["█████", "█    ", "████ ", "█    ", "█████"],
+    "F": ["█████", "█    ", "████ ", "█    ", "█    "],
+    "C": [" ████", "█    ", "█    ", "█    ", " ████"],
+    "H": ["█   █", "█   █", "█████", "█   █", "█   █"],
+    "K": ["█   █", "█  █ ", "███  ", "█  █ ", "█   █"],
 }
 _WORD = "REFCHECKER"
 
-# Plain (no-ANSI) wordmark for embedding in docs/README.
+# Plain (no-ANSI) wordmark for embedding in docs/README. Two spaces between
+# glyphs keeps adjacent letters from merging once the gradient is applied.
 PLAIN_LOGO = "\n".join(
-    " ".join(_GLYPHS[ch][row] for ch in _WORD) for row in range(5)
+    "  ".join(_GLYPHS[ch][row] for ch in _WORD) for row in range(5)
 )
 # Back-compat alias (older imports referenced LOGO).
 LOGO = "\n" + PLAIN_LOGO + "\n"
@@ -114,9 +117,10 @@ def render_banner(version: str) -> str:
     lines = []
 
     # ── Wordmark (block-pixel + gradient), or a compact title on narrow TTYs ──
-    if width >= 54:
+    # The full wordmark is ~70 cols wide; fall back to a compact title below that.
+    if width >= 72:
         for row in range(5):
-            line = " ".join(_GLYPHS[ch][row] for ch in _WORD)
+            line = "  ".join(_GLYPHS[ch][row] for ch in _WORD)
             lines.append("  " + c.rgb(_GRADIENT[row], line))
     else:
         lines.append("  " + c.bold(c.cyan("RefChecker")))
