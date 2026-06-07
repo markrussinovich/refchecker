@@ -25,7 +25,15 @@ function getConfigApiKey(keyStore, config) {
 function aiDetectionValues() {
   const s = useAiDetectionStore.getState()
   if (!s.enabled) return null
-  const out = { ai_detection_enabled: true, ai_detection_backend: s.backend }
+  // detection_mode controls whether reference checking also runs. 'both' (the
+  // default) verifies references AND detects AI text; 'ai_only' skips reference
+  // verification entirely. With AI detection disabled the backend default
+  // ('both' + ai off) is already reference-checking-only.
+  const out = {
+    ai_detection_enabled: true,
+    ai_detection_backend: s.backend,
+    detection_mode: s.detectionMode === 'ai_only' ? 'ai_only' : 'both',
+  }
   if (s.backend === 'api') {
     out.ai_detection_service = s.service
     out.ai_detection_consent = !!s.consent

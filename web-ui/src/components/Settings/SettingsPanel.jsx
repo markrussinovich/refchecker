@@ -593,6 +593,35 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           />
         </label>
 
+        {/* Run mode — what a check actually runs. Off = references only;
+            on splits into "both" or "AI text only" (skips reference checking). */}
+        {aiDetection.enabled && (
+          <div className="py-1">
+            <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Run mode</div>
+            <div className="text-xs mb-1.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+              Turn off “Detect AI-generated text” above for reference checking only.
+            </div>
+            {[
+              ['both', 'Reference check + AI detection', 'Verify the bibliography AND analyze the body text for AI-generated content.'],
+              ['ai_only', 'AI detection only', 'Skip reference extraction & verification — just analyze the body text. Faster when you only want the AI signal.'],
+            ].map(([id, label, desc]) => (
+              <label key={id} className="flex items-start gap-2 py-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="detection-run-mode"
+                  checked={(aiDetection.detectionMode || 'both') === id}
+                  onChange={() => aiDetection.setDetectionMode(id)}
+                  style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+                />
+                <span>
+                  <span style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+                  <span className="block text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{desc}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
         {/* Engine selector */}
         <div className="py-1">
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Detection engine</div>
@@ -629,6 +658,19 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                   {ms && !ms.installed && ms.deps_available && 'Not downloaded yet.'}
                   {ms && !ms.installed && !ms.deps_available &&
                     'Inference runtime not installed — install it below, or use the LLM-judge / API engine.'}
+                </div>
+                <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                  Model:{' '}
+                  <a
+                    href={`https://huggingface.co/${ms?.repo || 'desklib/ai-text-detector-v1.01'}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(`https://huggingface.co/${ms?.repo || 'desklib/ai-text-detector-v1.01'}`) } }}
+                    style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+                  >
+                    {ms?.repo || 'desklib/ai-text-detector-v1.01'}
+                  </a>
+                  {' '}— DeBERTa-v3 detector by Desklib (MIT), via Hugging Face.
                 </div>
                 {aiDetection.modelError && (
                   <div className="text-xs mt-1 rounded p-2 whitespace-pre-wrap" style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{aiDetection.modelError}</div>

@@ -1,6 +1,18 @@
 import { useState } from 'react'
 import DocumentViewer from './DocumentViewer'
 import AIDetectionVisuals from './AIDetectionVisuals'
+import { isTauri, openExternal } from '../../utils/tauriBridge'
+
+// Derive a citation link for the local detection model from its version
+// string (e.g. "local:desklib/ai-text-detector-v1.01" → the HF repo).
+function deriveModelCitation(detection) {
+  const v = detection?.model_version || ''
+  const m = v.match(/^local:(.+)$/)
+  if (!m) return null
+  const repo = m[1]
+  if (!repo.includes('/')) return null
+  return { repo, url: `https://huggingface.co/${repo}` }
+}
 
 /**
  * Document-level AI-generated-text detection result for a single manuscript.
@@ -56,6 +68,7 @@ export default function AIDetectionPanel({ detection, checkId }) {
   const scorePct = typeof detection.overall_score === 'number'
     ? Math.round(detection.overall_score * 100)
     : null
+  const modelCitation = deriveModelCitation(detection)
 
   return (
     <div
@@ -188,7 +201,7 @@ export default function AIDetectionPanel({ detection, checkId }) {
         </div>
       )}
 
-      {/* Permanent, non-dismissable honesty disclaimer. */}
+      {/* Permanent, non-dismissable honesty disclaimer + model attribution. */}
       <div
         className="px-3 py-2 text-xs rounded-b-lg border-t"
         style={{
@@ -199,6 +212,21 @@ export default function AIDetectionPanel({ detection, checkId }) {
       >
         ⚠ {detection.disclaimer}
         {detection.operating_point ? ` (${detection.operating_point})` : ''}
+        {modelCitation && (
+          <div className="mt-1">
+            Local model:{' '}
+            <a
+              href={modelCitation.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(modelCitation.url) } }}
+              style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+            >
+              {modelCitation.repo}
+            </a>
+            {' '}(DeBERTa-v3, MIT) — by Desklib, via Hugging Face.
+          </div>
+        )}
       </div>
     </div>
   )

@@ -19,6 +19,10 @@ const DEFAULTS = {
   backend: 'local',     // 'local' | 'llm-judge' | 'api'
   service: 'pangram',   // for backend === 'api': 'pangram' | 'gptzero'
   consent: false,       // explicit consent required for the API backend
+  // When AI detection is enabled, run it alongside reference checking ('both')
+  // or on its own, skipping reference verification ('ai_only'). With AI
+  // detection disabled the run is reference-checking-only regardless.
+  detectionMode: 'both', // 'both' | 'ai_only'
 }
 
 function load() {
@@ -38,6 +42,7 @@ function persist(state) {
       backend: state.backend,
       service: state.service,
       consent: state.consent,
+      detectionMode: state.detectionMode,
     }))
   } catch (e) {
     logger.warn('AiDetectionStore', 'Failed to persist preferences', e)
@@ -64,6 +69,7 @@ export const useAiDetectionStore = create((set, get) => ({
   setBackend: (backend) => { set({ backend }); persist(get()) },
   setService: (service) => { set({ service }); persist(get()) },
   setConsent: (consent) => { set({ consent }); persist(get()) },
+  setDetectionMode: (detectionMode) => { set({ detectionMode }); persist(get()) },
 
   fetchModelStatus: async () => {
     try {

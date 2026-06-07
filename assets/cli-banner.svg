@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="430" viewBox="0 0 760 430" role="img" aria-label="RefChecker CLI banner">
+  <defs><clipPath id="r"><rect width="760" height="430" rx="12"/></clipPath></defs>
+  <g clip-path="url(#r)" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">
+    <rect width="760" height="430" fill="#0d1117"/>
+    <!-- window chrome -->
+    <rect width="760" height="30" fill="#161b22"/>
+    <circle cx="18" cy="15" r="5" fill="#ff5f56"/>
+    <circle cx="36" cy="15" r="5" fill="#ffbd2e"/>
+    <circle cx="54" cy="15" r="5" fill="#27c93f"/>
+    <text x="380" y="19" text-anchor="middle" fill="#8b949e" font-size="11">academic-refchecker — banner</text>
+
+    <g xml:space="preserve">
+      <!-- ASCII logo -->
+      <text x="22" y="58"  fill="#7c9cff">   ___      __ ___ _           _</text>
+      <text x="22" y="75"  fill="#7c9cff">  / _ \___ / _/ __| |_  ___ __| |_____ _ _</text>
+      <text x="22" y="92"  fill="#22d3ee"> / , _/ -_) _| (__| ' \/ -_) _| / / -_) '_|</text>
+      <text x="22" y="109" fill="#34d399">/_/|_|\__/_|  \___|_||_\___\__|_\_\___|_|</text>
+
+      <text x="22" y="140" fill="#e6edf3" font-weight="700">  RefChecker <tspan fill="#34d399">v0.7.99</tspan>  ·  academic reference verification + AI-text detection</text>
+      <text x="22" y="158" fill="#8b949e">  by Mark Russinovich &amp; agentic AI assistants</text>
+
+      <text x="22" y="188" fill="#58a6ff" font-weight="700">  Environment</text>
+      <text x="22" y="205" fill="#adbac7">    python    3.11+   ·   macOS / Linux / Windows</text>
+      <text x="22" y="222" fill="#adbac7">    runtime   <tspan fill="#34d399">●</tspan> torch/onnx   <tspan fill="#34d399">●</tspan> transformers   <tspan fill="#34d399">●</tspan> llm sdks</text>
+
+      <text x="22" y="252" fill="#58a6ff" font-weight="700">  Verification engines</text>
+      <text x="22" y="269" fill="#adbac7">    · Semantic Scholar   · OpenAlex   · Crossref   · DBLP</text>
+      <text x="22" y="286" fill="#adbac7">    · ACL Anthology      · arXiv      · OpenReview · local DBs</text>
+
+      <text x="22" y="316" fill="#58a6ff" font-weight="700">  AI-text detection <tspan fill="#8b949e" font-weight="400">(opt-in, advisory — never proof of misconduct)</tspan></text>
+      <text x="22" y="333" fill="#adbac7">    <tspan fill="#34d399">●</tspan> local (desklib DeBERTa)   · LLM-judge   · external API</text>
+
+      <text x="22" y="363" fill="#58a6ff" font-weight="700">  Quick start</text>
+      <text x="22" y="380" fill="#a5d6ff">    academic-refchecker --paper &lt;arxiv-id|url|pdf|.bib&gt;</text>
+      <text x="22" y="397" fill="#a5d6ff">    academic-refchecker --help   <tspan fill="#8b949e">· full options</tspan></text>
+    </g>
+  </g>
+</svg>

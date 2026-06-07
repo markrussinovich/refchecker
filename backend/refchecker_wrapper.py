@@ -1104,7 +1104,8 @@ class ProgressRefChecker:
                  ai_detection_api_key: Optional[str] = None,
                  ai_detection_consent: bool = False,
                  ai_detection_service: str = "pangram",
-                 paperclip_api_key: Optional[str] = None):
+                 paperclip_api_key: Optional[str] = None,
+                 detection_mode: str = "both"):
         """
         Initialize the progress-aware refchecker
 
@@ -1140,6 +1141,15 @@ class ProgressRefChecker:
         self.ai_detection_consent = bool(ai_detection_consent)
         self.ai_detection_service = (ai_detection_service or "pangram").lower()
         self.paperclip_api_key = paperclip_api_key
+        # Detection mode: "references" (verify refs only — the default behaviour),
+        # "ai_only" (skip reference extraction + verification, just analyze the
+        # body text for AI-generated content), or "both". AI-only implies the
+        # AI-detection pass, so enable it even if the flag wasn't set explicitly.
+        self.detection_mode = (detection_mode or "both").lower()
+        if self.detection_mode not in ("references", "ai_only", "both"):
+            self.detection_mode = "both"
+        if self.detection_mode == "ai_only" and not self.ai_detection_enabled:
+            self.ai_detection_enabled = True
         self.hallucination_provider = None
         self.hallucination_model = None
         self.hallucination_api_key = None
@@ -2458,6 +2468,13 @@ class ProgressRefChecker:
             except Exception as e:
                 logger.debug("LLM citation-context fallback skipped: %s", e)
 
+            # AI-only detection mode: the user asked to skip reference checking
+            # entirely. Drop any extracted references and route through the
+            # body-text-only path below — it already runs AI detection on
+            # paper_text and emits a completion with an empty reference list.
+            if self.detection_mode == "ai_only":
+                references = []
+
             if not references:
                 # Diagnostic: log every signal that helps explain why
                 # extraction returned empty. v0.7.51 added this after
@@ -2474,11 +2491,14 @@ class ProgressRefChecker:
                     bool(self.llm),
                     len(arxiv_source_references) if arxiv_source_references else None,
                 )
-                detail_msg = "No references could be extracted from this paper."
-                if not self.llm and extraction_method in ('pdf', 'file', 'text'):
-                    detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
-                elif not paper_text or len(paper_text or "") < 200:
-                    detail_msg += " The file's text content looks empty or too short."
+                if self.detection_mode == "ai_only":
+                    detail_msg = "AI-text detection only — reference checking was skipped for this run."
+                else:
+                    detail_msg = "No references could be extracted from this paper."
+                    if not self.llm and extraction_method in ('pdf', 'file', 'text'):
+                        detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
+                    elif not paper_text or len(paper_text or "") < 200:
+                        detail_msg += " The file's text content looks empty or too short."
                 # Still run AI-text detection on the body even when no
                 # references were found — a bibliography-less manuscript with
                 # real prose is exactly the case the feature is wanted for.
@@ -2553,7 +2573,9 @@ class ProgressRefChecker:
             # (never 'reference_result'), so it doesn't touch the Seen-Refs
             # upsert path or the reference accumulators; usage records are
             # tracked under a distinct flow and the tracker is lock-guarded.
-            if self.ai_detection_enabled:
+            # Gate on the mode too: "references" mode never runs AI detection,
+            # even if the flag is somehow set (contradictory input).
+            if self.ai_detection_enabled and self.detection_mode != "references":
                 ai_detection_task = asyncio.create_task(
                     self._run_ai_detection(paper_text, paper_title)
                 )

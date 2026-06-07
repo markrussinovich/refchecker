@@ -1,6 +1,10 @@
 # RefChecker
 
 <p align="center">
+  <img alt="RefChecker" src="assets/hero.svg" width="100%">
+</p>
+
+<p align="center">
   <strong>Validate reference accuracy in academic papers.</strong><br>
   Catch citation errors, fabricated references, and metadata mismatches before they reach reviewers.
 </p>
@@ -36,30 +40,82 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.19)
+### ✨ What the desktop app adds
 
-- **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
-- **Global reference library (read + write, every code path).** Every verified reference — including ones that flow through post-processing rewriters like the hallucination resolver — is now persisted to the global identity cache (DOI / arXiv / normalized title key) via a single `emit_progress` hook. Previous builds only persisted along one of six code paths, which left a lot of refs uncached. Future verifications consult the cache automatically for instant matches. New *Seen References (library)* view at the top of the main panel.
-- **Find similar papers — multi-source, actively verified.** Pulls candidates from **Semantic Scholar** (recommendations + co-citation), **OpenAlex** (DOI-resolved co-citation), the user's configured **web-search provider** (OpenAI / Anthropic / Gemini), and the user's default **LLM** ("what else should I read?"). Candidates are deduped across sources, each row shows a source badge, and any cache-miss candidate is actively re-verified through the hybrid checker before display — so you see real ✓ verified or ? unconfirmed, not just metadata.
-- **Real citation graph.** Force-directed view of the paper's references, edges drawn from the real Semantic Scholar citation graph (ref A → ref B iff A cites B), **nodes sized by in-paper in-degree** (how many other refs in the same bibliography cite each one). Double-click any node to expand one hop further — pulls in that paper's top outgoing references as new nodes.
-- **Citation context.** Each reference card shows the sentence in the paper where it's cited — now matches both numeric markers (`[12]`) AND author-year style (`(Smith et al., 2020)`, `Smith (2020)`), so APA / Chicago papers light up too. Up to two sentences per ref, captured at parse time with no extra LLM call.
-- **Live citation health badge.** Score recomputes on every edit (Apply Fix / Add / Remove). Copy as Markdown for a README badge.
-- **Add / Remove / Suggest alternative — everywhere.** Now in both the References tab and the Corrections tab. Newly-added references are re-verified live, and *Apply Fix* in the Corrections tab also re-runs the verifier on the corrected metadata so the citation-health chip moves in real time. *Suggest alternative* combines an LLM-backed "what real paper did the author probably mean?" with Semantic Scholar title-search — **and each candidate is rendered in your currently-selected citation style** (APA / IEEE / BibTeX / your custom template) with a one-click Copy button, so the replacement drops into your bibliography in the right format.
-- **Minimal Grammarly-style citation-health chip** sits inline in the Summary header — color-coded, hover for breakdown, recomputes on every edit. No copy / download clutter; the score follows you.
-- **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. now expose Max-authors, et-al threshold, and Include-URL toggles. Need a journal-specific format? *Customize style → New custom style* lets you save a template like `{authors} ({year}). {title}. {venue}. {doi}` and pick it from the dropdown forever after.
-- **Seen References — live + clearable.** The library auto-refreshes whenever a check finishes (newly-verified refs appear immediately) and a *Clear cache* button wipes the whole identity table when you need a fresh start.
-- **LLM token + cost meter.** Inline chip in the Summary header tracks total tokens and an estimated USD cost across every provider you've used (OpenAI / Anthropic / Gemini) with a per-provider breakdown on hover. Counters persist across restarts via `llm_usage.json`. Cost rates are list-price USD-per-1K-tokens, hand-curated per model.
-- **Smoother citation graph.** Labels are now hover-on-demand (one node at a time, source always labelled) so the canvas stays readable; hovered node gets a soft outline ring. Slower force-cooldown lets the network breathe.
-- **Bullet-proof external links.** *Open in browser* / GitHub / DOI / arXiv buttons now use an explicit `shell:allow-open` scope (`https://**`, `http://**`, `mailto:**`, `tel:**`) so the Tauri shell plugin actually opens them — the default scope was silently empty.
-- **Apply Fix actually moves the citation-health chip.** Accepting a correction now merges the verifier's suggested metadata back into the stored reference before re-verifying, so the ref flips to *verified* and the badge updates in real time. Apply-all-visible parallelises the re-verifies at 4 in flight.
-- **Better "Similar Papers" diagnostics.** When nothing comes back, the panel now shows which sources were tried and how many candidates each produced, and explicit hints for the common causes (rate limits, refs without DOIs, no web-search-capable LLM provider).
-- **Token meter shows per-kind breakdown + cascade savings hint.** Hover the chip for tokens grouped by call kind (extraction / hallucination / suggest-alt / web-search). When cascade saved measurable cost vs an LLM-only path, the savings are estimated and surfaced at the bottom of the tooltip.
-- **Desktop version visible in Settings.** Settings → footer now shows both the desktop bundle version (e.g. `Desktop v0.6.6`) and the underlying Python engine version separately so you can tell at a glance which build you're on.
-- **Reference-manager export (RIS).** New *Export → RIS* option produces a `.ris` file that imports directly into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — including the verifier's corrected metadata (DOI, arXiv ID, fixed authors) instead of the wrong-as-cited values. The export menu also gets a *Sort* control: citation order, alphabetical (first author), or year ascending/descending.
-- **References tab honors the citation-style picker live.** Pick APA / IEEE / BibTeX / your custom template in the References-tab header and each card renders a styled preview line above the structured metadata. Title / authors / venue rows stay below so per-field badges keep working.
-- **Tab pill counts respect Summary filters.** Click "Errors" in the Summary chips and the References tab pill drops to "3" instead of staying at the full bibliography count — so the tab header matches the in-page header.
-- **Author rendering no longer leaks `[object Object]`.** `formatAuthors` now normalises every author shape we've seen from upstream (bare strings, `{name}`, `{display_name}`, OpenAlex `{author:{display_name}}`, CSL JSON `{family, given}`, JSON-encoded arrays).
-- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
+The desktop app wraps the same engine in a native Tauri shell and layers on a full
+review workspace. **The highlights below are grouped and collapsed** — click any
+section to expand it.
+
+> **Newest in v0.7.x** — **AI-generated-text detection** with rich visualizations ·
+> **Share & export** (HTML report, public link, video) · an **Obsidian-style 3D graph**
+> of your whole reference library · a **native-feeling document viewer** with zoom + find ·
+> **richer author cards** · and a **run-mode switch** (references only / AI only / both).
+
+<details>
+<summary><strong>🤖 AI-generated-text detection</strong> — opt-in, advisory, never proof of misconduct</summary>
+
+<br>
+
+- **Three engines, your choice.** A **local calibrated model** (desklib DeBERTa-v3, MIT — runs offline after a one-time download), an **LLM-judge** that reuses your hallucination-check provider, or an **external API** (Pangram / GPTZero, key + explicit consent required).
+- **GPTZero-style visualizations.** A confidence **donut**, **AI / Mixed / Human** probability pills, a **page-by-page** likelihood breakdown, and **Top AI / Top Human** sentence lists — all descriptive of the model's windowed scores, never a probability of guilt.
+- **Flagged passages, in context.** Click any advisory passage to **see it highlighted in the document**, with zoom + find.
+- **Run mode.** Settings → *Run mode* lets you check **references only** (default), **AI text only** (skips reference verification entirely), or **both**.
+- **Honesty-first.** A permanent disclaimer, distinct *inconclusive* / *unavailable* states, and abstention on short or highly technical text. The model is cited in-app and in [Sources & credits](#sources--credits).
+
+</details>
+
+<details>
+<summary><strong>📤 Share, export & document viewing</strong></summary>
+
+<br>
+
+- **Share this document.** One click produces a **self-contained HTML report** (references + verdicts + AI-detection visuals, all inline) you can download and send anywhere.
+- **Publish a link.** Opt-in *Publish to web* pushes the report to a host (GitHub Gist → viewable link) so *anyone with the link* can view the results.
+- **Video walkthrough.** Export an in-app **animated WebM** of the verdict gauge, reference stats, and AI band — no external tools, no screen-share.
+- **Native-feeling document viewer.** The extracted body renders as a centered, serif **"page"** with flagged passages highlighted in place, plus **zoom** and an in-document **find** bar (⌘F, match navigation).
+- **PDF page viewer with zoom.** Browse the original PDF pages full-screen with +/- zoom and fit.
+- **Reference-manager export (RIS).** Imports straight into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — with the verifier's *corrected* metadata, not the wrong-as-cited values. Includes a *Sort* control (citation order / alphabetical / year).
+
+</details>
+
+<details>
+<summary><strong>🕸️ Graphs & the reference library</strong></summary>
+
+<br>
+
+- **Obsidian-style 3D library graph.** Visualize **every reference you've ever verified** as a 3D force-directed graph — node size = how many times it's been seen, edges = shared authors / venue.
+- **Real per-paper citation graph.** Force-directed view of one paper's bibliography, edges from the **real Semantic Scholar citation graph** (A → B iff A cites B), nodes sized by **in-paper in-degree**. Double-click a node to expand one hop further; toggle an **AI-likelihood ring** on the nodes.
+- **Global reference library (Seen References).** Every verified reference is persisted to a global identity cache (DOI / arXiv / normalized-title key) and consulted automatically for instant matches. Live-refreshing, searchable, and clearable.
+- **Find similar papers — multi-source, actively verified.** Candidates from **Semantic Scholar**, **OpenAlex**, your **web-search provider**, and your **default LLM**, deduped with source badges and *re-verified* before display — real ✓ verified / ? unconfirmed, not just metadata.
+
+</details>
+
+<details>
+<summary><strong>✏️ Corrections, citation styles & live health</strong></summary>
+
+<br>
+
+- **Add / Remove / Suggest alternative — everywhere.** In both the References and Corrections tabs. *Apply Fix* merges the verifier's suggested metadata and **re-verifies live**, so the ref flips to *verified* and the health chip moves in real time (apply-all parallelizes 4 in flight).
+- **Suggest alternative** combines an LLM "what real paper did they mean?" with Semantic Scholar title-search — **each candidate rendered in your selected citation style** with one-click Copy.
+- **Live citation-health chip.** A minimal Grammarly-style score in the Summary header — color-coded, hover for a breakdown, recomputes on every edit, copyable as a Markdown badge.
+- **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. expose Max-authors, et-al threshold, and Include-URL toggles; save a custom template like `{authors} ({year}). {title}. {venue}. {doi}`.
+- **Author cards on hover.** Hovering an author shows **affiliation, paper & citation counts, h-index, homepage, and recent papers** (Semantic Scholar, cached). An **inline-cited ✓ badge** marks references actually cited in the body text.
+
+</details>
+
+<details>
+<summary><strong>⚙️ Extraction, cost tracking & quality-of-life</strong></summary>
+
+<br>
+
+- **Cascade extraction (token saver).** *Reference Extraction* picks **cascade** (regex / BibTeX / GROBID first, LLM only on messy entries) or **LLM-only** — typically 60–90% fewer LLM tokens on well-formatted papers.
+- **LLM token + cost meter.** Tracks tokens and an estimated USD cost across every provider, with per-provider and per-kind breakdowns and a cascade-savings hint. Persists across restarts.
+- **Citation context.** Each card shows the sentence where the reference is cited — numeric `[12]` **and** author-year `(Smith et al., 2020)` styles, with a retry/fallback that also catches narrative & title-mention citations.
+- **Batch workspace.** Run hundreds of papers, with a batch summary view, per-paper status, expand/collapse-all, and aggregate counters.
+- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / text file — or right-click → RefChecker in Finder/Explorer — and the check starts immediately.
+- **Auto-updating, signed builds.** Native installers for macOS / Windows / Linux, signed and shipped by GitHub Actions on every release tag, with a built-in updater.
+
+</details>
 
 ---
 
@@ -139,6 +195,8 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
 | **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
 | **Corrections** | Auto-generates corrected BibTeX, plain-text, and bibitem entries for each error |
+| **Visual analysis** | **3D reference-library graph** (Obsidian-style), real per-paper **citation graph**, and a **native-feeling document viewer** with zoom + in-document find |
+| **Share & export** | **Self-contained HTML report**, **publish-to-web link** (GitHub Gist), an **animated video** walkthrough, and **RIS** export for Zotero / EndNote / Mendeley |
 | **Web UI** | Real-time progress, history sidebar, batch tracking, split extraction/hallucination LLM settings, export (Markdown/text/BibTeX), dark mode |
 | **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
 
@@ -155,6 +213,12 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 
 Running the CLI prints an environment + capabilities banner (colourised on a TTY,
 plain when piped). `--help` lists the full options and examples.
+
+<p align="center">
+  <img alt="RefChecker CLI startup banner" src="assets/cli-banner.svg" width="720">
+</p>
+
+<details><summary>Plain-text banner</summary>
 
 ```
    ___      __ ___ _           _
@@ -180,6 +244,8 @@ plain when piped). `--help` lists the full options and examples.
     academic-refchecker --paper <arxiv-id|url|pdf|.bib>
     academic-refchecker --help   · full options
 ```
+
+</details>
 
 The banner goes to **stderr**, so machine-readable stdout (e.g. `--report-format json`)
 stays clean. Set `NO_COLOR=1` to disable colour, `FORCE_COLOR=1` to force it.
@@ -324,6 +390,9 @@ academic-refchecker --openreview aistats2025 --openreview-list-only --openreview
 
 ### All CLI Options
 
+<details>
+<summary><strong>Show every flag</strong> (input, LLM, hallucination, AI detection, output, OpenReview)</summary>
+
 ```
 Input (choose one):
   --paper PAPER              ArXiv ID, URL, PDF, LaTeX, text, or BibTeX file
@@ -370,6 +439,8 @@ Output:
   --debug                    Verbose logging
 ```
 
+</details>
+
 ---
 
 ## Hallucination Detection
@@ -415,7 +486,15 @@ Hallucination assessments appear inline in CLI output, in Web UI reference cards
 
 > **Opt-in and advisory only.** AI-text detection is unreliable on academic, technical, and non-native-English writing, and on human text polished with AI. RefChecker frames every result as a low/medium/high *likelihood band* with a permanent disclaimer — **never** a binary verdict or proof of misconduct, and never a basis for an accusation, grade, or decision. Below ~300 words, or on equation/code/citation-heavy passages, it abstains (`inconclusive`).
 
-When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. If both reference checking and AI detection are on, they run **in parallel**. Results show a band + score, an optional list of advisory flagged passages, and the engine/model used.
+When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. Results include a **confidence donut**, **AI / Mixed / Human** probability pills, a **page-by-page** breakdown, **Top AI / Top Human** sentence lists, and advisory **flagged passages** you can open highlighted in the document — alongside the engine/model used and a permanent disclaimer.
+
+**Run mode.** Settings → *Run mode* controls what a check actually runs:
+
+| Mode | Reference checking | AI detection |
+|------|:---:|:---:|
+| **References only** (turn AI detection off) | ✅ | — |
+| **Reference check + AI detection** | ✅ | ✅ (runs in parallel) |
+| **AI detection only** | — (extraction & verification skipped) | ✅ |
 
 ### Detection engines (pick one in Settings)
 

@@ -957,6 +957,7 @@ class BatchUrlsRequest(BaseModel):
     ai_detection_api_key: Optional[str] = None
     ai_detection_consent: bool = False
     ai_detection_service: str = "pangram"
+    detection_mode: str = "both"
 
 
 # Create FastAPI app
@@ -1432,6 +1433,7 @@ async def start_check(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -1472,6 +1474,7 @@ async def start_check(
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
         ai_detection_consent = _form_default_value(ai_detection_consent)
         ai_detection_service = _form_default_value(ai_detection_service)
+        detection_mode = _form_default_value(detection_mode)
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             _form_default_value(semantic_scholar_api_key)
         )
@@ -1668,6 +1671,7 @@ async def start_check(
                 ai_detection_consent=ai_detection_consent,
                 ai_detection_service=ai_detection_service,
                 paperclip_api_key=paperclip_api_key,
+                detection_mode=detection_mode,
             )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
@@ -1714,6 +1718,7 @@ async def run_check(
     ai_detection_consent: bool = False,
     ai_detection_service: str = "pangram",
     paperclip_api_key: Optional[str] = None,
+    detection_mode: str = "both",
 ):
     """
     Run reference check in background and emit progress updates
@@ -1836,6 +1841,7 @@ async def run_check(
             ai_detection_consent=ai_detection_consent,
             ai_detection_service=ai_detection_service,
             paperclip_api_key=paperclip_api_key,
+            detection_mode=detection_mode,
         )
 
         # Run the check
@@ -3136,6 +3142,7 @@ async def start_batch_check(
                     ai_detection_api_key=request.ai_detection_api_key,
                     ai_detection_consent=request.ai_detection_consent,
                     ai_detection_service=request.ai_detection_service,
+                    detection_mode=getattr(request, 'detection_mode', 'both'),
                     paperclip_api_key=request.paperclip_api_key,
                 )
             )
@@ -3189,6 +3196,7 @@ async def start_batch_check_files(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -3215,6 +3223,7 @@ async def start_batch_check_files(
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
         ai_detection_consent = _form_default_value(ai_detection_consent)
         ai_detection_service = _form_default_value(ai_detection_service)
+        detection_mode = _form_default_value(detection_mode)
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -3406,6 +3415,7 @@ async def start_batch_check_files(
                     ai_detection_consent=ai_detection_consent,
                     ai_detection_service=ai_detection_service,
                     paperclip_api_key=paperclip_api_key,
+                    detection_mode=detection_mode,
                 )
             )
             active_checks[session_id] = {
