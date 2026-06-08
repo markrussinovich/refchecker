@@ -1,44 +1,238 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="780" height="486" viewBox="0 0 780 486" role="img" aria-label="RefChecker CLI banner">
-  <defs><clipPath id="r"><rect width="780" height="486" rx="12"/></clipPath></defs>
-  <g clip-path="url(#r)" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12.5">
-    <rect width="780" height="486" fill="#0d1117"/>
-    <!-- window chrome -->
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="492" viewBox="0 0 780 492" role="img" aria-label="RefChecker CLI banner">
+  <defs><clipPath id="r"><rect width="780" height="492" rx="12"/></clipPath></defs>
+  <g clip-path="url(#r)" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">
+    <rect width="780" height="492" fill="#0d1117"/>
     <rect width="780" height="30" fill="#161b22"/>
     <circle cx="18" cy="15" r="5" fill="#ff5f56"/>
     <circle cx="36" cy="15" r="5" fill="#ffbd2e"/>
     <circle cx="54" cy="15" r="5" fill="#27c93f"/>
     <text x="390" y="19" text-anchor="middle" fill="#8b949e" font-size="11">academic-refchecker</text>
-
-    <g xml:space="preserve" font-size="13">
-      <!-- REFCHECKER block wordmark, cyan→green vertical gradient -->
-      <text x="22" y="58"  fill="#22d3ee">███  ████ ████  ███ █  █ ████  ███ █  █ ████ ███ </text>
-      <text x="22" y="74"  fill="#26d2d2">█  █ █    █    █    █  █ █    █    █ █  █    █  █</text>
-      <text x="22" y="90"  fill="#2bd2bd">███  ███  ███  █    ████ ███  █    ██   ███  ███ </text>
-      <text x="22" y="106" fill="#2fd2ab">█ █  █    █    █    █  █ █    █    █ █  █    █ █ </text>
-      <text x="22" y="122" fill="#34d399">█  █ ████ █     ███ █  █ ████  ███ █  █ ████ █  █</text>
+    <!-- REFCHECKER bold pixel wordmark, cyan->green vertical gradient (matches banner.py _GLYPHS/_GRADIENT) -->
+    <g shape-rendering="crispEdges">
+      <rect x="24" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="34" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="44" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="54" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="64" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="24" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="34" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="64" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="74" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="24" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="34" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="44" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="54" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="64" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="24" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="34" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="54" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="64" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="24" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="34" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="64" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="74" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="94" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="104" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="114" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="124" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="134" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="144" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="94" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="104" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="94" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="104" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="114" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="124" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="134" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="94" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="104" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="94" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="104" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="114" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="124" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="134" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="144" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="164" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="174" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="184" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="194" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="204" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="214" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="164" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="174" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="164" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="174" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="184" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="194" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="204" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="164" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="174" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="164" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="174" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="244" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="254" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="264" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="274" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="284" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="234" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="244" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="234" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="244" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="234" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="244" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="244" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="254" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="264" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="274" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="284" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="304" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="314" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="344" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="354" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="304" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="314" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="344" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="354" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="304" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="314" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="324" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="334" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="344" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="354" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="304" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="314" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="344" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="354" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="304" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="314" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="344" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="354" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="374" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="384" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="394" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="404" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="414" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="424" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="374" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="384" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="374" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="384" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="394" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="404" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="414" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="374" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="384" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="374" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="384" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="394" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="404" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="414" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="424" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="454" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="464" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="474" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="484" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="494" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="444" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="454" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="444" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="454" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="444" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="454" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="454" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="464" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="474" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="484" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="494" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="514" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="524" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="554" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="564" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="514" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="524" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="544" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="554" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="514" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="524" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="534" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="544" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="514" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="524" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="544" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="554" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="514" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="524" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="554" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="564" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="584" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="594" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="604" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="614" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="624" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="634" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="584" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="594" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="584" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="594" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="604" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="614" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="624" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="584" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="594" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="584" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="594" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="604" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="614" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="624" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="634" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="654" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="664" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="674" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="684" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="694" y="60" width="10" height="10" fill="#22d3ee"/>
+      <rect x="654" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="664" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="694" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="704" y="70" width="10" height="10" fill="#26d3d9"/>
+      <rect x="654" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="664" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="674" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="684" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="694" y="80" width="10" height="10" fill="#2bd3c4"/>
+      <rect x="654" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="664" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="684" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="694" y="90" width="10" height="10" fill="#2fd3ae"/>
+      <rect x="654" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="664" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="694" y="100" width="10" height="10" fill="#34d399"/>
+      <rect x="704" y="100" width="10" height="10" fill="#34d399"/>
     </g>
-
-    <g xml:space="preserve">
-      <text x="22" y="152" fill="#8b949e">  academic reference verification  <tspan fill="#34d399">+</tspan>  AI-text detection   <tspan fill="#34d399">v0.8.0</tspan></text>
-      <text x="22" y="176" fill="#e6edf3" font-weight="700">  academic-refchecker <tspan fill="#8b949e" font-weight="400">&lt;input&gt; [options]</tspan>   <tspan fill="#8b949e" font-weight="400">·   add</tspan> <tspan fill="#22d3ee" font-weight="400">--help</tspan> <tspan fill="#8b949e" font-weight="400">for the full list</tspan></text>
-
-      <text x="22" y="206" fill="#d96cff" font-weight="700">  Check</text>
-      <text x="22" y="223" fill="#e6edf3">    <tspan fill="#22d3ee">--paper      </tspan> one paper — ArXiv ID, URL, PDF, .tex, .bib, or text</text>
-      <text x="22" y="240" fill="#e6edf3">    <tspan fill="#22d3ee">--paper-list </tspan> many papers from a newline-delimited file</text>
-      <text x="22" y="257" fill="#e6edf3">    <tspan fill="#22d3ee">--openreview </tspan> fetch + scan an entire OpenReview venue</text>
-
-      <text x="22" y="287" fill="#d96cff" font-weight="700">  AI-text detection  <tspan fill="#8b949e" font-weight="400">· opt-in, advisory — never proof of misconduct</tspan></text>
-      <text x="22" y="304" fill="#e6edf3">    <tspan fill="#22d3ee">local        </tspan> <tspan fill="#34d399">●</tspan> desklib DeBERTa — offline &amp; calibrated</text>
-      <text x="22" y="321" fill="#e6edf3">    <tspan fill="#22d3ee">llm-judge    </tspan> reuse your configured LLM provider (uncalibrated)</text>
-      <text x="22" y="338" fill="#e6edf3">    <tspan fill="#22d3ee">external     </tspan> Pangram / GPTZero — key + explicit consent</text>
-
-      <text x="22" y="368" fill="#d96cff" font-weight="700">  Output</text>
-      <text x="22" y="385" fill="#e6edf3">    <tspan fill="#22d3ee">--report-file</tspan> structured report — json · jsonl · csv · text</text>
-      <text x="22" y="402" fill="#e6edf3">    <tspan fill="#22d3ee">--output-file</tspan> human-readable error list</text>
-
-      <text x="22" y="432" fill="#d96cff" font-weight="700">  Environment</text>
-      <text x="22" y="449" fill="#8b949e">    python <tspan fill="#e6edf3">3.11+</tspan>  ·  <tspan fill="#e6edf3">macOS / Linux / Windows</tspan>     runtime <tspan fill="#34d399">●</tspan> torch/onnx <tspan fill="#34d399">●</tspan> transformers <tspan fill="#34d399">●</tspan> llm sdks</text>
-      <text x="22" y="466" fill="#8b949e">    sources  Semantic Scholar · OpenAlex · Crossref · DBLP · ACL Anthology · arXiv · OpenReview</text>
-    </g>
+      <text x="24" y="150" fill="#8b949e">academic reference verification  —  AI-text detection</text>
+      <text x="756" y="150" fill="#34d399" text-anchor="end" font-weight="700">v3.1.0</text>
+      <text x="24" y="174" fill="#e6edf3">academic-refchecker &lt;input&gt; [options]   ·   add --help for the full list</text>
+      <text x="24" y="204" fill="#d96cff" font-weight="700">Check</text>
+      <text x="44" y="222" fill="#22d3ee">--paper</text>
+      <text x="184" y="222" fill="#e6edf3">one paper — ArXiv ID, URL, PDF, .tex, .bib, or text</text>
+      <text x="44" y="239" fill="#22d3ee">--paper-list</text>
+      <text x="184" y="239" fill="#e6edf3">many papers from a newline-delimited file</text>
+      <text x="44" y="256" fill="#22d3ee">--openreview</text>
+      <text x="184" y="256" fill="#e6edf3">fetch + scan an entire OpenReview venue</text>
+      <text x="24" y="286" fill="#d96cff" font-weight="700">AI-text detection</text>
+      <text x="220" y="286" fill="#8b949e">· opt-in, advisory — never proof of misconduct</text>
+      <text x="44" y="304" fill="#22d3ee">local</text>
+      <text x="184" y="304" fill="#e6edf3">desklib DeBERTa — offline &amp; calibrated (download in Settings)</text>
+      <text x="44" y="321" fill="#22d3ee">llm-judge</text>
+      <text x="184" y="321" fill="#e6edf3">reuse your configured LLM provider (uncalibrated)</text>
+      <text x="44" y="338" fill="#22d3ee">external</text>
+      <text x="184" y="338" fill="#e6edf3">Pangram / GPTZero — key + explicit consent</text>
+      <text x="24" y="368" fill="#d96cff" font-weight="700">Output</text>
+      <text x="44" y="386" fill="#22d3ee">--report-file</text>
+      <text x="184" y="386" fill="#e6edf3">structured report — json · jsonl · csv · text</text>
+      <text x="44" y="403" fill="#22d3ee">--output-file</text>
+      <text x="184" y="403" fill="#e6edf3">human-readable error list</text>
+      <text x="24" y="433" fill="#d96cff" font-weight="700">Environment</text>
+      <text x="24" y="451" fill="#8b949e">python 3.11+  ·  macOS / Linux / Windows  ·  runtime ● torch/onnx ● transformers ● llm sdks</text>
+      <text x="24" y="468" fill="#8b949e">sources  Semantic Scholar · OpenAlex · Crossref · DBLP · ACL Anthology · arXiv · OpenReview</text>
   </g>
 </svg>

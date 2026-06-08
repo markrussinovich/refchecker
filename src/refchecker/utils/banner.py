@@ -46,13 +46,24 @@ _GRADIENT = [
 ]
 
 
-def _supports_color() -> bool:
+def _supports_color(stream=None) -> bool:
+    # NO_COLOR always wins (https://no-color.org/).
     if os.environ.get("NO_COLOR"):
         return False
-    if os.environ.get("FORCE_COLOR"):
+    # FORCE_COLOR overrides TTY detection (CI, demos, recordings). Follow the
+    # Node convention where a falsey value (0/false/no/off) means *disable*.
+    fc = os.environ.get("FORCE_COLOR")
+    if fc is not None:
+        return fc.strip().lower() not in ("0", "false", "no", "off", "")
+    if os.environ.get("CLICOLOR_FORCE") == "1":
         return True
+    # Probe the stream we ACTUALLY write to (stderr by default) — not stdout —
+    # so the banner stays colourised even when stdout is redirected/piped
+    # (e.g. `academic-refchecker --report-format json > out.json`), which is the
+    # common reason the banner used to render as plain white blocks.
+    s = stream if stream is not None else sys.stderr
     try:
-        return sys.stdout.isatty()
+        return bool(s.isatty())
     except Exception:  # noqa: BLE001
         return False
 
@@ -103,8 +114,8 @@ def _section(c: _C, title: str, sub: str = "") -> str:
     return "  " + head
 
 
-def render_banner(version: str) -> str:
-    c = _C(_supports_color())
+def render_banner(version: str, stream=None) -> str:
+    c = _C(_supports_color(stream if stream is not None else sys.stderr))
     width = shutil.get_terminal_size((80, 24)).columns
 
     # Capability probes (cheap — no heavy imports).
@@ -181,7 +192,7 @@ def print_banner(version: str, stream=None) -> None:
     machine-readable stdout output like --report-format json)."""
     out = stream if stream is not None else sys.stderr
     try:
-        print(render_banner(version), file=out)
+        print(render_banner(version, out), file=out)
     except Exception:  # noqa: BLE001
         # Never let a cosmetic banner break the CLI.
         try:

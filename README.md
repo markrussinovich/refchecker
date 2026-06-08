@@ -136,6 +136,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 
 <br>
 
+- **v0.9.12** — The CLI startup banner is now **fully legible and colored everywhere** — the `REFCHECKER` wordmark renders as renderer-independent pixels (no font dependency, no text overlap), and colour now follows the **actual output stream (stderr)**, so the gradient stays even when stdout is piped (e.g. `--report-format json > out.json`).
 - **v0.9.11** — A **bolder, more legible CLI banner** — the `REFCHECKER` wordmark now uses solid 2-cell-wide strokes instead of thin scattered blocks.
 - **v0.9.10** — Fix: the Chat/Summarize **abstract-fallback** crashed on Python 3.11 (a mid-pattern inline-regex flag — `re.error: global flags not at the start`); CI is green across the full Python-3.11 suite again.
 - **v0.9.9** — Hardening: the **Published** badge now renders the backend's real human date (and a **Topics** badge from OpenAlex fields-of-study + a live **Checking/Pending** status pill); **Chat & Summarize** shows an honest "configure a model in Settings" empty-state; **Teams** gains remove-member / leave-team and a hardened presence roster. +26 frontend + several backend tests.
