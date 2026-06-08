@@ -256,7 +256,22 @@ jobs:
             EXTRA_CONFIG='--config {"bundle":{"createUpdaterArtifacts":false}}'
             echo "Updater signing disabled this run — passing --config to skip updater artifacts."
           fi
-          npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG
+          # Retry the bundle: the Tauri bundler downloads wix (Windows) /
+          # linuxdeploy + AppImage (Linux) tools from GitHub's release CDN,
+          # which returns transient `http status: 504`s (blocked v0.9.4/5/7).
+          # cargo caches the compile, so a retry only re-attempts the cheap
+          # bundling/download step.
+          n=0
+          until [ "$n" -ge 3 ]; do
+            npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG && break
+            n=$((n+1))
+            echo "::warning::tauri build attempt $n failed (likely a transient tool-download 504); retrying in 45s…"
+            sleep 45
+          done
+          if [ "$n" -ge 3 ]; then
+            echo "::error::tauri build failed after 3 attempts"
+            exit 1
+          fi
 
       - name: Collect artifacts
         id: collect
