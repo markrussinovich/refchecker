@@ -25,6 +25,11 @@ function Pill({ onClick, href, title, color, children }) {
         onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(href) } }}>{children}</a>
     )
   }
+  // Info-only pills (Published, Topics, Preprint, status) have no action — render
+  // them as a plain span so they don't look/behave like a clickable button.
+  if (!onClick) {
+    return <span title={title} style={style}>{children}</span>
+  }
   return <button type="button" onClick={onClick} title={title} style={style}>{children}</button>
 }
 

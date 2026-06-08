@@ -35,7 +35,6 @@ export default function MainPanel() {
   const mainRef = useRef(null)
   const contentRef = useRef(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
-  const [buttonLeft, setButtonLeft] = useState(null)
   const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
   const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
   const [showExplore, setShowExplore] = useState(false) // ResearchRabbit-style fullscreen Explore graph overlay (#68)
@@ -83,30 +82,6 @@ export default function MainPanel() {
     return () => mainElement.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Calculate button position based on content container
-  useEffect(() => {
-    const updateButtonPosition = () => {
-      if (contentRef.current) {
-        const rect = contentRef.current.getBoundingClientRect()
-        const margin = 12
-        const buttonWidth = 44
-        const viewportWidth = window.innerWidth
-        // Preferred spot: just to the right of the content column
-        let proposedLeft = rect.right + margin
-        // Keep the button visible on narrow viewports by clamping within the viewport
-        const maxLeft = viewportWidth - buttonWidth - margin
-        if (proposedLeft > maxLeft) {
-          // If there's no room outside, overlay inside the content's right edge
-          proposedLeft = Math.max(rect.right - buttonWidth - margin, margin)
-        }
-        setButtonLeft(proposedLeft)
-      }
-    }
-
-    updateButtonPosition()
-    window.addEventListener('resize', updateButtonPosition)
-    return () => window.removeEventListener('resize', updateButtonPosition)
-  }, [])
 
   // Scroll to top handler
   const scrollToTop = useCallback(() => {
@@ -538,16 +513,18 @@ export default function MainPanel() {
         />
       )}
 
-      {/* Scroll to top button - fixed position to the right of content column */}
-      {showScrollTop && buttonLeft && (
+      {/* Scroll to top button — pinned to the viewport's bottom-right corner so
+          it never overlaps full-width content (e.g. the "Find similar papers"
+          button). Higher z so it floats above panels. */}
+      {showScrollTop && (
         <button
           onClick={scrollToTop}
-          className="fixed z-40 p-2 rounded-full shadow-lg transition-all duration-200 hover:scale-110 opacity-50 hover:opacity-100"
+          className="fixed z-50 p-2 rounded-full shadow-lg transition-all duration-200 hover:scale-110 opacity-60 hover:opacity-100"
           style={{
             backgroundColor: 'var(--color-bg-tertiary)',
             color: 'var(--color-text-secondary)',
             border: '1px solid var(--color-border)',
-            left: `${buttonLeft}px`,
+            right: '1.5rem',
             bottom: '2rem',
           }}
           title="Scroll to top"

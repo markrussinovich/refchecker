@@ -1548,11 +1548,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
         return (
         <div
           role="tooltip"
-          className="rounded-xl text-xs overflow-hidden"
+          className="rounded-xl text-xs"
           style={{
             position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 60,
             minWidth: 300, maxWidth: 380,
-            maxHeight: '70vh', overflowY: 'auto',
+            // Scroll the popover body when the author has lots of recent papers
+            // (the `overflow-hidden` class used to clip it instead of scrolling).
+            maxHeight: '70vh', overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
