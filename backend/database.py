@@ -1875,6 +1875,27 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
 
+    async def remove_team_member(self, team_id: int, user_id: int) -> bool:
+        """Remove a user from a team. Returns True if a membership row was deleted."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
+                (team_id, user_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def count_team_members(self, team_id: int) -> int:
+        """Return the number of members in a team."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM team_members WHERE team_id = ?",
+                (team_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return int(row[0]) if row else 0
+
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
         """Get an app setting value."""

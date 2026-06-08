@@ -956,7 +956,6 @@ class TeamMemberAdd(BaseModel):
     email: Optional[str] = None
     user_id: Optional[int] = None
     role: str = "member"
-    llm_config_id: Optional[LLMConfigId] = None
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
     hallucination_config_id: Optional[LLMConfigId] = None
@@ -1420,6 +1419,49 @@ async def add_team_member(
     role = (payload.role or "member").strip() or "member"
     added = await db.add_team_member(team_id, target["id"], role)
     return {"added": added, "members": await db.get_team_members(team_id)}
+
+
+@app.delete("/api/teams/{team_id}/members/{user_id}")
+async def remove_team_member(
+    team_id: int,
+    user_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Remove a member from a team. Only the team owner may remove members, and
+    the owner cannot remove themselves this way (they must transfer or delete the
+    team / use the leave endpoint, which also forbids it)."""
+    team = await db.get_team(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the team owner can remove members")
+    if user_id == team["owner_user_id"]:
+        raise HTTPException(status_code=400, detail="The team owner cannot be removed")
+
+    removed = await db.remove_team_member(team_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="That user is not a member of this team")
+    return {"removed": True, "members": await db.get_team_members(team_id)}
+
+
+@app.post("/api/teams/{team_id}/leave")
+async def leave_team(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Leave a team you belong to. The owner may not leave while other members
+    remain (they would orphan the team); a sole-owner can leave to empty it."""
+    team = await db.get_team(team_id)
+    if not team or not await db.is_team_member(team_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] == current_user.id and await db.count_team_members(team_id) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="The owner cannot leave a team that still has other members",
+        )
+
+    removed = await db.remove_team_member(team_id, current_user.id)
+    return {"left": removed}
 
 
 @app.post("/api/auth/logout")

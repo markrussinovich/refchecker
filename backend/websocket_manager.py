@@ -156,12 +156,19 @@ class PresenceManager:
 
     @staticmethod
     def _roster(members: Dict[WebSocket, dict]) -> list:
-        """Deduplicate by user_id so a user with multiple tabs counts once."""
+        """Deduplicate by user_id so a user with multiple tabs counts once.
+
+        Entries without a real ``user_id`` (e.g. a malformed/anonymous token)
+        are skipped: they are not authenticated identities, and treating them
+        all as the same ``None`` key would collapse every such connection into
+        a single bogus roster entry (and could shadow real users).
+        """
         seen: Dict[int, dict] = {}
         for user in members.values():
             uid = user.get("user_id")
-            if uid not in seen:
-                seen[uid] = user
+            if uid is None or uid in seen:
+                continue
+            seen[uid] = user
         return list(seen.values())
 
     def roster(self, room_id: str) -> list:
@@ -176,7 +183,12 @@ class PresenceManager:
         ``presence_join`` to the others.
         """
         members = self._rooms.setdefault(room_id, {})
-        already_present = any(m.get("user_id") == user.get("user_id") for m in members.values())
+        uid = user.get("user_id")
+        # A None user_id is not a real identity; never treat two such
+        # connections as "the same user already present".
+        already_present = uid is not None and any(
+            m.get("user_id") == uid for m in members.values()
+        )
         members[websocket] = user
 
         # Tell the newcomer who is already here.
@@ -206,8 +218,9 @@ class PresenceManager:
         if not members:
             del self._rooms[room_id]
 
-        still_present = any(
-            m.get("user_id") == user.get("user_id")
+        uid = user.get("user_id")
+        still_present = uid is not None and any(
+            m.get("user_id") == uid
             for m in self._rooms.get(room_id, {}).values()
         )
         if not still_present:

@@ -95,6 +95,99 @@ def test_team_create_list_and_add_member():
             os.unlink(tmp)
 
 
+def test_team_remove_member():
+    """remove_team_member deletes a membership and is reflected in counts."""
+    tmp = tempfile.mktemp(suffix='.db')
+
+    async def run():
+        db = Database(tmp)
+        await db.init_db()
+
+        owner_id = await _seed_user(db, "owner@example.com", "Owner")
+        member_id = await _seed_user(db, "member@example.com", "Member")
+
+        team = await db.create_team("Lab Group", owner_id)
+        team_id = team["id"]
+        await db.add_team_member(team_id, member_id)
+        assert await db.count_team_members(team_id) == 2
+
+        # Removing the non-owner member works once and is then idempotent.
+        assert await db.remove_team_member(team_id, member_id) is True
+        assert await db.remove_team_member(team_id, member_id) is False
+        assert await db.is_team_member(team_id, member_id) is False
+        assert await db.count_team_members(team_id) == 1
+
+        # The owner remains, and the removed user no longer sees the team.
+        assert await db.is_team_member(team_id, owner_id) is True
+        assert await db.get_teams_for_user(member_id) == []
+
+    try:
+        _run(run())
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def test_team_leave_owner_guard_uses_member_count():
+    """A sole owner can empty a team; the count > 1 guard is what the leave
+    endpoint checks before allowing the owner to leave with others present."""
+    tmp = tempfile.mktemp(suffix='.db')
+
+    async def run():
+        db = Database(tmp)
+        await db.init_db()
+
+        owner_id = await _seed_user(db, "owner@example.com", "Owner")
+        member_id = await _seed_user(db, "member@example.com", "Member")
+
+        team = await db.create_team("Lab Group", owner_id)
+        team_id = team["id"]
+        await db.add_team_member(team_id, member_id)
+
+        # With other members present, the owner-leave guard (count > 1) holds.
+        assert await db.count_team_members(team_id) > 1
+
+        # A plain member can always leave.
+        assert await db.remove_team_member(team_id, member_id) is True
+        assert await db.count_team_members(team_id) == 1
+
+        # Now the owner is alone (count == 1) and may leave to empty the team.
+        assert await db.remove_team_member(team_id, owner_id) is True
+        assert await db.count_team_members(team_id) == 0
+
+    try:
+        _run(run())
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def test_presence_roster_skips_none_user_id():
+    """A malformed/anonymous token (user_id=None) must not collapse the roster.
+
+    Regression for the presence hardening: previously every None-id connection
+    deduped to the same key, hiding real users. Now None entries are skipped so
+    each real user is represented exactly once.
+    """
+    from backend.websocket_manager import PresenceManager
+
+    members = {
+        object(): {"user_id": None, "name": "Anon A"},
+        object(): {"user_id": None, "name": "Anon B"},
+        object(): {"user_id": 1, "name": "Alice"},
+        object(): {"user_id": 1, "name": "Alice (2nd tab)"},
+        object(): {"user_id": 2, "name": "Bob"},
+    }
+    roster = PresenceManager._roster(members)
+    ids = sorted(u["user_id"] for u in roster)
+    # Two real users, deduped; the None entries do not appear or collapse them.
+    assert ids == [1, 2]
+    assert all(u["user_id"] is not None for u in roster)
+
+
 if __name__ == "__main__":
     test_team_create_list_and_add_member()
+    test_team_remove_member()
+    test_team_leave_owner_guard_uses_member_count()
+    test_presence_roster_skips_none_user_id()
     print("ok")

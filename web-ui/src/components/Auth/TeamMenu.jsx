@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { getTeams, createTeam, getTeamMembers, addTeamMember } from '../../utils/api'
+import { getTeams, createTeam, getTeamMembers, addTeamMember, removeTeamMember, leaveTeam } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 /**
@@ -95,6 +95,34 @@ export default function TeamMenu() {
     }
   }
 
+  const handleRemoveMember = async (userId) => {
+    if (!selectedId || !userId) return
+    setBusy(true); setError('')
+    try {
+      const resp = await removeTeamMember(selectedId, userId)
+      setMembers(resp.data.members || [])
+      await loadTeams() // refresh member counts
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not remove member')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleLeave = async () => {
+    if (!selectedId) return
+    setBusy(true); setError('')
+    try {
+      await leaveTeam(selectedId)
+      setSelectedId(null)
+      await loadTeams()
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not leave team')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -152,12 +180,40 @@ export default function TeamMenu() {
               </p>
               <ul className="max-h-40 overflow-y-auto space-y-1">
                 {members.map((m) => (
-                  <li key={m.user_id} className="flex items-center justify-between text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                    <span className="truncate">{m.name || m.email || `User ${m.user_id}`}</span>
-                    <span className="text-xs ml-2 flex-none" style={{ color: 'var(--color-text-secondary)' }}>{m.role}</span>
+                  <li key={m.user_id} className="flex items-center justify-between text-sm gap-2" style={{ color: 'var(--color-text-primary)' }}>
+                    <span className="truncate flex-1 min-w-0">{m.name || m.email || `User ${m.user_id}`}</span>
+                    <span className="text-xs flex-none" style={{ color: 'var(--color-text-secondary)' }}>{m.role}</span>
+                    {/* Owner can remove anyone except the owner. */}
+                    {isOwner && m.user_id !== selectedTeam.owner_user_id && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMember(m.user_id)}
+                        disabled={busy}
+                        className="text-xs flex-none disabled:opacity-50 hover:opacity-80"
+                        style={{ color: 'var(--color-error, #ef4444)' }}
+                        aria-label={`Remove ${m.name || m.email || `user ${m.user_id}`}`}
+                        title="Remove member"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
+
+              {/* Leave the team (hidden for an owner who still has other members). */}
+              {!(isOwner && members.length > 1) && (
+                <button
+                  type="button"
+                  onClick={handleLeave}
+                  disabled={busy}
+                  className="text-xs mt-2 disabled:opacity-50 hover:opacity-80"
+                  style={{ color: 'var(--color-error, #ef4444)' }}
+                  title="Leave this team"
+                >
+                  Leave team
+                </button>
+              )}
 
               {/* Owner-only: add a member by email */}
               {isOwner && (
