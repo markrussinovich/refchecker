@@ -710,7 +710,9 @@ docker compose pull       # Update to latest
 
 ### Multi-User Server (OAuth)
 
-By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required, and every request runs as a built-in local admin. Multi-user mode is **opt-in**: it turns on only when you both set `REFCHECKER_MULTIUSER=true` **and** configure at least one OAuth provider's client ID and secret (Google, GitHub, or Microsoft). Setting the flag alone — with no provider credentials — leaves the app in single-user mode and shows no login screen. Once at least one provider is configured, the Web UI gates behind a login page that renders a sign-in button **only** for the providers the server reports at `/api/auth/providers`, and every API route requires a valid session.
+
+If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -740,7 +742,8 @@ JWT_SECRET_KEY=<output from step 1>
 SITE_URL=https://<your-domain>
 HTTPS_ONLY=true
 
-# At least one OAuth provider
+# At least one OAuth provider — only providers whose ID *and* secret are set
+# appear as login buttons. Microsoft uses the MS_* prefix.
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 
@@ -749,6 +752,13 @@ GITHUB_CLIENT_SECRET=...
 
 MS_CLIENT_ID=...
 MS_CLIENT_SECRET=...
+
+# Optional — by default the callback URL is derived from SITE_URL as
+# <SITE_URL>/api/auth/callback/{google,github,microsoft}. Override per provider
+# only if you registered a different redirect URI:
+# GOOGLE_REDIRECT_URI=https://<your-domain>/api/auth/callback/google
+# GITHUB_REDIRECT_URI=https://<your-domain>/api/auth/callback/github
+# MS_REDIRECT_URI=https://<your-domain>/api/auth/callback/microsoft
 
 # Optional
 REFCHECKER_ADMINS=github:you  # comma-separated; first sign-in is auto-admin
