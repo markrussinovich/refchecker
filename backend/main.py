@@ -1395,6 +1395,10 @@ async def create_team(
     if not name:
         raise HTTPException(status_code=400, detail="Team name is required")
     team = await db.create_team(name, current_user.id)
+    await db.log_team_activity(
+        team["id"], current_user.id, getattr(current_user, "email", None),
+        "created_team", detail=name,
+    )
     return {"team": team}
 
 
@@ -1412,6 +1416,17 @@ async def list_team_members(
     """List members of a team the current user belongs to."""
     await _get_team_for_member_or_404(team_id, current_user)
     return {"members": await db.get_team_members(team_id)}
+
+
+@app.get("/api/teams/{team_id}/activity")
+async def list_team_activity(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Team activity/audit log — who created the team, added or removed which
+    member, and who left. Visible to any member of the team."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"activity": await db.get_team_activity(team_id, limit=100)}
 
 
 @app.post("/api/teams/{team_id}/members")
@@ -1440,6 +1455,12 @@ async def add_team_member(
 
     role = (payload.role or "member").strip() or "member"
     added = await db.add_team_member(team_id, target["id"], role)
+    if added:
+        await db.log_team_activity(
+            team_id, current_user.id, getattr(current_user, "email", None),
+            "added_member", target_user_id=target["id"],
+            target_email=target.get("email"), detail=role,
+        )
     return {"added": added, "members": await db.get_team_members(team_id)}
 
 
@@ -1460,9 +1481,15 @@ async def remove_team_member(
     if user_id == team["owner_user_id"]:
         raise HTTPException(status_code=400, detail="The team owner cannot be removed")
 
+    target = await db.get_user_by_id(user_id)
     removed = await db.remove_team_member(team_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="That user is not a member of this team")
+    await db.log_team_activity(
+        team_id, current_user.id, getattr(current_user, "email", None),
+        "removed_member", target_user_id=user_id,
+        target_email=(target or {}).get("email"),
+    )
     return {"removed": True, "members": await db.get_team_members(team_id)}
 
 
@@ -1483,6 +1510,12 @@ async def leave_team(
         )
 
     removed = await db.remove_team_member(team_id, current_user.id)
+    if removed:
+        await db.log_team_activity(
+            team_id, current_user.id, getattr(current_user, "email", None),
+            "left_team", target_user_id=current_user.id,
+            target_email=getattr(current_user, "email", None),
+        )
     return {"left": removed}
 
 

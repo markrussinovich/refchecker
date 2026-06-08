@@ -138,6 +138,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 
 <br>
 
+- **v0.9.13** — **Teams** gain an **activity log** (who created the team, added/removed which member, and who left — newest first) · the **radial library graph** shows full **article info on hover** (title · venue · year · times-seen · status) and keeps it for the pinned node · the **3D graph glow** is calmer (less blinding bloom) · **bug reports** now open the **upstream** repo's issue tracker · **email support** reliably opens your mail client (never a blank window).
 - **v0.9.12** — **Fix:** **batch checks** failed with a 500 (`'BatchUrlsRequest' object has no attribute 'semantic_scholar_api_key'`) — the batch request model now carries the full per-check config (LLM · hallucination · Semantic Scholar · AI-detection · detection-mode), matching single checks. Plus a **fully legible, colored CLI banner** — the `REFCHECKER` wordmark renders as renderer-independent pixels (no font dependency, no text overlap), and colour now follows the **actual output stream (stderr)**, so the gradient stays even when stdout is piped (e.g. `--report-format json > out.json`).
 - **v0.9.11** — A **bolder, more legible CLI banner** — the `REFCHECKER` wordmark now uses solid 2-cell-wide strokes instead of thin scattered blocks.
 - **v0.9.10** — Fix: the Chat/Summarize **abstract-fallback** crashed on Python 3.11 (a mid-pattern inline-regex flag — `re.error: global flags not at the start`); CI is green across the full Python-3.11 suite again.

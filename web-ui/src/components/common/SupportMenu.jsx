@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
 
-const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
+// Issues go to the upstream project (Mark Russinovich's repo), not this fork.
+const ISSUES_URL = 'https://github.com/markrussinovich/refchecker/issues/new'
 const SUPPORT_EMAILS = ['ariorad.moniri@live.acibadem.edu.tr', 'mark.russinovich@microsoft.com']
 
 /**
@@ -21,11 +22,21 @@ export default function SupportMenu() {
 
   const go = (url, isMailto = false) => {
     setOpen(false)
+    // Desktop: hand off to the OS (default browser / mail client) via the shell
+    // plugin. Browser dev: open a tab for links; navigate for mailto (the mail
+    // client opens without unloading the page). Never window.open() a mailto —
+    // inside the Tauri WebView that spawns a blank window instead of the mail app.
     if (isTauri()) { openExternal(url); return }
     if (isMailto) { window.location.href = url } else { window.open(url, '_blank', 'noopener,noreferrer') }
   }
-  const githubIssue = () => go(`${REPO_URL}/issues/new`)
-  const emailSupport = () => go(`mailto:${SUPPORT_EMAILS.join(',')}?subject=${encodeURIComponent('RefChecker support')}`, true)
+  const githubIssue = () => go(ISSUES_URL)
+  // Primary recipient + cc so every mail client parses it (some choke on a bare
+  // comma-joined recipient list).
+  const emailSupport = () => {
+    const [to, ...cc] = SUPPORT_EMAILS
+    const q = `${cc.length ? `cc=${encodeURIComponent(cc.join(','))}&` : ''}subject=${encodeURIComponent('RefChecker support')}`
+    go(`mailto:${to}?${q}`, true)
+  }
 
   return (
     <div className="relative" ref={ref}>

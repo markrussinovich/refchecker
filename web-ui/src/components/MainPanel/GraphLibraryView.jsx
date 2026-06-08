@@ -50,6 +50,7 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
   const { ordered, pos, links, cx, cy, w, h } = layout
   const chord = (a, b) => `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`
   const focus = pinned || hover // pinned wins; hover previews when nothing pinned
+  const infoId = hover || pinned // info panel follows the cursor, falls back to the pinned node
 
   return (
     <svg width={w} height={h} style={{ display: 'block' }}
@@ -101,6 +102,30 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
           </text>
         </g>
       )}
+      {/* Article info panel — shows on hover, and stays on the pinned node.
+          Top-left so it never collides with the legend / pinned hint. */}
+      {infoId && pos[infoId] && (() => {
+        const nd = pos[infoId].node
+        const ident = nd.doi ? `DOI: ${nd.doi}` : (nd.arxiv_id ? `arXiv: ${nd.arxiv_id}` : '')
+        return (
+          <foreignObject x={10} y={10} width={Math.min(330, w - 20)} height={108} pointerEvents="none">
+            <div xmlns="http://www.w3.org/1999/xhtml" style={{
+              padding: '8px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.4,
+              background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)', boxShadow: '0 4px 14px rgba(0,0,0,0.35)' }}>
+              <div style={{ fontWeight: 600, marginBottom: 2, display: '-webkit-box',
+                WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{nd.label}</div>
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
+                {(nd.venue || '—')}{nd.year ? ` · ${nd.year}` : ''} · seen {nd.times_seen}× · {nd.status}
+              </div>
+              {ident && (
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ident}</div>
+              )}
+            </div>
+          </foreignObject>
+        )
+      })()}
       {pinned && (
         <text x={10} y={h - 10} fontSize="11" fill="var(--color-text-muted)" pointerEvents="none">
           Pinned · click empty space to reset
@@ -221,7 +246,9 @@ export default function GraphLibraryView({ onClose }) {
         const mod = await import('three/examples/jsm/postprocessing/UnrealBloomPass.js')
         if (cancelled) return
         const bloom = new mod.UnrealBloomPass()
-        bloom.strength = 1.1; bloom.radius = 0.55; bloom.threshold = 0.08
+        // Subtle glow, not a blinding flare: lower strength + higher threshold
+        // so only the brightest nodes bloom (was 1.1/0.55/0.08 — too shiny).
+        bloom.strength = 0.55; bloom.radius = 0.4; bloom.threshold = 0.2
         composer.addPass(bloom); composer.__bloomAdded = true
       } catch (e) { logger.error?.('GraphLibrary', 'bloom unavailable', e) }
     }

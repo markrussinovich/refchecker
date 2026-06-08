@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { getTeams, createTeam, getTeamMembers, addTeamMember, removeTeamMember, leaveTeam } from '../../utils/api'
+import { getTeams, createTeam, getTeamMembers, addTeamMember, removeTeamMember, leaveTeam, getTeamActivity } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 /**
@@ -17,6 +17,7 @@ export default function TeamMenu() {
   const [teams, setTeams] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [members, setMembers] = useState([])
+  const [activity, setActivity] = useState([])
   const [newTeamName, setNewTeamName] = useState('')
   const [memberEmail, setMemberEmail] = useState('')
   const [busy, setBusy] = useState(false)
@@ -52,10 +53,23 @@ export default function TeamMenu() {
     }
   }, [])
 
+  const loadActivity = useCallback(async (teamId) => {
+    if (!teamId) { setActivity([]); return }
+    try {
+      const resp = await getTeamActivity(teamId)
+      setActivity(resp.data.activity || [])
+    } catch (e) {
+      logger.error('TeamMenu', 'Failed to load activity', e)
+      setActivity([])
+    }
+  }, [])
+
   // Load teams when the menu opens.
   useEffect(() => { if (open) loadTeams() }, [open, loadTeams])
-  // Load members whenever the selected team changes (while open).
-  useEffect(() => { if (open) loadMembers(selectedId) }, [open, selectedId, loadMembers])
+  // Load members + activity whenever the selected team changes (while open).
+  useEffect(() => {
+    if (open) { loadMembers(selectedId); loadActivity(selectedId) }
+  }, [open, selectedId, loadMembers, loadActivity])
 
   if (!authRequired || !user) return null
 
@@ -88,6 +102,7 @@ export default function TeamMenu() {
       setMemberEmail('')
       setMembers(resp.data.members || [])
       await loadTeams() // refresh member counts
+      await loadActivity(selectedId)
     } catch (e) {
       setError(e.response?.data?.detail || 'Could not add member')
     } finally {
@@ -102,6 +117,7 @@ export default function TeamMenu() {
       const resp = await removeTeamMember(selectedId, userId)
       setMembers(resp.data.members || [])
       await loadTeams() // refresh member counts
+      await loadActivity(selectedId)
     } catch (e) {
       setError(e.response?.data?.detail || 'Could not remove member')
     } finally {
@@ -121,6 +137,26 @@ export default function TeamMenu() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // Render one audit-log entry as a human sentence: who did what to whom.
+  const shortName = (email) => (email ? String(email).split('@')[0] : '')
+  const activityText = (a) => {
+    const actor = shortName(a.actor_email) || 'Someone'
+    const target = shortName(a.target_email)
+    switch (a.action) {
+      case 'created_team': return `${actor} created the team`
+      case 'added_member': return `${actor} added ${target || 'a member'}${a.detail && a.detail !== 'member' ? ` as ${a.detail}` : ''}`
+      case 'removed_member': return `${actor} removed ${target || 'a member'}`
+      case 'left_team': return `${actor} left the team`
+      default: return `${actor} · ${a.action}`
+    }
+  }
+  const fmtWhen = (s) => {
+    if (!s) return ''
+    // SQLite CURRENT_TIMESTAMP is UTC without a zone — append Z so it parses as UTC.
+    const d = new Date(String(s).replace(' ', 'T') + 'Z')
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   }
 
   return (
@@ -242,6 +278,23 @@ export default function TeamMenu() {
                   </button>
                 </div>
               )}
+
+              {/* Activity log — who created the team, added/removed which member, who left. */}
+              <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-muted)' }}>Activity</p>
+                {activity.length === 0 ? (
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>No activity yet.</p>
+                ) : (
+                  <ul className="max-h-40 overflow-y-auto space-y-1">
+                    {activity.map((a) => (
+                      <li key={a.id} className="text-xs flex items-baseline justify-between gap-2">
+                        <span className="truncate min-w-0" style={{ color: 'var(--color-text-secondary)' }}>{activityText(a)}</span>
+                        <span className="flex-none whitespace-nowrap" style={{ color: 'var(--color-text-muted)' }}>{fmtWhen(a.created_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
 

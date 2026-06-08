@@ -10,6 +10,9 @@ import { invokeTauri, isTauri, openExternal, getAppVersion } from '../../utils/t
 import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
 
 const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
+// Bug reports / feature requests go upstream to Mark Russinovich's repo;
+// release downloads stay on this fork (where the desktop builds are published).
+const ISSUES_URL = 'https://github.com/markrussinovich/refchecker'
 
 /**
  * Settings panel component - ChatGPT-style with left navigation
@@ -216,7 +219,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     const shortBody = diagReport
       ? '## What I expected\n\n\n## What happened\n\n\n<!-- Diagnostic report was copied to your clipboard. Paste it here (Cmd/Ctrl-V). -->\n'
       : '## What I expected\n\n\n## What happened\n\n'
-    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
+    const url = `${ISSUES_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
     openExternal(url)
   }
 

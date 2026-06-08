@@ -540,6 +540,25 @@ class Database:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_user_id)"
             )
+            # Per-team audit log: who added/removed whom (and other team changes),
+            # so the team view can show an activity feed. actor/target emails are
+            # denormalised so the log stays readable even if a user later leaves.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS team_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    team_id INTEGER NOT NULL REFERENCES teams(id),
+                    actor_user_id INTEGER REFERENCES users(id),
+                    actor_email TEXT,
+                    action TEXT NOT NULL,
+                    target_user_id INTEGER,
+                    target_email TEXT,
+                    detail TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_team_activity_team ON team_activity(team_id, id)"
+            )
 
             # Tiny key/value store for one-time migrations. Keeps the
             # bump-schema-and-clean-stale-rows logic out of the column
@@ -1895,6 +1914,51 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return int(row[0]) if row else 0
+
+    async def log_team_activity(
+        self,
+        team_id: int,
+        actor_user_id: Optional[int],
+        actor_email: Optional[str],
+        action: str,
+        target_user_id: Optional[int] = None,
+        target_email: Optional[str] = None,
+        detail: Optional[str] = None,
+    ) -> None:
+        """Append one entry to a team's activity/audit log.
+
+        Best-effort: never raises (an audit-log failure must not break the
+        underlying team operation)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("PRAGMA busy_timeout=5000")
+                await db.execute(
+                    """INSERT INTO team_activity
+                       (team_id, actor_user_id, actor_email, action,
+                        target_user_id, target_email, detail)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (team_id, actor_user_id, actor_email, action,
+                     target_user_id, target_email, detail),
+                )
+                await db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("log_team_activity failed: %s", e)
+
+    async def get_team_activity(self, team_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return a team's activity log, newest first."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT id, team_id, actor_user_id, actor_email, action,
+                          target_user_id, target_email, detail, created_at
+                   FROM team_activity
+                   WHERE team_id = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (team_id, int(limit)),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:

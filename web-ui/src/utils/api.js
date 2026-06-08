@@ -69,6 +69,7 @@ export const addTeamMember = (teamId, { email, user_id, role } = {}) =>
 export const removeTeamMember = (teamId, userId) =>
   api.delete(`/teams/${teamId}/members/${userId}`)
 export const leaveTeam = (teamId) => api.post(`/teams/${teamId}/leave`)
+export const getTeamActivity = (teamId) => api.get(`/teams/${teamId}/activity`)
 
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
