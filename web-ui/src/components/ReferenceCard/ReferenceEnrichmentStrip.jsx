@@ -62,7 +62,9 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     has_funding ||
     has_affiliation ||
     (biblio && (biblio.volume || biblio.issue || biblio.first_page)) ||
-    links.libkey || links.worldcat || links.doi
+    links.libkey || links.worldcat || links.doi ||
+    (Array.isArray(verified_by) && verified_by.length > 0) ||
+    !!source_label
   )
   if (!hasAnyBadge) return null
 
@@ -113,9 +115,20 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
 
   // DOI excluded — rendered above by the Verification block; pills row
   // shows OpenAlex / PMID / PMC / LibKey / WorldCat / ORCID instead.
-  const hasIdRow = !!(openalex_id || pubmed_id || pmc_id || mag_id || links.libkey || links.worldcat)
-  const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
+  // The authors popover and the "via <source>" attribution are independent
+  // signals: they must render whenever present even when NO external-ID
+  // pill is — otherwise a reference that resolved only an author list (or
+  // only a source label) would silently drop that real data. So the row is
+  // shown if ANY of its members has something to display, and each member
+  // self-guards below.
   const hasAuthors = Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)
+  const hasSource = !!(verified_by?.length || source_label)
+  const hasIdRow = !!(
+    openalex_id || pubmed_id || pmc_id || mag_id ||
+    links.libkey || links.worldcat ||
+    hasAuthors || hasSource
+  )
+  const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
 
   return (
     <div className="flex flex-col gap-1.5 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { findSimilarPapers } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 import { logger } from '../../utils/logger'
@@ -15,6 +15,11 @@ const MODES = [
   { id: 'cites_refs', label: 'Cites & Refs' },
   { id: 'both', label: 'Both' },
 ]
+
+// Literal value of the app's --color-accent green. Used for anything painted
+// onto the <canvas> (the source node, its halo, the selected highlight), which
+// cannot resolve CSS custom properties. HTML chrome still uses the CSS var.
+const SOURCE_GREEN = '#22c55e'
 
 // Pick the same source-id derivation SimilarPapersPanel uses so 'cites_refs'
 // mode can resolve the SOURCE paper on OpenAlex.
@@ -46,39 +51,68 @@ function yearColor(year, minYear, maxYear) {
 
 /**
  * Build the graph from a /api/papers/similar response. The current paper is
- * the centre node; every real candidate becomes a node whose horizontal
- * position is pinned by publication year (left = older, right = newer) and
- * whose colour follows the same year gradient. Edges connect each candidate
- * back to the source. REAL DATA ONLY — candidates with no usable identity are
- * dropped, and an empty response yields an empty graph (we abstain, never
- * invent placeholder nodes).
+ * the centre node; every real candidate becomes a node.
+ *
+ * Layout strategy (fixes the "collapsed line of dots" bug):
+ *  - When we have a usable year range we PIN each candidate's HORIZONTAL
+ *    position to its year (left = older, right = newer) via `fx`, giving a
+ *    readable timeline. The previous bug was NOT the x pinning — it was that
+ *    `y` was free but nothing fanned same-year nodes apart, so they stacked on
+ *    one horizontal line. The component now adds charge + a vertical-spread
+ *    force so they spread out.
+ *  - We seed every node with a DISTINCT initial x/y so the engine never starts
+ *    with everything on (0,0) (which rendered as empty / a single dot before).
+ *  - With no usable year range we fall back to a pure radial cluster around the
+ *    source (no x pin), again with distinct seeds.
+ *
+ * REAL DATA ONLY — candidates with no usable identity are dropped, and an empty
+ * response yields an empty graph (we abstain, never invent placeholder nodes).
  */
-function buildGraph(candidates, paperTitle, width) {
+function buildGraph(candidates, paperTitle, width, height) {
   const cands = (candidates || []).filter((c) => c && (c.title || c.doi || c.arxiv_id))
   const years = cands.map((c) => c.year).filter((y) => typeof y === 'number' && y > 0)
   const minYear = years.length ? Math.min(...years) : null
   const maxYear = years.length ? Math.max(...years) : null
+  const hasYearAxis = minYear !== null && maxYear !== null && maxYear !== minYear
   const w = Math.max(480, width || 800)
+  const h = Math.max(360, height || 600)
+  // Horizontal span used for the year axis (centred on 0).
+  const spanX = w * 0.78
   const xFor = (year) => {
-    if (!year || !minYear || !maxYear || maxYear === minYear) return 0
+    if (!hasYearAxis || !year) return 0
     const t = (year - minYear) / (maxYear - minYear)
-    // Spread across the middle 70% of the canvas, centred on 0.
-    return (t - 0.5) * (w * 0.7)
+    return (t - 0.5) * spanX
   }
 
   const sourceNode = {
     id: '__source__',
     isSource: true,
     label: paperTitle || 'This paper',
-    color: 'var(--color-accent, #3b82f6)',
+    // Literal green — a <canvas> can't resolve CSS vars, so the source dot must
+    // be a concrete colour or it renders invisible (part of the "empty" bug).
+    color: SOURCE_GREEN,
+    // Hard-pin the source to the centre so it stays the visual anchor.
     fx: 0,
     fy: 0,
+    x: 0,
+    y: 0,
   }
   const nodes = [sourceNode]
   const links = []
+  const n = cands.length
+  const ring = Math.min(w, h) * 0.34
   cands.forEach((c, idx) => {
     const id = c.paperId || c.openalex_id || c.doi || c.arxiv_id || `cand-${idx}`
-    nodes.push({
+    // Seed every node at a DISTINCT position so the simulation never starts with
+    // all candidates stacked on (0,0) — that stacking is what produced the empty
+    // / one-line render. Fan them around a circle; the forces refine from there.
+    const angle = (idx / Math.max(1, n)) * Math.PI * 2
+    const yearX = hasYearAxis ? xFor(c.year) : null
+    // Distinct seed: along the timeline x (if any) but with a varied y so
+    // same-year nodes don't begin on top of each other.
+    const seedX = (yearX !== null ? yearX : Math.cos(angle) * ring)
+    const seedY = Math.sin(angle) * ring + ((idx % 2 === 0 ? 1 : -1) * ((idx % 9) + 1) * 8)
+    const node = {
       id,
       label: c.title || '(untitled)',
       year: c.year || null,
@@ -90,13 +124,17 @@ function buildGraph(candidates, paperTitle, width) {
       shared_refs_count: c.shared_refs_count || 0,
       sources: c.sources || [],
       color: yearColor(c.year, minYear, maxYear),
-      // Pin x by year so the layout reads as a timeline; y stays free so the
-      // force engine spreads overlapping years vertically.
-      fx: xFor(c.year),
-    })
+      x: seedX,
+      y: seedY,
+    }
+    // Pin x to the year axis (timeline). y stays free so charge + the vertical
+    // spread force fan papers of the same year apart instead of overlapping
+    // them on a single horizontal line (the reported bug).
+    if (yearX !== null) node.fx = yearX
+    nodes.push(node)
     links.push({ source: '__source__', target: id, relation: c.relation || null })
   })
-  return { nodes, links, meta: { minYear, maxYear, count: cands.length } }
+  return { nodes, links, meta: { minYear, maxYear, count: cands.length, hasYearAxis } }
 }
 
 /**
@@ -104,10 +142,12 @@ function buildGraph(candidates, paperTitle, width) {
  * the results panel and graphs the SIMILAR / CITES&REFS neighbourhood of the
  * current check's references — reusing the exact /api/papers/similar pipeline
  * (incl. the #63 modes) the Similar Papers tab already drives. Nodes are
- * positioned + coloured by publication year and are individually selectable.
+ * coloured by publication year, laid out as a year-axis force cluster, and are
+ * individually selectable.
  */
 export default function ExploreGraphView({ references, paperTitle, paperSource, onClose }) {
   const containerRef = useRef(null)
+  const fgRef = useRef(null)
   const [dims, setDims] = useState({ w: 800, h: 600 })
   const [mode, setMode] = useState('similar')
   const [loading, setLoading] = useState(false)
@@ -139,7 +179,8 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const load = async () => {
+  const load = useCallback(async (activeMode) => {
+    const m = activeMode || mode
     if (!refsForRequest.length) return
     setLoading(true)
     setError(null)
@@ -150,7 +191,7 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
         paper_title: paperTitle,
         paper_id: paperId || undefined,
         limit: 25,
-        mode,
+        mode: m,
       })
       setCandidates(res.data?.candidates || [])
       setLoaded(true)
@@ -160,13 +201,55 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
     } finally {
       setLoading(false)
     }
-  }
+  }, [mode, refsForRequest, paperTitle, paperId])
+
+  // REACTIVE BUILD (fixes the "must recreate" bug): build automatically as soon
+  // as we have references, and rebuild whenever the mode changes. No manual
+  // "Build graph" click is required — the button is only a manual refresh.
+  useEffect(() => {
+    if (!refsForRequest.length) return
+    load(mode)
+    // We intentionally key off mode + the (stable, memoised) request payload so
+    // a new search or a mode switch re-fetches; `load` is memoised on the same
+    // deps so including it is safe and keeps lint happy.
+  }, [mode, refsForRequest, load])
 
   const graphData = useMemo(
-    () => buildGraph(candidates, paperTitle, dims.w),
-    [candidates, paperTitle, dims.w],
+    () => buildGraph(candidates, paperTitle, dims.w, dims.h - 44),
+    [candidates, paperTitle, dims.w, dims.h],
   )
   const meta = graphData.meta
+
+  // Configure the d3 force engine once the graph mounts AND whenever the data
+  // changes. THIS IS THE HEART OF THE LAYOUT FIX. Previously the only forces
+  // were the default charge + the radial link to the fixed centre, so candidates
+  // (with x pinned to their year) collapsed onto a single horizontal line. We
+  // now add:
+  //   - stronger charge repulsion so nodes don't pile up,
+  //   - a vertical-spread force that fans same-x (same-year) nodes apart on Y,
+  //   - a gentle pull toward the vertical centre so the cluster stays framed.
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg || graphData.nodes.length <= 1) return
+    // Strong repulsion so nodes don't pile up on one coordinate.
+    fg.d3Force('charge')?.strength(-280).distanceMax(700)
+    // Keep candidates a readable distance from the centre / each other.
+    fg.d3Force('link')?.distance(90).strength(0.2)
+    // Vertical spread: candidates have x pinned to their year, so without this
+    // they stack on one horizontal line. This force pushes overlapping nodes
+    // apart along Y while pulling the cluster gently back to centre so it stays
+    // in frame. The source is hard-pinned (fx/fy) and is skipped automatically.
+    fg.d3Force('spreadY', verticalSpreadForce(64, 0.05))
+    // Re-energise the layout so the new forces actually take effect (without a
+    // manual recreate).
+    fg.d3ReheatSimulation?.()
+  }, [graphData])
+
+  // Frame the whole graph once it settles so the user never lands on an empty /
+  // off-screen canvas.
+  const handleEngineStop = useCallback(() => {
+    fgRef.current?.zoomToFit?.(400, 60)
+  }, [])
 
   return (
     <div className="fixed inset-0 z-50" style={{ background: 'var(--color-bg-primary)' }}>
@@ -182,7 +265,7 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
               <button
                 key={m.id}
                 type="button"
-                onClick={() => { if (m.id !== mode) { setMode(m.id); setLoaded(false); setCandidates([]); setSelected(null) } }}
+                onClick={() => { if (m.id !== mode) { setMode(m.id); setSelected(null) } }}
                 className="px-2.5 py-1 text-xs"
                 style={mode === m.id
                   ? { background: 'var(--color-accent)', color: '#fff' }
@@ -202,12 +285,12 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
         <div className="flex items-center gap-2 text-xs">
           <button
             type="button"
-            onClick={load}
+            onClick={() => load(mode)}
             disabled={loading || !refsForRequest.length}
             className="px-3 py-1 rounded-md"
             style={{ background: 'var(--color-accent)', color: '#fff', opacity: (loading || !refsForRequest.length) ? 0.5 : 1 }}
           >
-            {loading ? 'Building…' : (loaded ? 'Refresh' : 'Build graph')}
+            {loading ? 'Building…' : 'Refresh'}
           </button>
           <button
             type="button"
@@ -235,33 +318,57 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
         {refsForRequest.length > 0 && !loading && error && (
           <div className="w-full h-full flex items-center justify-center text-sm text-center px-6" style={{ color: 'var(--color-text-muted)' }}>{error}</div>
         )}
-        {refsForRequest.length > 0 && !loading && !error && !loaded && (
-          <div className="w-full h-full flex items-center justify-center text-sm text-center px-6" style={{ color: 'var(--color-text-muted)' }}>
-            Build the graph to explore the {mode === 'cites_refs' ? 'citation neighbourhood' : 'similar-paper neighbourhood'} of this check’s references.
-          </div>
-        )}
         {refsForRequest.length > 0 && !loading && !error && loaded && graphData.nodes.length <= 1 && (
           <div className="w-full h-full flex items-center justify-center text-sm text-center px-6" style={{ color: 'var(--color-text-muted)' }}>
             No related papers surfaced from any source for this check.
           </div>
         )}
-        {refsForRequest.length > 0 && !loading && !error && loaded && graphData.nodes.length > 1 && (
+        {refsForRequest.length > 0 && !loading && !error && graphData.nodes.length > 1 && (
           <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading graph engine…</div>}>
             <ForceGraph2D
+              ref={fgRef}
               width={dims.w}
               height={dims.h - 44}
               graphData={graphData}
               backgroundColor="rgba(0,0,0,0)"
               nodeId="id"
-              nodeLabel={(n) => `${n.label}${n.year ? ` (${n.year})` : ''}`}
-              nodeColor={(n) => (selected && selected.id === n.id) ? 'var(--color-accent, #3b82f6)' : n.color}
-              nodeVal={(n) => (n.isSource ? 8 : 3 + Math.min(6, n.shared_refs_count || 0))}
+              nodeLabel={(node) => `${node.label}${node.year ? ` (${node.year})` : ''}`}
+              nodeColor={(node) => (selected && selected.id === node.id) ? SOURCE_GREEN : node.color}
+              nodeVal={(node) => (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || 0))}
               nodeRelSize={4}
-              linkColor={() => 'rgba(140,144,170,0.28)'}
+              // Custom paint: draw the dot, the distinct green ring on the
+              // source, and an always-on short label so the graph is readable
+              // at a glance (tooltips still show the full title on hover).
+              nodeCanvasObjectMode={() => 'after'}
+              nodeCanvasObject={(node, ctx, globalScale) => {
+                const r = (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || 0))
+                if (node.isSource) {
+                  // Distinct green halo around the centre node.
+                  ctx.beginPath()
+                  ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI)
+                  ctx.strokeStyle = SOURCE_GREEN
+                  ctx.lineWidth = 2 / globalScale
+                  ctx.stroke()
+                }
+                // Truncated label beneath each node, scaled with zoom.
+                const fontSize = Math.max(2.5, 11 / globalScale)
+                if (globalScale > 0.55 || node.isSource) {
+                  const raw = node.label || ''
+                  const text = raw.length > 28 ? `${raw.slice(0, 27)}…` : raw
+                  ctx.font = `${fontSize}px sans-serif`
+                  ctx.textAlign = 'center'
+                  ctx.textBaseline = 'top'
+                  ctx.fillStyle = node.isSource ? SOURCE_GREEN : 'rgba(170,174,196,0.85)'
+                  ctx.fillText(text, node.x, node.y + r + 2)
+                }
+              }}
+              linkColor={() => 'rgba(140,144,170,0.4)'}
               linkWidth={1}
-              enableNodeDrag={false}
-              cooldownTicks={80}
-              onNodeClick={(n) => setSelected(n.isSource ? null : n)}
+              enableNodeDrag
+              cooldownTicks={120}
+              warmupTicks={20}
+              onEngineStop={handleEngineStop}
+              onNodeClick={(node) => setSelected(node.isSource ? null : node)}
               onBackgroundClick={() => setSelected(null)}
             />
           </Suspense>
@@ -309,18 +416,61 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
             style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             <div className="flex items-center gap-1.5">
-              <span style={{ width: 9, height: 9, borderRadius: 9, background: 'var(--color-accent, #3b82f6)', display: 'inline-block' }} />
+              <span style={{ width: 9, height: 9, borderRadius: 9, background: 'var(--color-accent, #22c55e)', display: 'inline-block' }} />
               <span>this paper</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span style={{ width: 36, height: 8, borderRadius: 4, background: 'linear-gradient(90deg, rgb(59,130,246), rgb(245,158,11))', display: 'inline-block' }} />
-              <span>older → newer (x = year)</span>
+              <span>{meta.hasYearAxis ? 'older → newer (x = year)' : 'colour = year'}</span>
             </div>
           </div>
         )}
       </div>
     </div>
   )
+}
+
+// --- Vertical-spread force --------------------------------------------------
+// react-force-graph's d3Force(name, force) accepts any d3-force-compatible
+// force: a function invoked with `(alpha)` each tick that has an
+// `.initialize(nodes)` method. We keep the component self-contained with one
+// small force that does two things every tick:
+//   1. pushes pairs of nodes that overlap vertically (similar x, close y) apart
+//      along Y — this is what fans same-year candidates off a single line, and
+//   2. pulls every (non-pinned) node gently toward y=0 so the cluster stays in
+//      frame instead of drifting off-canvas.
+// `gap` is the minimum vertical breathing room; `centering` is the pull-to-
+// centre strength. The hard-pinned source (fy != null) is left untouched.
+function verticalSpreadForce(gap, centering) {
+  let nodes = []
+  function force(alpha) {
+    const n = nodes.length
+    // Pairwise vertical separation for nodes that share roughly the same x.
+    for (let i = 0; i < n; i += 1) {
+      const a = nodes[i]
+      for (let j = i + 1; j < n; j += 1) {
+        const b = nodes[j]
+        // Only nudge nodes that are horizontally close (same year column).
+        if (Math.abs((a.x || 0) - (b.x || 0)) > gap) continue
+        const dy = (a.y || 0) - (b.y || 0)
+        const adyAbs = Math.abs(dy)
+        if (adyAbs >= gap) continue
+        // Push them apart proportionally to how much they overlap.
+        const push = ((gap - adyAbs) / gap) * alpha * 0.6
+        const dir = dy === 0 ? (i % 2 === 0 ? 1 : -1) : Math.sign(dy)
+        if (a.fy == null) a.vy += dir * push
+        if (b.fy == null) b.vy -= dir * push
+      }
+    }
+    // Gentle centering so the spread cluster stays framed.
+    for (let i = 0; i < n; i += 1) {
+      const node = nodes[i]
+      if (node.fy != null) continue
+      node.vy += (0 - (node.y || 0)) * centering * alpha
+    }
+  }
+  force.initialize = (n) => { nodes = n }
+  return force
 }
 
 // Pure, side-effect-free helpers co-located with the component so they can be

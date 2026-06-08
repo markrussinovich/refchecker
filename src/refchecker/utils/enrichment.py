@@ -48,6 +48,49 @@ def _safe_get(d: Dict[str, Any], *path: str, default: Any = None) -> Any:
     return cur
 
 
+def _coerce_int(v: Any) -> Optional[int]:
+    """Best-effort non-negative int from a count field. Accepts int or a
+    clean numeric string ("182", "182.0"); rejects everything else.
+    Returns None — never invents a value — so callers can distinguish
+    "no signal" from a real zero."""
+    if isinstance(v, bool):  # bool is a subclass of int — exclude it
+        return None
+    if isinstance(v, int):
+        return v if v >= 0 else None
+    if isinstance(v, float):
+        return int(v) if v >= 0 else None
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        try:
+            f = float(s)
+        except (TypeError, ValueError):
+            return None
+        return int(f) if f >= 0 else None
+    return None
+
+
+def _max_count(verified_data: Dict[str, Any], *keys: str) -> Optional[int]:
+    """Coalesce a count across every source-shaped key present in the SAME
+    payload and keep the richest (largest) real value. A payload can carry
+    several source variants at once (OpenAlex `cited_by_count`,
+    Semantic Scholar `citationCount`, Crossref `is-referenced-by-count`),
+    and any one of them may be 0/None while another holds the real number.
+    Taking the max across all present, parseable values means a real 0 is
+    never picked over a real 182, and a missing primary source no longer
+    suppresses a populated secondary one. Returns None when no key carries
+    a parseable value — real-data only, nothing fabricated."""
+    best: Optional[int] = None
+    for k in keys:
+        n = _coerce_int(verified_data.get(k))
+        if n is None:
+            continue
+        if best is None or n > best:
+            best = n
+    return best
+
+
 def _short_id(openalex_url: Optional[str]) -> Optional[str]:
     if not openalex_url:
         return None
@@ -181,14 +224,21 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     enrichment: Dict[str, Any] = {}
 
-    # cited_by_count: OpenAlex top-level; Semantic Scholar uses
-    # `citationCount`; Crossref puts it in `is-referenced-by-count`.
-    cited_by = (
-        verified_data.get('cited_by_count')
-        or verified_data.get('citationCount')
-        or verified_data.get('is-referenced-by-count')
+    # cited_by_count: OpenAlex top-level `cited_by_count`; Semantic Scholar
+    # uses `citationCount`; Crossref puts it in `is-referenced-by-count`.
+    # Coalesce across EVERY variant present in the same payload and keep the
+    # richest (largest) real value — so a source that returned 0 (or omitted
+    # the field) never masks another source's real count, and the UI shows
+    # the maximum confirmable citation number rather than dropping the field.
+    cited_by = _max_count(
+        verified_data,
+        'cited_by_count',
+        'citationCount',
+        'is-referenced-by-count',
+        'citation_count',
+        'numCitedBy',
     )
-    if isinstance(cited_by, int):
+    if cited_by is not None:
         enrichment['cited_by_count'] = cited_by
 
     # Citing-Patents counter — OpenAlex exposes this in
@@ -205,18 +255,23 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
-    # reference_count: OpenAlex `referenced_works` array length; S2
-    # may include `referenceCount`; Crossref `references-count`.
-    ref_count: Optional[int] = None
+    # reference_count: OpenAlex `referenced_works` array length; S2 may
+    # include `referenceCount`; Crossref `references-count`. Coalesce
+    # across all variants and keep the richest (largest) value rather than
+    # short-circuiting on the first key seen — an empty `referenced_works`
+    # list (length 0) must NOT suppress a real Crossref `references-count`
+    # carried in the same payload. The array-length and the integer counts
+    # are pooled together; the maximum real value wins.
+    ref_candidates: List[int] = []
     refs = verified_data.get('referenced_works')
     if isinstance(refs, list):
-        ref_count = len(refs)
-    elif isinstance(verified_data.get('referenceCount'), int):
-        ref_count = verified_data['referenceCount']
-    elif isinstance(verified_data.get('references-count'), int):
-        ref_count = verified_data['references-count']
-    if ref_count is not None:
-        enrichment['reference_count'] = ref_count
+        ref_candidates.append(len(refs))
+    for k in ('referenceCount', 'references-count', 'reference_count', 'numReferences'):
+        n = _coerce_int(verified_data.get(k))
+        if n is not None:
+            ref_candidates.append(n)
+    if ref_candidates:
+        enrichment['reference_count'] = max(ref_candidates)
 
     # Open access flag (OpenAlex; Crossref expresses via license[].URL).
     oa_flag = _safe_get(verified_data, 'open_access', 'is_oa')
@@ -256,26 +311,45 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(pub_type, str) and pub_type:
         enrichment['publication_type'] = pub_type
 
-    # Venue / journal name — OpenAlex uses `primary_location.source.display_name`,
-    # Crossref puts the journal title in `container-title` (list), Semantic Scholar
-    # uses `venue` (str) or `publicationVenue.name`.
+    # Venue / journal name — every source names this differently, so walk
+    # ALL of them and take the first non-empty real value. OpenAlex uses
+    # `primary_location.source.display_name`; Crossref puts the journal
+    # title in `container-title` (list) or `journal-title`/`short-container-title`;
+    # Semantic Scholar uses `venue` (str), `publicationVenue.name`, or a
+    # nested `journal.name`. Coalescing across every variant means a paper
+    # that matched via a source missing its primary venue key still shows
+    # the venue when ANY source in the payload carries it.
+    def _first_str(*vals: Any) -> Optional[str]:
+        for v in vals:
+            if isinstance(v, list) and v:
+                v = v[0]
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return None
+
     venue_name = None
     if isinstance(venue_struct, dict):
-        venue_name = venue_struct.get('name') or venue_struct.get('display_name')
+        venue_name = _first_str(venue_struct.get('name'), venue_struct.get('display_name'))
     if not venue_name:
         primary = verified_data.get('primary_location')
         if isinstance(primary, dict):
             src = primary.get('source')
             if isinstance(src, dict):
-                venue_name = src.get('display_name')
+                venue_name = _first_str(src.get('display_name'), src.get('name'))
     if not venue_name:
-        venue_name = verified_data.get('venue')
+        journal = verified_data.get('journal')
+        if isinstance(journal, dict):
+            venue_name = _first_str(journal.get('name'), journal.get('display_name'))
+        elif isinstance(journal, str):
+            venue_name = _first_str(journal)
     if not venue_name:
-        ct = verified_data.get('container-title')
-        if isinstance(ct, list) and ct:
-            venue_name = ct[0]
-        elif isinstance(ct, str):
-            venue_name = ct
+        venue_name = _first_str(
+            verified_data.get('venue'),
+            verified_data.get('container-title'),
+            verified_data.get('journal-title'),
+            verified_data.get('journalName'),
+            verified_data.get('short-container-title'),
+        )
     if isinstance(venue_name, str) and venue_name.strip():
         enrichment['venue'] = venue_name.strip()
 
@@ -325,12 +399,28 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if pub_date_str:
         enrichment['publication_date'] = pub_date_str
 
-    # Fields of study — OpenAlex concepts; S2 has `fieldsOfStudy`.
+    # Fields of study — OpenAlex `concepts`; Semantic Scholar exposes a
+    # plain `fieldsOfStudy` (list[str]) AND a richer `s2FieldsOfStudy`
+    # (list[{category, source}]). Walk every variant in turn so a payload
+    # that only carries the S2 structured form (or only OpenAlex concepts)
+    # still surfaces a Field of Study chip. First non-empty real list wins;
+    # capped at three for the strip.
     fos = _fields_of_study_from_openalex(verified_data.get('concepts') or [])
     if not fos:
         s2_fos = verified_data.get('fieldsOfStudy')
         if isinstance(s2_fos, list):
-            fos = [f for f in s2_fos[:3] if f]
+            fos = [f for f in s2_fos if isinstance(f, str) and f.strip()][:3]
+    if not fos:
+        s2_struct_fos = verified_data.get('s2FieldsOfStudy')
+        if isinstance(s2_struct_fos, list):
+            seen_fos = set()
+            for item in s2_struct_fos:
+                cat = item.get('category') if isinstance(item, dict) else item
+                if isinstance(cat, str) and cat.strip() and cat not in seen_fos:
+                    seen_fos.add(cat)
+                    fos.append(cat.strip())
+                if len(fos) >= 3:
+                    break
     if fos:
         enrichment['fields_of_study'] = fos
 
@@ -342,27 +432,49 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # fetch it). We surface SOMETHING in all three cases so the FE's
     # AuthorsLine renders a hover for the cited name even when the
     # backing DB doesn't expose author profile IDs.
-    authorships = verified_data.get('authorships')
-    s2_authors_raw: List[Dict[str, Any]] = []
-    if not authorships:
-        # Crossref shape
-        if isinstance(verified_data.get('author'), list):
-            authorships = verified_data['author']
-        # Semantic Scholar shape — promote {authorId, name} into
-        # OpenAlex-shaped {author: {display_name}}. We deliberately
-        # omit `id` because S2's authorId is NOT an OpenAlex ID and
-        # would produce a broken openalex.org/<id> link in the FE.
-        # `s2_author_id` is stored separately so a future FE pass can
-        # link to semanticscholar.org/author/<id>.
-        elif isinstance(verified_data.get('authors'), list):
-            for a in verified_data['authors']:
+    def _s2_authors_to_authorships(raw: Any) -> List[Dict[str, Any]]:
+        """Promote Semantic Scholar `authors` ({authorId, name}) into the
+        OpenAlex-shaped {author: {display_name}}. We deliberately omit `id`
+        because S2's authorId is NOT an OpenAlex ID and would produce a
+        broken openalex.org/<id> link in the FE; `s2_author_id` is stored
+        separately so the FE can link to semanticscholar.org/author/<id>."""
+        out: List[Dict[str, Any]] = []
+        if isinstance(raw, list):
+            for a in raw:
                 if isinstance(a, dict) and a.get('name'):
                     entry = {'author': {'display_name': a.get('name')}}
                     if a.get('authorId'):
                         entry['s2_author_id'] = a.get('authorId')
-                    s2_authors_raw.append(entry)
-            authorships = s2_authors_raw
-    enriched_authors = _extract_authors_with_orcid(authorships or [])
+                    out.append(entry)
+        return out
+
+    # Authors — multi-shape adapter that coalesces across every author key a
+    # source might carry (OpenAlex `authorships`, Crossref `author`,
+    # Semantic Scholar `authors`). Rather than stopping at the first
+    # non-empty key, normalise EACH present shape and keep the richest
+    # result — the list with the most names, breaking ties toward whichever
+    # carries the most ORCID/OpenAlex IDs. That way a payload whose primary
+    # author key is empty/sparse still shows the fullest real author list
+    # another source provided. Never fabricated.
+    candidate_author_lists: List[List[Dict[str, Any]]] = []
+    for raw in (
+        verified_data.get('authorships'),
+        verified_data.get('author') if isinstance(verified_data.get('author'), list) else None,
+    ):
+        if isinstance(raw, list) and raw:
+            candidate_author_lists.append(_extract_authors_with_orcid(raw))
+    s2_shaped = _s2_authors_to_authorships(verified_data.get('authors'))
+    if s2_shaped:
+        candidate_author_lists.append(_extract_authors_with_orcid(s2_shaped))
+
+    enriched_authors: List[Dict[str, Any]] = []
+    for cand in candidate_author_lists:
+        if not cand:
+            continue
+        cand_ids = sum(1 for a in cand if a.get('orcid') or a.get('openalex_id'))
+        best_ids = sum(1 for a in enriched_authors if a.get('orcid') or a.get('openalex_id'))
+        if (len(cand), cand_ids) > (len(enriched_authors), best_ids):
+            enriched_authors = cand
     if enriched_authors:
         enrichment['authors'] = enriched_authors
 

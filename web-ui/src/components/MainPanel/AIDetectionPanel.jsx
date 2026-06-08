@@ -205,12 +205,18 @@ export default function AIDetectionPanel({ detection, checkId }) {
                   </div>
                 )}
                 {clickable && (
-                  <div className="text-xs mt-1.5 inline-flex items-center gap-1 font-medium" style={{ color: 'var(--color-accent)' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setFocusIdx(i); setViewerOpen(true) }}
+                    title="Open this flagged sentence in the document viewer"
+                    className="text-xs mt-1.5 inline-flex items-center gap-1 font-medium rounded px-1.5 py-0.5 transition-colors focus:outline-none focus:ring-2 hover:bg-[var(--color-bg-secondary)]"
+                    style={{ color: 'var(--color-accent)', background: 'transparent', border: 'none', cursor: 'pointer', '--tw-ring-color': 'var(--color-accent)' }}
+                  >
                     View in document
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
                     </svg>
-                  </div>
+                  </button>
                 )}
               </div>
             )

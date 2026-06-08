@@ -102,6 +102,63 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   const ZOOM_MIN = 0.7, ZOOM_MAX = 2.2, ZOOM_STEP = 0.15
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
+  const clampZoom = (z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +z.toFixed(3)))
+
+  // Live zoom mirror so the once-bound gesture handler can read the current
+  // value as its pinch baseline without re-attaching the listener on each
+  // zoom change.
+  const zoomRef = useRef(zoom)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+
+  // Trackpad pinch-to-zoom over the document. On macOS a pinch arrives as a
+  // `wheel` event with ctrlKey=true (Safari/WebKit/Tauri additionally fire
+  // `gesturestart`/`gesturechange`/`gestureend`). We preventDefault those and
+  // map them onto the zoom state. A plain wheel (no ctrlKey) is left alone so
+  // normal vertical scrolling still works. Listeners are non-passive because we
+  // call preventDefault to stop the browser's own page zoom.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (!e.ctrlKey) return // plain scroll — let it through
+      e.preventDefault()
+      // deltaY > 0 means pinch-in (zoom out). Scale the step by the magnitude
+      // for a smooth, proportional feel, then clamp.
+      const factor = Math.exp(-e.deltaY * 0.01)
+      setZoom((z) => clampZoom(z * factor))
+    }
+    let gestureBase = 1
+    const onGestureStart = (e) => { e.preventDefault(); gestureBase = zoomRef.current }
+    const onGestureChange = (e) => {
+      e.preventDefault()
+      setZoom(clampZoom(gestureBase * (e.scale || 1)))
+    }
+    const onGestureEnd = (e) => { e.preventDefault() }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('gesturestart', onGestureStart, { passive: false })
+    el.addEventListener('gesturechange', onGestureChange, { passive: false })
+    el.addEventListener('gestureend', onGestureEnd, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('gesturestart', onGestureStart)
+      el.removeEventListener('gesturechange', onGestureChange)
+      el.removeEventListener('gestureend', onGestureEnd)
+    }
+  }, [])
+
+  // Back-link from a clicked PDF highlight to its reference card. NativePdfViewer
+  // calls this with the span it drew; we re-broadcast the focus event the
+  // reference list listens for and close the viewer so the flashing card is
+  // visible. Falls back to whatever the parent passed if it supplied a handler.
+  const jumpToReference = (span) => {
+    if (onJumpToReference) { onJumpToReference(span); onClose?.(); return }
+    const refId = span?.refId != null ? span.refId : span?.refIndex
+    if (refId == null) return
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId } }))
+    } catch { /* no-op */ }
+    onClose?.()
+  }
 
   useEffect(() => {
     if (mode !== 'text') return        // only fetch text once we fall back to it
@@ -319,7 +376,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
           {mode === 'pdf' && (
             <NativePdfViewer
               checkId={checkId} spans={spans} focusSpanIndex={focusSpanIndex} zoom={zoom}
-              onJumpToReference={onJumpToReference}
+              onJumpToReference={jumpToReference}
               onUnavailable={() => setMode('text')} onLocated={setPdfLocated}
             />
           )}

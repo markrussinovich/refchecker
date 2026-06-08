@@ -25,39 +25,12 @@ function Pill({ onClick, href, title, color, children }) {
         onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(href) } }}>{children}</a>
     )
   }
-  // Info-only pills (Published, Topics, Preprint, status) have no action — render
+  // Info-only pills (Topics, Preprint, Funding, status) have no action — render
   // them as a plain span so they don't look/behave like a clickable button.
   if (!onClick) {
     return <span title={title} style={style}>{children}</span>
   }
   return <button type="button" onClick={onClick} title={title} style={style}>{children}</button>
-}
-
-// Render enrichment.publication_date for the "Published …" badge. The backend
-// (enrichment.py) already pre-formats this into a human string — "Oct 1, 2021"
-// for a full date, or a bare "2021" year fallback — so the common, real-data
-// case is to surface that string verbatim. We also defensively handle a raw
-// ISO "YYYY-MM-DD" (parsing the parts directly instead of `new Date(str)`,
-// which treats a bare date as UTC midnight and can render the previous day in
-// negative-offset locales). Returns null only when the value is absent or has
-// no usable content — never fabricates a date.
-function formatPublicationDate(value) {
-  if (!value || typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  // Raw ISO date (legacy/defensive path): normalize to a no-drift local string.
-  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (m) {
-    const [, y, mo, d] = m
-    const dt = new Date(Number(y), Number(mo) - 1, Number(d))
-    if (!Number.isNaN(dt.getTime())) {
-      return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-    }
-  }
-  // Already-human backend string ("Oct 1, 2021") or a bare year ("2021"):
-  // surface it as-is. Only require that it actually carries a 4-digit year so
-  // we never render a meaningless fragment.
-  return /\d{4}/.test(trimmed) ? trimmed : null
 }
 
 export default function AdditionalInfoBar({ reference, checkId }) {
@@ -69,12 +42,22 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   const oaUrl = e.oa_pdf_url || (e.links && e.links.oa_pdf) || null
   const toggle = (p) => setPanel((cur) => (cur === p ? null : p))
 
-  // Real OpenAlex signals for the new badges. publication_date is an ISO
-  // string; fields_of_study is an array of real OpenAlex concept names. Both
-  // omit entirely when absent — no placeholders, no fabricated "description".
-  const publishedLabel = formatPublicationDate(e.publication_date)
+  // Primary URL for the "Full link" action: prefer the open-access PDF, then the
+  // reference's own url, then a DOI resolved to https://doi.org/<doi>. Stays null
+  // when none exists so the action is real-data-gated (never a dead link).
+  const doi = reference?.doi || reference?.verified_doi || null
+  const fullLink = oaUrl
+    || reference?.url
+    || (doi ? `https://doi.org/${String(doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')}` : null)
+
+  // Real OpenAlex signals for the new badges. fields_of_study is an array of real
+  // OpenAlex concept names; funders is an array of real funder names. Both omit
+  // entirely when absent — no placeholders, no fabricated "description".
   const topics = Array.isArray(e.fields_of_study)
     ? e.fields_of_study.filter(t => typeof t === 'string' && t.trim())
+    : []
+  const funders = Array.isArray(e.funders)
+    ? e.funders.filter(f => typeof f === 'string' && f.trim())
     : []
 
   // Real verification state (not enrichment): show a live status pill only
@@ -104,11 +87,15 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   if (e.abstract) badges.push(<Pill key="ab" onClick={() => toggle('abstract')} title="Show the abstract">Abstract</Pill>)
   if (e.tldr) badges.push(<Pill key="cl" onClick={() => toggle('tldr')} title="One-line claim (Semantic Scholar TL;DR)" color="var(--color-warning)">Claim</Pill>)
   if (e.is_preprint) badges.push(<Pill key="pp" title="Preprint / posted content (not yet a journal article)" color="var(--color-warning)">Preprint</Pill>)
-  if (publishedLabel) badges.push(<Pill key="pd" title="Publication date (OpenAlex)">Published {publishedLabel}</Pill>)
   if (topics.length > 0) badges.push(<Pill key="fos" title={`Fields of study (OpenAlex concepts): ${topics.join(', ')}`}>Topics: {topics.slice(0, 3).join(', ')}{topics.length > 3 ? ` +${topics.length - 3}` : ''}</Pill>)
+  if (funders.length > 0) badges.push(<Pill key="fund" title={`Funding (OpenAlex grants): ${funders.join(', ')}`}>Funding: {funders.slice(0, 2).join(', ')}{funders.length > 2 ? ` +${funders.length - 2}` : ''}</Pill>)
 
   const actions = []
   if (oaUrl) actions.push(<Pill key="vp" href={oaUrl} title="Open the open-access full text / PDF" color="var(--color-accent)">View full text ↗</Pill>)
+  // "Full link" opens the reference's primary URL (url / DOI). Only shown when it
+  // resolves to something other than the open-access PDF already linked above, so
+  // we never render two pills pointing at the same destination.
+  if (fullLink && fullLink !== oaUrl) actions.push(<Pill key="fl" href={fullLink} title={`Open the reference link: ${fullLink}`} color="var(--color-accent)">Full link ↗</Pill>)
   if (canCache) {
     actions.push(
       <Pill key="lib" onClick={addToLibrary}

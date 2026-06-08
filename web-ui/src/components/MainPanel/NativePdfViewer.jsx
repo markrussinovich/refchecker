@@ -50,6 +50,11 @@ function locate(pageText, rawQuote) {
  *
  * spans: [{ quote, status?, refId?, label?, _i? }]
  */
+// Clamp the auto-computed fit-width base scale to a sensible band so a
+// very narrow modal doesn't render an unreadably tiny page and a very wide
+// one doesn't blow the page up past native-ish resolution.
+const FIT_MIN = 0.5, FIT_MAX = 3
+
 export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = null, zoom = 1, onJumpToReference, onUnavailable, onLocated }) {
   const [pages, setPages] = useState([])      // [{ pageNumber, width, height, highlights }]
   const [status, setStatus] = useState('loading') // loading | ready | error
@@ -57,7 +62,62 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   const canvasRefs = useRef({})               // pageNumber -> canvas el
   const renderedRef = useRef(new Set())       // pages already painted at current scale
   const containerRef = useRef(null)
-  const SCALE = 1.5 * zoom
+  // Base scale that makes a page fit the modal width at zoom=1. Measured from
+  // the scroll container once mounted; falls back to 1 until then. Multiplied
+  // by the `zoom` prop so the header zoom controls (and pinch) scale on top of
+  // a fit-width default instead of a fixed, often-too-wide 1.5×.
+  const [fitScale, setFitScale] = useState(1)
+  const SCALE = fitScale * zoom
+
+  // Measure the available width (the scroll container that wraps us) and derive
+  // a fit-width base scale from the PDF's intrinsic page width. Re-measures on
+  // resize so the page tracks the modal/window size. The page never exceeds the
+  // container width at zoom=1 because the base scale targets the inner width.
+  useEffect(() => {
+    const compute = () => {
+      const host = containerRef.current?.parentElement
+      const pdf = docRef.current
+      if (!host || !pdf) return
+      ;(async () => {
+        try {
+          const page = await pdf.getPage(1)
+          const base = page.getViewport({ scale: 1 })
+          // Subtract a little so the page + its drop shadow sit inside the
+          // padded scroll area rather than forcing a horizontal scrollbar.
+          const avail = Math.max(0, host.clientWidth - 8)
+          if (!avail || !base.width) return
+          const next = Math.min(FIT_MAX, Math.max(FIT_MIN, avail / base.width))
+          setFitScale((prev) => (Math.abs(prev - next) > 0.01 ? next : prev))
+        } catch { /* not ready yet — ignore */ }
+      })()
+    }
+    compute()
+    const host = containerRef.current?.parentElement
+    let ro
+    if (typeof ResizeObserver !== 'undefined' && host) {
+      ro = new ResizeObserver(compute)
+      ro.observe(host)
+    }
+    window.addEventListener('resize', compute)
+    return () => {
+      try { ro?.disconnect() } catch { /* ignore */ }
+      window.removeEventListener('resize', compute)
+    }
+  }, [status])
+
+  // Clicking a highlight that carries a reference id should scroll the matching
+  // reference card into view. Prefer the caller's handler when supplied;
+  // otherwise dispatch the same `refchecker:focus-reference` event the
+  // ReferenceCard list listens for, wiring the back-link end-to-end without a
+  // prop drill. (MainPanel switches to the References tab on this event.)
+  const jumpToReference = useCallback((span) => {
+    if (onJumpToReference) { onJumpToReference(span); return }
+    const refId = span?.refId != null ? span.refId : span?.refIndex
+    if (refId == null) return
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId } }))
+    } catch { /* no-op */ }
+  }, [onJumpToReference])
 
   // Load the PDF + compute highlight geometry (independent of paint scale).
   useEffect(() => {
@@ -194,12 +254,13 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
           <canvas ref={(el) => { canvasRefs.current[p.pageNumber] = el }}
             style={{ display: 'block', width: p.width, height: p.height }} />
           {p.highlights.map((h) => {
-            const clickable = !!(onJumpToReference && (h.span.refId != null || h.span.refIndex != null))
+            const hasRef = h.span.refId != null || h.span.refIndex != null
+            const clickable = hasRef
             return (
               <div
                 key={h.key}
                 data-span={h.spanIndex}
-                onClick={clickable ? () => onJumpToReference(h.span) : undefined}
+                onClick={clickable ? (e) => { e.stopPropagation(); jumpToReference(h.span) } : undefined}
                 title={clickable ? `Go to reference${h.span.label ? `: ${h.span.label}` : ''}` : (h.span.label || undefined)}
                 style={{
                   position: 'absolute', left: h.x, top: h.y, width: h.w, height: h.h,
