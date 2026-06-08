@@ -1285,6 +1285,28 @@ class ProgressRefChecker:
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path}")
 
+        # R04: dedicated, bounded thread pool for the hallucination LLM
+        # checks. Previously these ran on the default (shared) executor,
+        # which could saturate and let a hung LLM request wedge the whole
+        # check. A small private pool isolates them and bounds concurrency.
+        self._ha_executor = ThreadPoolExecutor(
+            max_workers=8, thread_name_prefix="halluc",
+        )
+
+    def close(self) -> None:
+        """Release the dedicated hallucination executor.
+
+        Best-effort: safe to call multiple times. Not strictly required
+        (worker threads are daemonic and the process tears them down), but
+        lets long-lived callers reclaim threads deterministically.
+        """
+        ex = getattr(self, '_ha_executor', None)
+        if ex is not None:
+            try:
+                ex.shutdown(wait=False)
+            except Exception:
+                pass
+
     def _format_verification_result(
         self,
         reference: Dict[str, Any],
@@ -4189,9 +4211,19 @@ class ProgressRefChecker:
                         ha_task = asyncio.create_task(
                             asyncio.wait_for(
                                 loop.run_in_executor(
-                                    None, self._run_hallucination_check_sync, c_result, c_ref
+                                    # R04: dedicated bounded pool (not the
+                                    # shared default executor) so a hung LLM
+                                    # request can't saturate everything else.
+                                    self._ha_executor,
+                                    self._run_hallucination_check_sync, c_result, c_ref
                                 ),
-                                timeout=150.0,
+                                # R04: lowered from 150s → 90s. The verifier's
+                                # own per-client timeouts (60–90s) bound each
+                                # request; this outer wall-clock cap guarantees
+                                # the ref can never stay pending much longer.
+                                # Read from an instance attr so tests can inject
+                                # a tiny budget without monkeypatching the loop.
+                                timeout=getattr(self, '_ha_task_timeout', 90.0),
                             ),
                             name=f"hallucination-{c_idx}",
                         )

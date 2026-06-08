@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReferenceCard from './ReferenceCard'
 
 vi.mock('../../utils/formatters', async () => {
@@ -98,5 +98,64 @@ describe('ReferenceCard', () => {
     expect(marker).toBeInTheDocument()
     expect(marker.style.fontWeight).toBe('700')
     expect(container.textContent).toContain('groups (Black et al., 2022).')
+  })
+})
+
+describe('ReferenceCard — R04 hallucination-pending safety net', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reverts a ref stuck pending past the wall-clock cap to its base status with a timeout note', () => {
+    vi.useFakeTimers()
+    const reference = {
+      status: 'verified',
+      title: 'A Reference Stuck Mid-Hallucination-Check',
+      authors: ['A. Author'],
+      year: 2024,
+      hallucination_check_pending: true,
+      errors: [],
+      warnings: [],
+      suggestions: [],
+    }
+
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    // Initially: the pending spinner text is shown, no timeout note yet.
+    expect(screen.getByText(/Checking for hallucination with LLM/i)).toBeTruthy()
+    expect(screen.queryByText(/Hallucination check timed out/i)).toBeNull()
+
+    // Advance past the ~180s FE budget — the safety net fires.
+    act(() => {
+      vi.advanceTimersByTime(181000)
+    })
+
+    // The eternal "checking" indicator is gone, replaced by a timeout note;
+    // the card no longer wedges on the spinner.
+    expect(screen.queryByText(/Checking for hallucination with LLM/i)).toBeNull()
+    expect(screen.getByText(/Hallucination check timed out/i)).toBeTruthy()
+  })
+
+  it('does not show a timeout note while still within the budget', () => {
+    vi.useFakeTimers()
+    const reference = {
+      status: 'verified',
+      title: 'Still Checking',
+      authors: ['B. Author'],
+      year: 2024,
+      hallucination_check_pending: true,
+      errors: [],
+      warnings: [],
+      suggestions: [],
+    }
+
+    render(<ReferenceCard reference={reference} index={1} />)
+
+    act(() => {
+      vi.advanceTimersByTime(60000) // 60s — well under the cap
+    })
+
+    expect(screen.getByText(/Checking for hallucination with LLM/i)).toBeTruthy()
+    expect(screen.queryByText(/Hallucination check timed out/i)).toBeNull()
   })
 })

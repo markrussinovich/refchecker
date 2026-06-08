@@ -43,6 +43,12 @@ const handleExternalClick = (url) => (e) => {
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
+// R04: client-side wall-clock cap on the hallucination "checking" state.
+// If a ref stays pending longer than this (~180s) the FE reverts it to its
+// base status with a "check timed out" note, so a missing backend
+// reference_result can never wedge the card on the spinner forever.
+const HALLUCINATION_PENDING_TIMEOUT_MS = 180000
+
 function normalizeCitationMarkerText(value) {
   return String(value || '')
     .normalize('NFKC')
@@ -267,7 +273,41 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
-  const status = getEffectiveReferenceStatus(reference, isCheckComplete)
+
+  // R04 FE safety net: if a ref sits in the hallucination "checking" state
+  // for longer than HALLUCINATION_PENDING_TIMEOUT_MS (~180s) — e.g. the
+  // backend's final reference_result never arrived — stop spinning forever.
+  // We locally treat the check as finished (no pending flag) so the card
+  // falls back to its real base status and shows a "check timed out" note,
+  // instead of wedging on "Checking for hallucination with LLM…".
+  const [hallucinationTimedOut, setHallucinationTimedOut] = useState(false)
+  const isHallucinationPending = !reference.hallucination_assessment && (
+    reference.hallucination_check_pending ||
+    (getEffectiveReferenceStatus(reference, isCheckComplete) === 'checking'
+      && reference.errors?.some(e => e.error_type === 'unverified'))
+  )
+  useEffect(() => {
+    if (!isHallucinationPending) {
+      // Pending resolved (or never started) — clear any prior timeout flag
+      // so a later legitimate re-check isn't immediately marked timed-out.
+      setHallucinationTimedOut(false)
+      return undefined
+    }
+    if (hallucinationTimedOut) return undefined
+    const t = setTimeout(() => setHallucinationTimedOut(true), HALLUCINATION_PENDING_TIMEOUT_MS)
+    return () => clearTimeout(t)
+  }, [isHallucinationPending, hallucinationTimedOut])
+
+  // Once timed out, evaluate status as if the check had finished: clear the
+  // pending flag AND treat the check as complete, so the card resolves to its
+  // real base status (verified/error/warning/etc.) instead of staying on
+  // 'checking' — covering both the explicit-pending and the unverified-during-
+  // active-check cases.
+  const statusReference = hallucinationTimedOut && reference.hallucination_check_pending
+    ? { ...reference, hallucination_check_pending: false }
+    : reference
+  const statusIsComplete = isCheckComplete || (hallucinationTimedOut && isHallucinationPending)
+  const status = getEffectiveReferenceStatus(statusReference, statusIsComplete)
 
   // Subscribe to the shared citation-style store so the card re-renders
   // when the user changes the style picker on the References tab.
@@ -1140,13 +1180,21 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
           {/* Hallucination check pending indicator — shows when:
               1. Backend explicitly set hallucination_check_pending, OR
-              2. Ref is unverified during an active check (LLM check hasn't started yet) */}
-          {!reference.hallucination_assessment && (
-            reference.hallucination_check_pending ||
-            (status === 'checking' && reference.errors?.some(e => e.error_type === 'unverified'))
-          ) && (
+              2. Ref is unverified during an active check (LLM check hasn't started yet)
+              R04: suppressed once the FE wall-clock cap (HALLUCINATION_PENDING_TIMEOUT_MS)
+              elapses — see the "check timed out" note below. */}
+          {isHallucinationPending && !hallucinationTimedOut && (
             <div className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
               <span>{reference.hallucination_check_pending ? 'Checking for hallucination with LLM...' : 'Awaiting LLM hallucination check...'}</span>
+            </div>
+          )}
+
+          {/* R04 FE safety net: the hallucination check never reported back
+              within the budget. Show a non-blocking note instead of an
+              eternal spinner; the card already fell back to its base status. */}
+          {isHallucinationPending && hallucinationTimedOut && (
+            <div className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              <span>Hallucination check timed out.</span>
             </div>
           )}
 
