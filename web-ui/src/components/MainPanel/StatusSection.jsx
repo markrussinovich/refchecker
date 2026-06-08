@@ -7,6 +7,7 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import ShareModal from '../Modals/ShareModal'
+import { getStatusColors, normalizeStatus } from '../../utils/statusColors'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
@@ -27,20 +28,14 @@ const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight:
 const _BAND_HL = {
   high: 'rgba(239,68,68,0.30)', medium: 'rgba(245,158,11,0.30)', low: 'rgba(34,197,94,0.22)',
 }
-// Citation-context highlight fill (distinct blue, so it never reads as AI).
+// Citation-context highlight fill (distinct blue) for citations WITHOUT a
+// resolved check status, so they never read as an AI flag.
 const _CITE_HL = 'rgba(59,130,246,0.32)'
-// Citation-context highlight tinted by the reference's CHECK STATUS, so the
-// reader instantly sees whether the cited source is verified / has issues.
-const _STATUS_HL = {
-  verified: 'rgba(34,197,94,0.34)', error: 'rgba(239,68,68,0.36)',
-  warning: 'rgba(245,158,11,0.34)', unverified: 'rgba(148,163,184,0.30)',
-  hallucination: 'rgba(168,85,247,0.34)', hallucinated: 'rgba(168,85,247,0.34)',
-}
-const _STATUS_STROKE = {
-  verified: 'rgba(22,163,74,0.85)', error: 'rgba(220,38,38,0.9)',
-  warning: 'rgba(202,138,4,0.85)', unverified: 'rgba(100,116,139,0.7)',
-  hallucination: 'rgba(147,51,234,0.85)', hallucinated: 'rgba(147,51,234,0.85)',
-}
+const _CITE_STROKE = 'rgba(37,99,235,0.6)'
+// Citation-context highlights with a known reference status are tinted via the
+// shared R14 status→color map (utils/statusColors), so this overlay agrees with
+// NativePdfViewer + ReferenceCard. `hallucinated` is normalized to
+// `hallucination` there.
 
 function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, citationTarget, onClose }) {
   const [pageCount, setPageCount] = useState(null)
@@ -464,9 +459,14 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                 {/* Citation-context highlight — tinted by the reference's CHECK
                     STATUS, pulses on appear, and links back to the reference. */}
                 {(citeHl[i] || []).flatMap((hl) => {
-                  const st = (hl.status || '').toLowerCase()
-                  const fill = _STATUS_HL[st] || _CITE_HL
-                  const stroke = _STATUS_STROKE[st] || 'rgba(37,99,235,0.6)'
+                  // Normalize via the shared R14 map (handles the `hallucinated`
+                  // alias). A citation with no resolved status keeps the distinct
+                  // blue so it never reads as a verification verdict.
+                  const st = normalizeStatus(hl.status)
+                  const hasStatus = st !== 'default'
+                  const statusColors = getStatusColors(hl.status)
+                  const fill = hasStatus ? statusColors.fill : _CITE_HL
+                  const stroke = hasStatus ? statusColors.stroke : _CITE_STROKE
                   const clickable = !!hl.refId
                   return (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
                     <div
@@ -494,7 +494,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                           padding: '6px 8px', borderRadius: 6, width: 250, lineHeight: 1.4,
                           pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
                         }}>
-                          <strong style={{ color: '#fff' }}>Citation context{st ? ` · ${st}` : ''}</strong>
+                          <strong style={{ color: '#fff' }}>Citation context{hasStatus ? ` · ${st}` : ''}</strong>
                           {hl.refTitle ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>{hl.refTitle.slice(0, 90)}</div> : null}
                           {clickable ? <div style={{ color: '#93c5fd', marginTop: 3 }}>Click to open this reference ↗</div> : null}
                         </div>

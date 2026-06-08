@@ -3,23 +3,15 @@ import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { getPaperPdf } from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { getStatusColors } from '../../utils/statusColors'
 
 // Vite resolves `?url` to the emitted worker asset; pdfjs needs it set once.
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
-// Status → highlight colours, matching the reference-card status palette.
-const FILL = {
-  verified: 'rgba(16,185,129,0.26)', warning: 'rgba(245,158,11,0.30)',
-  error: 'rgba(239,68,68,0.30)', hallucination: 'rgba(168,85,247,0.30)',
-  suggestion: 'rgba(59,130,246,0.26)', ai: 'rgba(239,68,68,0.24)',
-  default: 'rgba(245,158,11,0.28)',
-}
-const STROKE = {
-  verified: 'rgba(16,185,129,0.95)', warning: 'rgba(245,158,11,0.95)',
-  error: 'rgba(239,68,68,0.95)', hallucination: 'rgba(168,85,247,0.95)',
-  suggestion: 'rgba(59,130,246,0.95)', ai: 'rgba(239,68,68,0.8)',
-  default: 'rgba(245,158,11,0.9)',
-}
+// AI-flagged spans carry no verification status, so they keep a dedicated red
+// highlight; every status-bearing span is colored via the shared R14 map
+// (utils/statusColors) so this viewer agrees with StatusSection + ReferenceCard.
+const AI_COLORS = { fill: 'rgba(239,68,68,0.24)', stroke: 'rgba(239,68,68,0.8)' }
 
 const ESC = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const norm = (s) => (s || '').replace(/\s+/g, ' ').trim()
@@ -184,11 +176,15 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
             const boxes = items.filter((it) => it.end > qs && it.start < qe && it.w > 0)
             if (!boxes.length) return
             totalLocated += 1
-            const sKey = sp.status || (sp.kind === 'ai' ? 'ai' : 'default')
+            // Status-bearing spans use the shared R14 map; status-less AI spans
+            // keep the dedicated red highlight.
+            const colors = sp.status
+              ? getStatusColors(sp.status)
+              : (sp.kind === 'ai' ? AI_COLORS : getStatusColors('default'))
             boxes.forEach((b, bi) => highlights.push({
               spanIndex: si, key: `${n}-${si}-${bi}`,
               x: b.x, y: b.y, w: b.w, h: b.h,
-              fill: FILL[sKey] || FILL.default, stroke: STROKE[sKey] || STROKE.default,
+              fill: colors.fill, stroke: colors.stroke,
               span: sp,
             }))
           })
