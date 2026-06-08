@@ -1,0 +1,230 @@
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useAuthStore } from '../../stores/useAuthStore'
+import { getTeams, createTeam, getTeamMembers, addTeamMember } from '../../utils/api'
+import { logger } from '../../utils/logger'
+
+/**
+ * Team switcher / menu in the header (issue #66). Lists the teams the current
+ * user owns or belongs to, shows the selected team's members, and lets the
+ * owner create a team or add a member by email.
+ *
+ * Only rendered when auth is enabled (teams require real OAuth users); mirrors
+ * UserMenu's outside-click-close pattern and uses theme CSS vars.
+ */
+export default function TeamMenu() {
+  const { user, authRequired } = useAuthStore()
+  const [open, setOpen] = useState(false)
+  const [teams, setTeams] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [members, setMembers] = useState([])
+  const [newTeamName, setNewTeamName] = useState('')
+  const [memberEmail, setMemberEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    const onDown = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  const loadTeams = useCallback(async () => {
+    try {
+      const resp = await getTeams()
+      const list = resp.data.teams || []
+      setTeams(list)
+      setSelectedId((prev) => (prev && list.some((t) => t.id === prev) ? prev : (list[0]?.id ?? null)))
+    } catch (e) {
+      logger.error('TeamMenu', 'Failed to load teams', e)
+      setError('Could not load teams')
+    }
+  }, [])
+
+  const loadMembers = useCallback(async (teamId) => {
+    if (!teamId) { setMembers([]); return }
+    try {
+      const resp = await getTeamMembers(teamId)
+      setMembers(resp.data.members || [])
+    } catch (e) {
+      logger.error('TeamMenu', 'Failed to load members', e)
+      setMembers([])
+    }
+  }, [])
+
+  // Load teams when the menu opens.
+  useEffect(() => { if (open) loadTeams() }, [open, loadTeams])
+  // Load members whenever the selected team changes (while open).
+  useEffect(() => { if (open) loadMembers(selectedId) }, [open, selectedId, loadMembers])
+
+  if (!authRequired || !user) return null
+
+  const selectedTeam = teams.find((t) => t.id === selectedId) || null
+  const isOwner = selectedTeam && selectedTeam.owner_user_id === user.id
+
+  const handleCreate = async () => {
+    const name = newTeamName.trim()
+    if (!name) return
+    setBusy(true); setError('')
+    try {
+      const resp = await createTeam(name)
+      setNewTeamName('')
+      await loadTeams()
+      const created = resp.data.team
+      if (created?.id) setSelectedId(created.id)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not create team')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleAddMember = async () => {
+    const email = memberEmail.trim()
+    if (!email || !selectedId) return
+    setBusy(true); setError('')
+    try {
+      const resp = await addTeamMember(selectedId, { email })
+      setMemberEmail('')
+      setMembers(resp.data.members || [])
+      await loadTeams() // refresh member counts
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not add member')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-gray-400 hover:text-gray-200 transition-colors flex items-center"
+        aria-label="Teams"
+        title="Teams"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-2.5-1.34M5 12.66A3 3 0 117 7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 mt-2 w-72 rounded-xl shadow-lg z-50 py-1"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+            Teams
+          </div>
+
+          {/* Team switcher */}
+          {teams.length > 0 ? (
+            <div className="px-3 pb-2">
+              <select
+                value={selectedId ?? ''}
+                onChange={(e) => setSelectedId(Number(e.target.value))}
+                className="w-full text-sm rounded-md px-2 py-1.5"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.member_count})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <p className="px-3 pb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              You are not in any team yet.
+            </p>
+          )}
+
+          {/* Members of the selected team */}
+          {selectedTeam && (
+            <div className="px-3 pb-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <p className="text-xs font-semibold mt-2 mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                Members
+              </p>
+              <ul className="max-h-40 overflow-y-auto space-y-1">
+                {members.map((m) => (
+                  <li key={m.user_id} className="flex items-center justify-between text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                    <span className="truncate">{m.name || m.email || `User ${m.user_id}`}</span>
+                    <span className="text-xs ml-2 flex-none" style={{ color: 'var(--color-text-secondary)' }}>{m.role}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {/* Owner-only: add a member by email */}
+              {isOwner && (
+                <div className="flex gap-1 mt-2">
+                  <input
+                    type="email"
+                    value={memberEmail}
+                    onChange={(e) => setMemberEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddMember() }}
+                    placeholder="member@email.com"
+                    className="flex-1 text-sm rounded-md px-2 py-1.5 min-w-0"
+                    style={{
+                      backgroundColor: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddMember}
+                    disabled={busy || !memberEmail.trim()}
+                    className="text-sm rounded-md px-2.5 py-1.5 flex-none disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: '#fff' }}
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Create a new team */}
+          <div className="px-3 py-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-muted)' }}>
+              Create a team
+            </p>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+                placeholder="Team name"
+                className="flex-1 text-sm rounded-md px-2 py-1.5 min-w-0"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border)',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={busy || !newTeamName.trim()}
+                className="text-sm rounded-md px-2.5 py-1.5 flex-none disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: '#fff' }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <p className="px-3 pb-2 text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>{error}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

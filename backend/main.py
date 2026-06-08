@@ -944,6 +944,18 @@ class BatchUrlsRequest(BaseModel):
     """Request model for batch URL submission"""
     urls: list[str]
     batch_label: Optional[str] = None
+
+
+class TeamCreate(BaseModel):
+    """Request model for creating a team (issue #66)."""
+    name: str
+
+
+class TeamMemberAdd(BaseModel):
+    """Request model for adding a member to a team by email or user id."""
+    email: Optional[str] = None
+    user_id: Optional[int] = None
+    role: str = "member"
     llm_config_id: Optional[LLMConfigId] = None
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
@@ -1337,6 +1349,77 @@ async def auth_me(current_user: UserInfo = Depends(require_user)):
             "is_admin": current_user.is_admin,
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# Teams (issue #66): create a team, list my teams, add/list members.
+# All require_user; mutations are owner-gated.
+# ---------------------------------------------------------------------------
+
+async def _get_team_for_member_or_404(team_id: int, current_user: UserInfo) -> dict:
+    """Fetch a team the current user belongs to, or raise 404."""
+    team = await db.get_team(team_id)
+    if not team or not await db.is_team_member(team_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team
+
+
+@app.post("/api/teams")
+async def create_team(
+    payload: TeamCreate,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Create a team owned by the current user (who is also added as a member)."""
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Team name is required")
+    team = await db.create_team(name, current_user.id)
+    return {"team": team}
+
+
+@app.get("/api/teams")
+async def list_teams(current_user: UserInfo = Depends(require_user)):
+    """List teams the current user owns or belongs to."""
+    return {"teams": await db.get_teams_for_user(current_user.id)}
+
+
+@app.get("/api/teams/{team_id}/members")
+async def list_team_members(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """List members of a team the current user belongs to."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"members": await db.get_team_members(team_id)}
+
+
+@app.post("/api/teams/{team_id}/members")
+async def add_team_member(
+    team_id: int,
+    payload: TeamMemberAdd,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Add a member by email or user id. Only the team owner may add members."""
+    team = await db.get_team(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the team owner can add members")
+
+    target = None
+    if payload.user_id is not None:
+        target = await db.get_user_by_id(payload.user_id)
+    elif payload.email:
+        target = await db.get_user_by_email(payload.email)
+    else:
+        raise HTTPException(status_code=400, detail="Provide an email or user_id")
+
+    if not target:
+        raise HTTPException(status_code=404, detail="No user found for that email or id")
+
+    role = (payload.role or "member").strip() or "member"
+    added = await db.add_team_member(team_id, target["id"], role)
+    return {"added": added, "members": await db.get_team_members(team_id)}
 
 
 @app.post("/api/auth/logout")

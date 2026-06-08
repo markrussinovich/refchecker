@@ -60,6 +60,13 @@ export const authLogout = () => api.post('/auth/logout')
 export const getUserPreferences = () => api.get('/user/preferences')
 export const updateUserPreferences = (preferences) => api.put('/user/preferences', preferences)
 
+// Teams (issue #66): create + list my teams, list + add members.
+export const getTeams = () => api.get('/teams')
+export const createTeam = (name) => api.post('/teams', { name })
+export const getTeamMembers = (teamId) => api.get(`/teams/${teamId}/members`)
+export const addTeamMember = (teamId, { email, user_id, role } = {}) =>
+  api.post(`/teams/${teamId}/members`, { email, user_id, role })
+
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
 export const createLLMConfig = (config) => api.post('/llm-configs', config)

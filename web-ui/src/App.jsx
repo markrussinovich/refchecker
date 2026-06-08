@@ -6,6 +6,7 @@ import LiveWebSocketManager from './components/LiveWebSocketManager'
 import SettingsPanel from './components/Settings/SettingsPanel'
 import LoginPage from './components/Auth/LoginPage'
 import UserMenu from './components/Auth/UserMenu'
+import TeamMenu from './components/Auth/TeamMenu'
 import SupportMenu from './components/common/SupportMenu'
 import { logger } from './utils/logger'
 import { useAuthStore } from './stores/useAuthStore'
@@ -185,6 +186,8 @@ function App() {
             </a>
             {/* Help & support: GitHub issue + email the maintainers */}
             <SupportMenu />
+            {/* Teams switcher/menu (only visible when auth is enabled) */}
+            <TeamMenu />
             {/* User menu (only visible when auth is enabled) */}
             <UserMenu />
           </div>

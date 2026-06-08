@@ -513,6 +513,34 @@ class Database:
                 )
             """)
 
+            # Teams (issue #66). A team is owned by one user and groups any
+            # number of member users. Owner-gated mutations live in main.py;
+            # the schema is idempotent (CREATE TABLE IF NOT EXISTS) and mirrors
+            # the migration style used by users/oauth_accounts above.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS teams (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS team_members (
+                    team_id INTEGER NOT NULL REFERENCES teams(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    role TEXT NOT NULL DEFAULT 'member',
+                    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (team_id, user_id)
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_user_id)"
+            )
+
             # Tiny key/value store for one-time migrations. Keeps the
             # bump-schema-and-clean-stale-rows logic out of the column
             # additions in `_ensure_columns` so each migration is a
@@ -1734,6 +1762,118 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get a user by email (case-insensitive). Used to add members by email."""
+        if not email:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, provider, provider_id, email, name, avatar_url, is_admin, created_at "
+                "FROM users WHERE email IS NOT NULL AND LOWER(email) = LOWER(?)",
+                (email.strip(),)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Teams (issue #66)
+    # ------------------------------------------------------------------
+
+    async def create_team(self, name: str, owner_user_id: int) -> Dict[str, Any]:
+        """Create a team owned by ``owner_user_id`` and add the owner as a member.
+
+        Returns the created team row (with id, name, owner_user_id, created_at).
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "INSERT INTO teams (name, owner_user_id) VALUES (?, ?)",
+                (name, owner_user_id),
+            )
+            team_id = cursor.lastrowid
+            # Owner is always a member with the 'owner' role.
+            await db.execute(
+                "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
+                (team_id, owner_user_id),
+            )
+            await db.commit()
+            async with db.execute(
+                "SELECT id, name, owner_user_id, created_at FROM teams WHERE id = ?",
+                (team_id,),
+            ) as c:
+                row = await c.fetchone()
+                return dict(row)
+
+    async def get_team(self, team_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single team by id, or None."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, name, owner_user_id, created_at FROM teams WHERE id = ?",
+                (team_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_teams_for_user(self, user_id: int) -> List[Dict[str, Any]]:
+        """List teams the user owns or is a member of, with member counts."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT t.id, t.name, t.owner_user_id, t.created_at,
+                       tm.role AS my_role,
+                       (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+                FROM teams t
+                JOIN team_members tm ON tm.team_id = t.id
+                WHERE tm.user_id = ?
+                ORDER BY t.created_at DESC, t.id DESC
+                """,
+                (user_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def is_team_member(self, team_id: int, user_id: int) -> bool:
+        """Return whether the user belongs to the team."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?",
+                (team_id, user_id),
+            ) as cursor:
+                return await cursor.fetchone() is not None
+
+    async def get_team_members(self, team_id: int) -> List[Dict[str, Any]]:
+        """List members of a team joined with their user profile fields."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT tm.user_id, tm.role, tm.joined_at,
+                       u.email, u.name, u.avatar_url
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE tm.team_id = ?
+                ORDER BY tm.joined_at ASC, tm.user_id ASC
+                """,
+                (team_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def add_team_member(self, team_id: int, user_id: int, role: str = "member") -> bool:
+        """Add a user to a team. Idempotent: returns True if a new row was added."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)",
+                (team_id, user_id, role),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
