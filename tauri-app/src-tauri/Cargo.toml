@@ -27,6 +27,11 @@ once_cell = "1"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Crate-local marker that gates open_devtools() in release builds (debug builds
+# always allow it). Declaring it here makes `--features devtools` buildable and
+# silences the check-cfg "unexpected cfg value: devtools" warning. The `tauri`
+# dependency already enables its own `devtools` feature unconditionally.
+devtools = ["tauri/devtools"]
 
 [profile.release]
 panic = "abort"
