@@ -164,14 +164,17 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
     }
   }, [paperTitle, mode, cacheKey])
 
-  // Tick a re-render every second while a search is in flight so the
-  // elapsed-time progress label updates instead of freezing.
+  // Elapsed seconds since the search started, kept as STATE updated by an
+  // interval — so render stays pure (no Date.now() during render, which the
+  // react-hooks purity rule rightly flags) and the label still ticks live.
+  const [elapsedSec, setElapsedSec] = useState(0)
   useEffect(() => {
-    if (!loading || !searchStartedAt) return undefined
-    const t = setInterval(() => setSearchStartedAt(s => s), 1000)
+    if (!searchStartedAt) { setElapsedSec(0); return undefined }
+    const tick = () => setElapsedSec(Math.floor((Date.now() - searchStartedAt) / 1000))
+    tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [loading, searchStartedAt])
-  const elapsedSec = searchStartedAt ? Math.floor((Date.now() - searchStartedAt) / 1000) : 0
+  }, [searchStartedAt])
 
   if (!refsForRequest.length) {
     return (
