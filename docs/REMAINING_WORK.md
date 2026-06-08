@@ -513,3 +513,89 @@ for (const s of STREAMS) {                         // sequential: respects build
 
 ### Paste-ready master prompt (hand to the harness)
 > Close every remaining item in `docs/REMAINING_WORK.md` §3 (R01–R41) for the refchecker monorepo at `/Users/ario/Downloads/refchecker`. Work one §4 work-stream at a time in the §5 build order (P0 first: R01 → R04 → R05 → viewers). For EACH work-stream run an adversarial loop: a **researcher** enumerates breaking inputs; **full-stack / ml / regex / algorithms** engineers implement the change + ≥1 test per item in an isolated worktree; a **reviewer** and a **watchdog** (plus the relevant domain subagents for the heavy streams 2,3,5-R08,6,9,11) challenge the diff and only close an objection with file:line + a passing test; iterate until zero objections. Then a **tester** runs `cd web-ui && npm run lint && npm test && npm run build`, `python -m pytest tests/unit`, and `cargo check` in `tauri-app/src-tauri`; the watchdog signs off only when every acceptance checkbox for that stream passes and no §2 DONE item regressed. Enforce the §7 hard constraints (no fabrication, no dead buttons, no empty gated containers, real per-article video counts, in-PDF hyperlinks). Do NOT rebuild anything in §2. Stop only when all 41 items pass §6 acceptance and full CI is green (R40); do not cut a release until then.
+
+---
+
+## 8. Batch 3 — additional requests (R42–R45)
+
+New asks captured after the run started. R42 touches in-flux viewer files (`NativePdfViewer.jsx`/`DocumentViewer.jsx`) so it is scheduled AFTER the viewer streams S5–S7; R45 folds into R23/R24 with tightened acceptance. Each carries the adversarial implement→reviewer+watchdog→verify loop.
+
+| ID | Area | Requirement | Current state (file ref) | Severity |
+|---|---|---|---|---|
+| **R42** | Viewers | In **all** native PDF views, a search/find option (Cmd/Ctrl+F) with match highlight + next/prev + count | No find UI in the pdf.js viewers (`NativePdfViewer.jsx`, `DocumentViewer.jsx`); text layer exists for highlights | **P1 · MISSING** |
+| **R43** | Per-ref chat | Make the reference's file queryable: fetch its full text so chat answers from the document, not only the TL;DR | `article_chat.py:259` chats on whatever `grounding` is passed (anticipates a "from abstract only" banner `:252`); FE passes only TL;DR → disclaimer in `ArticleAssistant.jsx`; no full-text retrieval for refs | **P1 · PARTIAL** |
+| **R44** | Library UI | When a ref is in the library, a clearly-labeled "Remove from library" near the in-library pill, distinct from the reference-list Remove | Both exist + titled distinctly (`ReferenceActionsBar.jsx:405` "…from the check" vs `AdditionalInfoBar.jsx:174` "…from your Seen-References library"); ambiguous visible labels/placement | **P2 · PARTIAL** |
+| **R45** | Share video | Video counts must equal that article's Summary; play once then freeze on the completed frame until the popup is closed & reopened (replays once) | `ShareModal.jsx:86`/`ShareAnimationCanvas` use `buildReferenceSummary` but with non-style-aware inputs vs `StatsSection.jsx:211-212`; animation loops/unmounts | **P1 · BROKEN (merge into R23/R24)** |
+
+### R42 — Native-PDF find/search *(implement after S5–S7)*
+- *Change:* add a Find bar to the shared pdf.js viewer used by the per-ref context view AND the AI-detection viewer. Prefer pdfjs `EventBus` + `PDFFindController` wired to the existing text layer; else a custom controller over the rendered text-layer spans (normalize → match → wrap in `<mark>` → track current index → scroll into view). Keyboard: Cmd/Ctrl+F focuses the bar, Enter/Shift+Enter next/prev, Esc closes+clears. Must not clash with the R14 status/citation highlight colors.
+- *Acceptance:* [ ] Find bar present in every native PDF view; [ ] highlights all matches with count + next/prev + clear; [ ] Cmd/Ctrl+F + Esc work; [ ] status/citation highlights still render; [ ] vitest for the match/navigation logic.
+
+### R43 — Per-reference chat grounded in fetched full text *(adversarial loop; honesty-gated)*
+- *Change:* add a reference full-text retrieval path — resolve the ref's DOI → OA location via Unpaywall/OpenAlex `best_oa_location`/arXiv (reuse existing fetchers in `src/refchecker/utils` + `backend/pdf_convert.py`), download the PDF, extract text (PyMuPDF), cache per identity (DOI/arXiv/title) with TTL + soft-fail + bounded concurrency. Extend the per-ref chat endpoint so it returns `grounding=<full_text>, source='pdf'` when available, else `grounding=<tldr>, source='tldr'`. `ArticleAssistant.jsx`: on opening chat for a ref, trigger retrieval ("Fetching full text…") and switch the banner to "grounded in the full text" vs the existing TL;DR-only disclaimer. HONESTY: only real fetched text; if retrieval fails, keep the current TL;DR disclaimer verbatim — never fabricate.
+- *Acceptance:* [ ] OA-available ref → chat grounded in the fetched full text with the matching banner; [ ] no-OA ref → existing TL;DR-only disclaimer unchanged; [ ] retrieval cached/soft-fail/bounded; [ ] backend test (OA hit → full-text grounding, miss → tldr) + vitest for the banner states.
+
+### R44 — Distinct "Remove from library" control
+- *Change:* in `AdditionalInfoBar.jsx`, give the in-library remove a clear VISIBLE affordance ("Remove from library" text or a library-minus icon + tooltip) placed immediately next to the "✓ In library" pill, visually distinct from the `ReferenceActionsBar.jsx` "Remove" (which removes from the check — optionally relabel that "Remove from list"). Keep the honest post-remove "Removed" pill. Align to the R33 button system.
+- *Acceptance:* [ ] in-library pill has an adjacent, clearly-labeled control that calls `removeFromLibrary` only; [ ] the list/check "Remove" stays distinct and unaffected; [ ] vitest that the two removes invoke different handlers.
+
+### R45 — Share video count parity + play-once-then-freeze *(merge into R23/R24)*
+- *Change:* feed `ShareModal`/`ShareAnimationCanvas` the SAME inputs `StatsSection` uses (style-aware filtered references + identical `isComplete`), or pass `StatsSection.summaryCounts` straight through, so the video numbers equal the Summary bar for that article. Implement play-once-then-freeze: clamp `t=min(1,…)`, `cancelAnimationFrame` at `t===1`, keep the canvas mounted (drop the `&& animActive` gate / `ANIM_PLAY_MS` unmount), re-key on modal open so close+reopen replays once then holds.
+- *Acceptance:* [ ] video counts equal `StatsSection.summaryCounts` for the same article; [ ] plays once then holds the final frame; [ ] close+reopen replays once then holds; [ ] vitest comparing share counts to StatsSection counts + the freeze/remount behavior.
+
+---
+
+## 9. Batch 4 — additional requests (R46–R48)
+
+| ID | Area | Requirement | Current state (file ref) | Severity |
+|---|---|---|---|---|
+| **R46** | Support | Email-support must open the system mail composer with both recipients (To+Cc), not a blank page | **FIXED THIS TURN** — `SupportMenu.jsx` email was a bare `<a href="mailto:">` (blank in webview/new tab); now routes via `openExternal` (Tauri) / `window.location.href` (web) | **P1 · DONE (uncommitted)** |
+| **R47** | Cost telemetry | Track ALL spent tokens + $ for every LLM operation in real-time, live-updating the Summary badge | `LLMUsageBadge.jsx` already polls `getLLMUsage(checkId)` ~3s + aggregates flows, but badge shows `$0.000` with "Halluc checked 3" → backend `usage_tracker` not recording usage for those flows | **P1 · PARTIAL** |
+| **R48** | Count parity | Summary badge, report card, AND exported file must show identical counts + citation-health %; fix disrupted export logo | App itself disagrees: badge **30 verified/8 warn/82%** vs report **29/9/80%**; export inherits the mismatch + logo disrupted. Same root as R16/R45; **reopens Q5/U5** | **P1 · BROKEN** |
+
+### R46 — Support mailto *(done this turn, pending commit + Tauri allowlist check)*
+- *Done:* `web-ui/src/components/common/SupportMenu.jsx` — Email button is now a `<button>` calling `emailSupport()`: `openExternal(MAILTO_URL)` in Tauri, else `window.location.href = MAILTO_URL`. Both emails preserved (To=ariorad…, Cc=mark…).
+- *Acceptance:* [ ] clicking Email opens the OS mail composer with both recipients (verify on web AND Tauri); [ ] no blank page/tab; [ ] confirm the Tauri shell/opener allowlist permits the `mailto:` scheme (add it if missing); [ ] vitest that the button invokes `openExternal`/`window.location` (not a bare anchor).
+
+### R47 — Real-time token + $ telemetry for every LLM flow *(adversarial loop; schedule after R04)*
+- *Change:* the FE badge infra exists — the gap is backend accounting. Audit EVERY LLM call site and record response usage (prompt+completion tokens) into `backend/usage_tracker.py` keyed by `(check_id, flow)`, with cost from a per-model price table: `src/refchecker/llm/hallucination_verifier.py` (coordinate with R04 — both edit this file), `backend/article_chat.py` (chat + **summarize** — newer, likely untracked), the extract/verify/suggest/graph/reverify/context paths in `backend/refchecker_wrapper.py`, and any LLM AI-detection backend. Parse each provider's usage (OpenAI `usage`, Anthropic `usage`, Google `usageMetadata`). Ensure `getLLMUsage` returns the live totals; have `LLMUsageBadge.jsx` keep polling during follow-ups (chat/summarize) so it ticks up. HONESTY: report real provider-returned token counts/cost only; show `$0.000` only when nothing was actually spent.
+- *Acceptance:* [ ] after a real check the badge shows non-zero tok + $ equal to the sum of per-flow usage; [ ] the screenshot case (hallucination checked 3 → currently $0) now reports its real cost; [ ] chat + summarize spend is added live; [ ] hover breakdown shows each flow's real tokens/cost; [ ] backend test that `usage_tracker` accumulates per flow and `getLLMUsage` returns totals (+ a regression test for the previously-$0 hallucination path).
+
+### R48 — One canonical count/health across badge + report + export; fix logo *(reopens Q5/U5; ties to R16/R45)*
+- *Change:* establish a SINGLE canonical summary (the `buildReferenceSummary` style-aware result) and consume it in ALL THREE places — the Summary badge, the `StatsSection` report card, and `backend/export.py` serialization — so verified/warnings/errors/unverified + citation-health % match exactly (the off-by-one is a verified-vs-warning boundary disagreement: 30/8/82% vs 29/9/80%). Pass the FE-computed summary through to export (or compute identically server-side via shared logic). Fix the disrupted RefChecker logo asset in exports (path/embedding/aspect across html/md/pdf). The prior "Q5/U5 export parity DONE" was incorrect — this supersedes it.
+- *Acceptance:* [ ] badge, report card, and exported HTML/MD/PDF show identical counts + health % for the same check; [ ] the verified/warning boundary is consistent everywhere (no off-by-one); [ ] logo renders correctly in every export format; [ ] backend test asserting export counts == `buildReferenceSummary`; [ ] vitest tying the badge to the report card (extends R16).
+
+---
+
+## 10. Batch 5 — gap-closure from completeness audit (R49–R53)
+
+A full sweep of every request across the chat (79 items) found 74 fully covered; these 5 sub-requirements were folded away and are now tracked explicitly.
+
+| ID | Area | Requirement | Why it was a gap | Severity |
+|---|---|---|---|---|
+| **R49** | Gap-finder | The "did you miss these / N works you might add" panel must be COLLAPSIBLE after results generate | Only a stray optional "C3 persisted collapse" with no R-id/acceptance | **P2 · PARTIAL** |
+| **R50** | Similar papers | Redo the FRONTEND/visual DESIGN of the "Similar Cites & Refs" tab to match the provided attachment (not just function) | Backlog only had functional items (R08/R20/R25/J4); no visual redesign | **P1 · MISSING** |
+| **R51** | Share video | Remove the walkthrough button; the video must live ONLY in the download banner and play once each time the banner opens | R23/R45 cover play-once-freeze but not walkthrough-button removal nor banner-only placement | **P1 · PARTIAL** |
+| **R52** | Buttons | Click-state stability: no size/shape change or layout shift when clicked (re-check↔spinner width jump, expand/collapse, tab switch) | R33 covers static styling only, not active-state stability | **P1 · PARTIAL** |
+| **R53** | Author UI | Author popover shows a clickable ORCID **page link** AND the visible ORCID **number** together, when resolvable | R36 only populates `orcidUrl`; the link+number pair isn't an asserted acceptance | **P2 · PARTIAL** |
+
+### R49 — Gap-finder results panel collapsible *(verify current state first)*
+- *Change:* `GapFinder.jsx` — wrap the generated results in a collapsible section with a persistent toggle (localStorage), so after generation the user can collapse/expand. The latest screenshot shows a "▸ show" affordance may already exist — confirm whether it already collapses post-generation; if so mark done, else add persisted collapse.
+- *Acceptance:* [ ] results collapse/expand after generation; [ ] state persists across re-renders; [ ] vitest for the toggle.
+
+### R50 — "Similar Cites & Refs" tab visual redesign *(needs the design attachment; route through the UX loop)*
+- *Change:* `SimilarPapersPanel.jsx` — restyle the panel (layout, result cards, spacing, graph placement) to match the user's provided design attachment, using the app design tokens + the approved `BUTTON_DESIGN.md`/R33 system. Capture the target in a design spec reviewed by the designer→UX loop before implementing.
+- *Acceptance:* [ ] panel matches the approved design spec; [ ] consistent with the app's native-mac language; [ ] UX-reviewer approval; [ ] snapshot/vitest.
+- *Blocker:* the original design attachment isn't in the repo — **ask the user to re-share it** for fidelity.
+
+### R51 — Remove walkthrough button; video only in the download banner *(extends R23)*
+- *Change:* grep for the "walkthrough" control and remove it; ensure the generated video renders ONLY inside the download-banner component (not in the share-popup body and not as a separate expandable), playing once each time the banner opens (reuse R23/R45 play-once-then-freeze + remount-on-open).
+- *Acceptance:* [ ] no walkthrough button anywhere; [ ] video appears only in the download banner; [ ] plays once per banner open; [ ] vitest that the walkthrough control is gone and the video mounts only in the banner.
+
+### R52 — Button click-state stability *(extends R33; per the approved BUTTON_DESIGN.md)*
+- *Change:* implement the `BUTTON_DESIGN.md` "click-state stability" section — reserve min-width for label↔"checking…"↔spinner swaps, keep radius/height constant across states, a non-reflowing segmented-tab indicator, fixed-header expand/collapse. Apply to the re-check pills (`CitationIntegrity.jsx`/`RetractionCheck.jsx`), the split-button, the assistant tabs/Send, the AI-likelihood pill, and the gap-finder header.
+- *Acceptance:* [ ] re-check↔checking↔spinner causes no width change; [ ] expand/collapse, tab switch, and menu open cause no layout shift or shape change; [ ] vitest asserting stable measured dimensions across states.
+
+### R53 — ORCID link + visible number pair in the author popover *(extends R36)*
+- *Change:* in `AuthorChip` (`ReferenceCard.jsx` ~1605 / 1654-1661 / 1750-1772 / 1422) render an ORCID row: the iD logo linking to `https://orcid.org/<id>` AND the raw ORCID number as visible text, sourced from `profile?.orcid || e?.orcid`.
+- *Acceptance:* [ ] popover shows a clickable ORCID page link + the visible ORCID number when available; [ ] absent (no fabrication) when unresolved; [ ] vitest.
