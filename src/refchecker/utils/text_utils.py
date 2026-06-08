@@ -653,8 +653,74 @@ def clean_author_name(author):
     
     # Clean up extra spaces
     author = re.sub(r'\s+', ' ', author).strip()
-    
+
     return author
+
+
+# Sentinel author tokens that mean "the rest of the list was truncated" rather
+# than a real surname. Lowercased for case-insensitive comparison.
+_ET_AL_AUTHOR_TOKENS = frozenset({
+    'et al', 'et al.', 'et.al', 'et.al.', 'others', 'and others', 'and other',
+})
+
+
+def _is_et_al_author_token(name) -> bool:
+    """True when an author-list entry is a truncation sentinel ("et al."),
+    not a real name. Mirrors the variants the author parser emits."""
+    if not name:
+        return False
+    return str(name).strip().lower().rstrip('.') in {t.rstrip('.') for t in _ET_AL_AUTHOR_TOKENS}
+
+
+def recover_full_authors_from_enrichment(cited_authors, enrichment_authors):
+    """Recover the FULL author list when the cited names were truncated to
+    "<Author> et al." at parse time.
+
+    Many references are cited as e.g. ``Smith et al.`` and the parser stores
+    that literally as ``["Smith", "et al"]``. When the reference verified
+    against a real work, ``enrichment.authors`` holds the complete, REAL author
+    list (display names straight from OpenAlex / Crossref / Semantic Scholar).
+    This surfaces those real names so the UI can show the whole author list
+    instead of a truncated "et al.".
+
+    REAL DATA ONLY — names are taken verbatim from ``enrichment_authors``; this
+    never invents or guesses names.
+
+    Returns the recovered ``list[str]`` of full names, or ``None`` to signal
+    "leave the cited authors unchanged" when:
+      - the cited list is not truncated (no "et al." sentinel), or
+      - there is no usable enrichment author data, or
+      - the enrichment list isn't strictly richer than what was already cited
+        (so a single-author "et al." with one matching DB name is left alone).
+    """
+    # Cited list must actually be truncated with an "et al." sentinel.
+    if not isinstance(cited_authors, list) or not cited_authors:
+        return None
+    if not any(_is_et_al_author_token(a) for a in cited_authors):
+        return None
+
+    # Pull real display names out of the enrichment author objects.
+    if not isinstance(enrichment_authors, list):
+        return None
+    full_names = []
+    for entry in enrichment_authors:
+        if isinstance(entry, dict):
+            name = entry.get('name')
+        else:
+            name = entry
+        if isinstance(name, str) and name.strip() and not _is_et_al_author_token(name):
+            full_names.append(name.strip())
+    if not full_names:
+        return None
+
+    # Only override when the recovered list is strictly more complete than the
+    # real (non-sentinel) names already cited. This keeps behaviour unchanged
+    # for refs whose cited list was already full.
+    cited_real = [a for a in cited_authors if isinstance(a, str) and a.strip() and not _is_et_al_author_token(a)]
+    if len(full_names) <= len(cited_real):
+        return None
+    return full_names
+
 
 def clean_title_basic(title):
     """

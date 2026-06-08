@@ -1491,6 +1491,24 @@ class ProgressRefChecker:
         except Exception as e:
             logger.debug("enrichment build failed: %s", e)
 
+        # Recover the FULL author list when the cited names were truncated to
+        # "<Author> et al." at parse time. enrichment.authors carries the real,
+        # complete author list straight from the verified work (OpenAlex /
+        # Crossref / Semantic Scholar), so surface those real names instead of
+        # the truncated "et al." for the UI. REAL DATA ONLY — never fabricated;
+        # falls back silently (display_authors stays None) when there's no
+        # richer verified list. Behind the et-al sentinel check so refs whose
+        # cited list was already complete are untouched.
+        display_authors = None
+        try:
+            from refchecker.utils.text_utils import recover_full_authors_from_enrichment
+            display_authors = recover_full_authors_from_enrichment(
+                reference.get('authors'),
+                enrichment_payload.get('authors'),
+            )
+        except Exception as e:
+            logger.debug("author recovery failed: %s", e)
+
         # Carry top-level doi / arxiv_id / pmid through to the result so the
         # Seen-Refs identity key can resolve to a stable DOI/arxiv bucket
         # even for refs that didn't verify against an external DB (where
@@ -1525,7 +1543,7 @@ class ProgressRefChecker:
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
-            "authors": reference.get('authors', []),
+            "authors": display_authors if display_authors else reference.get('authors', []),
             "year": reference.get('year') or None,
             "venue": reference.get('venue'),
             "cited_url": reference.get('cited_url') or reference.get('url'),
