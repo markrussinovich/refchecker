@@ -1288,6 +1288,11 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
  */
 function AuthorsLine({ authors, enrichedAuthors }) {
   const list = normalizeAuthors(authors)
+  // Hooks MUST run before any early return (rules-of-hooks). If a reference's
+  // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
+  // an early return here would skip the useState below and flip the hook count,
+  // crashing the whole tree with React #310 (blank page).
+  const [showAll, setShowAll] = useState(false)
   if (list.length === 0) return null
 
   // Normalise a name fragment: lowercase, strip diacritics, strip
@@ -1360,8 +1365,8 @@ function AuthorsLine({ authors, enrichedAuthors }) {
   }
 
   // Cap at 10 visible names; an overflow list is expandable to reveal ALL
-  // authors (replaces the old static " et al.").
-  const [showAll, setShowAll] = useState(false)
+  // authors (replaces the old static " et al.").  (showAll is declared above,
+  // before the early return, to satisfy rules-of-hooks.)
   const CAP = 10
   const overflow = list.length > CAP
   const visible = (showAll || !overflow) ? list : list.slice(0, CAP)

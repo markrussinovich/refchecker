@@ -12,6 +12,13 @@ import { openExternal, isTauri } from '../../utils/tauriBridge'
  */
 export default function GapFinder({ checkId, references }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
+  // All hooks declared BEFORE the early return so the hook count is stable when
+  // `hasDoi` flips (e.g. removing the last DOI-bearing reference) — otherwise
+  // React #310 crashes the page. (rules-of-hooks)
+  const [added, setAdded] = useState({})       // key -> 'adding'|'done'|'error'
+  const [info, setInfo] = useState({})         // key -> { insertedIndex }
+  const [preview, setPreview] = useState({})   // key -> { open, loading, data, error }
+  const [collapsed, setCollapsed] = useState(false) // collapse the results panel
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
 
@@ -25,11 +32,6 @@ export default function GapFinder({ checkId, references }) {
     }
   }
 
-  // Per-suggestion "add to references" state: key -> 'adding'|'done'|'error'.
-  const [added, setAdded] = useState({})
-  const [info, setInfo] = useState({})       // key -> { insertedIndex }
-  const [preview, setPreview] = useState({}) // key -> { open, loading, data, error }
-  const [collapsed, setCollapsed] = useState(false) // collapse the results panel
   const keyOf = (s, i) => s.openalex_id || s.doi || `i${i}`
 
   // Step 1: show a read-only "document changes" preview before committing. The
