@@ -2393,7 +2393,10 @@ def _slice_abstract(text: str) -> str:
     """
     if not text:
         return ""
-    m = re.search(r'(?im)^\s*abstract\s*[:.\-]?\s*$|(?i)\babstract\b\s*[:.\-]', text)
+    # NOTE: the leading (?im) applies to the WHOLE alternation, so a second
+    # inline (?i) mid-pattern is redundant AND illegal on Python 3.11+
+    # ("global flags not at the start of the expression"). Keep only the leading flags.
+    m = re.search(r'(?im)^\s*abstract\s*[:.\-]?\s*$|\babstract\b\s*[:.\-]', text)
     if not m:
         return ""
     tail = text[m.end():]
