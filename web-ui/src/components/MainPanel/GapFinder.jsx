@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getCheckGaps, addReferenceToCheck } from '../../utils/api'
+import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 
@@ -27,20 +27,42 @@ export default function GapFinder({ checkId, references }) {
 
   // Per-suggestion "add to references" state: key -> 'adding'|'done'|'error'.
   const [added, setAdded] = useState({})
+  const [info, setInfo] = useState({})       // key -> { insertedIndex }
+  const [preview, setPreview] = useState({}) // key -> { open, loading, data, error }
   const keyOf = (s, i) => s.openalex_id || s.doi || `i${i}`
+
+  // Step 1: show a read-only "document changes" preview before committing. The
+  // new reference is APPENDED, so the backend reports how (if at all) existing
+  // inline markers would renumber — honestly abstaining for non-numeric styles.
+  const openPreview = async (s, i) => {
+    const k = keyOf(s, i)
+    setPreview((p) => ({ ...p, [k]: { open: true, loading: true, data: null, error: null } }))
+    try {
+      const res = await getCitationRenumberPreview(checkId) // omit insert_at => append
+      setPreview((p) => ({ ...p, [k]: { open: true, loading: false, data: res.data, error: null } }))
+    } catch (e) {
+      setPreview((p) => ({ ...p, [k]: { open: true, loading: false, data: null, error: e?.response?.data?.detail || e?.message || 'Preview unavailable' } }))
+    }
+  }
+  const closePreview = (k) => setPreview((p) => ({ ...p, [k]: { ...(p[k] || {}), open: false } }))
+
+  // Step 2: commit. Uses the authoritative inserted_index/renumbering from the
+  // write path to report the real list change, then refreshes the check.
   const addToRefs = async (s, i) => {
     const k = keyOf(s, i)
     setAdded((a) => ({ ...a, [k]: 'adding' }))
     try {
-      await addReferenceToCheck(checkId, {
+      const res = await addReferenceToCheck(checkId, {
         title: s.title,
         year: s.year,
         doi: s.doi || undefined,
         cited_url: s.doi ? `https://doi.org/${s.doi}` : undefined,
       })
+      setInfo((m) => ({ ...m, [k]: { insertedIndex: res?.data?.inserted_index } }))
       // Refresh the check so the new reference appears in the list.
       await useHistoryStore.getState().selectCheck?.(checkId, { force: true })
       setAdded((a) => ({ ...a, [k]: 'done' }))
+      closePreview(k)
     } catch (e) {
       setAdded((a) => ({ ...a, [k]: 'error' }))
     }
@@ -80,15 +102,60 @@ export default function GapFinder({ checkId, references }) {
                     target="_blank" rel="noopener noreferrer" className="ml-1.5 underline text-xs" style={{ color: 'var(--color-accent)' }}>DOI ↗</a>
                 )}
                 {(() => {
-                  const st = added[keyOf(s, i)]
-                  if (st === 'done') return <span className="ml-1.5 text-xs font-medium" style={{ color: 'var(--color-success)' }}>✓ Added</span>
+                  const k = keyOf(s, i)
+                  const st = added[k]
+                  const pv = preview[k]
+                  if (st === 'done') {
+                    const n = info[k]?.insertedIndex
+                    return <span className="ml-1.5 text-xs font-medium" style={{ color: 'var(--color-success)' }}>✓ Added{n ? ` as [${n}]` : ''}</span>
+                  }
                   if (st === 'error') return <span className="ml-1.5 text-xs" style={{ color: 'var(--color-error)' }}>add failed</span>
                   return (
-                    <button type="button" onClick={() => addToRefs(s, i)} disabled={st === 'adding'}
-                      className="ml-1.5 text-xs underline" style={{ color: 'var(--color-accent)', opacity: st === 'adding' ? 0.6 : 1 }}
-                      title="Add this work to the reference list and re-verify">
-                      {st === 'adding' ? 'Adding…' : '+ Add to references'}
-                    </button>
+                    <>
+                      {!(pv && pv.open) && (
+                        <button type="button" onClick={() => openPreview(s, i)} disabled={st === 'adding'}
+                          className="ml-1.5 text-xs underline" style={{ color: 'var(--color-accent)', opacity: st === 'adding' ? 0.6 : 1 }}
+                          title="Preview the document changes, then add this work to the reference list">
+                          {st === 'adding' ? 'Adding…' : '+ Add to references'}
+                        </button>
+                      )}
+                      {pv && pv.open && (
+                        <div className="mt-1.5 rounded-md p-2" style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}>
+                          {pv.loading && <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Checking document…</div>}
+                          {pv.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{pv.error}</div>}
+                          {pv.data && (
+                            <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                              <div className="rc-diff-row"><span className="rc-diff-added">+ new reference</span><span className="rc-diff-arrow">appended to the list</span></div>
+                              {pv.data.abstained || !(pv.data.shifted_markers || []).length ? (
+                                <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                                  Existing inline citation markers are unchanged{pv.data.scheme ? ` (${pv.data.scheme} style)` : ''}.
+                                </div>
+                              ) : (
+                                <div className="mt-1">
+                                  <div style={{ color: 'var(--color-text-muted)' }}>{pv.data.shifted_count} inline marker{pv.data.shifted_count === 1 ? '' : 's'} would shift:</div>
+                                  {(pv.data.shifted_markers || []).slice(0, 5).map((sm, mi) => (
+                                    <div key={mi} className="rc-diff-row mt-0.5">
+                                      <span className="rc-diff-old">{sm.marker}</span><span className="rc-diff-arrow">→</span><span className="rc-diff-new">{sm.new_marker}</span>
+                                    </div>
+                                  ))}
+                                  {pv.data.shifted_count > 5 && <div style={{ color: 'var(--color-text-muted)' }}>+{pv.data.shifted_count - 5} more…</div>}
+                                </div>
+                              )}
+                              <div className="mt-1.5" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                                Your document/PDF is not edited — only the reference list is updated. Add the inline citation in your manuscript yourself.
+                              </div>
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <button type="button" onClick={() => addToRefs(s, i)} disabled={st === 'adding'}
+                                  className="px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'var(--color-accent)', color: '#fff', opacity: st === 'adding' ? 0.6 : 1 }}>
+                                  {st === 'adding' ? 'Adding…' : 'Confirm add'}
+                                </button>
+                                <button type="button" onClick={() => closePreview(k)} className="text-xs underline" style={{ color: 'var(--color-text-muted)' }}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )
                 })()}
               </li>

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["inline_citation_report"]
+__all__ = ["inline_citation_report", "renumber_preview"]
 
 
 # --------------------------------------------------------------------------- #
@@ -63,6 +63,9 @@ _COLOR_MED = "#f59e0b"
 _COLOR_LOW = "#84cc16"
 
 _SUPERSCRIPT_MAP = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+# Inverse of _SUPERSCRIPT_MAP: re-encode ASCII digits as superscript glyphs so a
+# remapped superscript marker (e.g. ⁹ -> ¹⁰) renders in its original form.
+_ASCII_TO_SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 
 
 # --------------------------------------------------------------------------- #
@@ -754,4 +757,128 @@ def inline_citation_report(paper_text, references):
         "counts": counts,
         "issues": issues,
         "badge": _badge_for(issues, abstained=False),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Renumber preview ("what would change inline if I add a reference")           #
+# --------------------------------------------------------------------------- #
+
+def _abstain_preview(scheme, confidence, has_text, reason):
+    return {
+        "abstained": True,
+        "scheme": scheme,
+        "scheme_confidence": round(_clamp(confidence), 3),
+        "has_text": bool(has_text),
+        "new_printed_number": None,
+        "shifted_markers": [],
+        "shifted_count": 0,
+        "abstain_reason": reason,
+    }
+
+
+def _remap_marker_numbers(marker, new_printed_number, superscript):
+    """Return (changed, old_marker, new_marker): +1 every integer run in *marker*
+    whose value is >= *new_printed_number*, preserving brackets/commas/dashes.
+    For superscript schemes the result is re-encoded to superscript glyphs.
+    Never invents a position — only rewrites the digits the regex matched.
+    """
+    ascii_marker = marker.translate(_SUPERSCRIPT_MAP)
+    changed = {"v": False}
+
+    def _repl(m):
+        n = int(m.group(0))
+        if n >= new_printed_number:
+            changed["v"] = True
+            return str(n + 1)
+        return m.group(0)
+
+    new_ascii = re.sub(r"\d{1,3}", _repl, ascii_marker)
+    if superscript:
+        return changed["v"], marker, new_ascii.translate(_ASCII_TO_SUPERSCRIPT)
+    return changed["v"], ascii_marker, new_ascii
+
+
+def renumber_preview(paper_text, references, new_printed_number=None):
+    """Preview how EXISTING inline numeric markers would renumber if a new
+    reference were inserted so that it takes printed number *new_printed_number*
+    (1-based). Every existing marker number >= that value shifts up by one.
+
+    Honesty contract (mirrors ``inline_citation_report``): this ABSTAINS — and
+    returns an empty shift list — whenever the inline-citation scheme is not a
+    clean numeric one (author-year / mixed / superscript-ambiguous / too few
+    markers / no body text). It never fabricates a marker position: only markers
+    the regex actually matched are remapped, anchored to their real offsets. The
+    document/PDF is never modified; this is a read-only preview.
+
+    Returns a dict: ``{abstained, scheme, scheme_confidence, has_text,
+    new_printed_number, shifted_markers, shifted_count}`` where each shifted
+    marker is ``{offset, line, marker, new_marker, numbers}``.
+    """
+    paper_text = _coerce_text(paper_text)
+    if not isinstance(references, (list, tuple)):
+        references = []
+    references = [r for r in references if isinstance(r, dict)]
+    ref_count = len(references)
+
+    if not paper_text.strip() or ref_count == 0:
+        return _abstain_preview(None, 0.0, False, "empty input")
+
+    body = _truncate_at_bibliography(paper_text)
+    has_text = len(body.strip()) >= _MIN_BODY_CHARS
+    if not has_text:
+        return _abstain_preview(None, 0.0, False, "body too short")
+
+    scheme, confidence, _families = _detect_scheme(body, ref_count)
+    if scheme in (None, "mixed", "author-year"):
+        return _abstain_preview(scheme, confidence, True,
+                                "no numeric scheme to renumber")
+
+    # Default: append after the last reference -> nothing shifts (honest).
+    if new_printed_number is None:
+        new_printed_number = ref_count + 1
+    try:
+        new_printed_number = int(new_printed_number)
+    except (TypeError, ValueError):
+        new_printed_number = ref_count + 1
+    if new_printed_number < 1:
+        new_printed_number = 1
+
+    occurrences, _raw_out, _range_errors = _extract_numeric_occurrences(
+        body, scheme, ref_count)
+    distinct = {o.number for o in occurrences}
+    if len(distinct) < _MIN_NUMERIC_MARKERS:
+        return _abstain_preview(scheme, confidence * 0.7, True,
+                                "too few resolved markers")
+
+    # Group the per-number occurrences back into physical markers (one row per
+    # matched marker), then remap only those at/above the insertion number.
+    by_marker = {}
+    for o in occurrences:
+        by_marker.setdefault((o.offset, o.marker), set()).add(o.number)
+
+    superscript = scheme == "superscript"
+    shifted = []
+    for (offset, marker), numbers in sorted(by_marker.items(), key=lambda kv: kv[0][0]):
+        if not any(n >= new_printed_number for n in numbers):
+            continue
+        changed, old_m, new_m = _remap_marker_numbers(marker, new_printed_number, superscript)
+        if not changed:
+            continue
+        shifted.append({
+            "offset": offset,
+            "line": _line_for_offset(body, offset).strip()[:160],
+            "marker": old_m,
+            "new_marker": new_m,
+            "numbers": sorted(n for n in numbers if n >= new_printed_number),
+        })
+
+    return {
+        "abstained": False,
+        "scheme": scheme,
+        "scheme_confidence": round(_clamp(confidence), 3),
+        "has_text": True,
+        "new_printed_number": new_printed_number,
+        "shifted_markers": shifted,
+        "shifted_count": len(shifted),
     }

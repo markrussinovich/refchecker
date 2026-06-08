@@ -199,6 +199,11 @@ export const getCheckHealth = (checkId) => api.get(`/check/${checkId}/health`, {
 export const getCheckRetractions = (checkId) => api.get(`/check/${checkId}/retractions`, { timeout: 45000 })
 export const getCheckGaps = (checkId) => api.get(`/check/${checkId}/gaps`, { timeout: 60000 })
 export const getCitationIntegrity = (checkId) => api.get(`/check/${checkId}/citation-integrity`, { timeout: 60000 })
+// Read-only preview of how inline numeric markers would renumber if a new
+// reference were inserted at the given 1-based printed position (omit to append).
+// Abstains (empty shifts) whenever the inline-citation checker abstains.
+export const getCitationRenumberPreview = (checkId, insertAt) =>
+  api.get(`/check/${checkId}/citation-renumber-preview`, { params: insertAt != null ? { insert_at: insertAt } : {}, timeout: 60000 })
 
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>

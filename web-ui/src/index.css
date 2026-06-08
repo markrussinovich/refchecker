@@ -245,3 +245,12 @@ a[href^="mailto:"]:hover {
 @media (prefers-reduced-motion: reduce) {
   .rc-cite-pulse, .rc-ref-flash { animation: none; }
 }
+
+/* Add-to-references "document changes" preview (list-level diff chips). The
+   document/PDF is never mutated — these only preview how the printed numbering
+   and existing inline markers would shift. */
+.rc-diff-row { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.rc-diff-old { color: var(--color-text-muted); text-decoration: line-through; }
+.rc-diff-arrow { color: var(--color-text-muted); }
+.rc-diff-new { color: var(--color-accent); font-weight: 600; }
+.rc-diff-added { color: var(--color-success, #22c55e); font-weight: 600; }

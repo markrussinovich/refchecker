@@ -1,6 +1,6 @@
 """Unit tests for the inline-citation numbering parser + checker."""
 
-from backend.inline_citation_checker import inline_citation_report
+from backend.inline_citation_checker import inline_citation_report, renumber_preview
 
 
 # --------------------------------------------------------------------------- #
@@ -334,3 +334,85 @@ def test_years_not_treated_as_citations():
     # Either abstains (no numeric scheme) -> no issues; the key invariant is
     # that no year produced an 'undefined' numeric marker issue.
     assert all(i["type"] != "undefined" for i in report["issues"])
+
+
+# --------------------------------------------------------------------------- #
+# renumber_preview (add-to-references "document changes" preview)              #
+# --------------------------------------------------------------------------- #
+
+def _seq_refs(n):
+    return [{"index": i, "title": f"Ref {i}", "authors": ["A B"]} for i in range(1, n + 1)]
+
+
+def test_renumber_preview_shifts_only_at_or_above_inserted():
+    body = (
+        "We build on prior work [1] and extend [2]. Methods follow [3] and [4]. "
+        "Results match [5] closely. Again [3] and [5] confirm this."
+    )
+    rep = renumber_preview(body, _seq_refs(5), 3)
+    assert rep["abstained"] is False
+    assert rep["scheme"] == "bracket"
+    pairs = {(s["marker"], s["new_marker"]) for s in rep["shifted_markers"]}
+    assert ("[3]", "[4]") in pairs
+    assert ("[4]", "[5]") in pairs
+    assert ("[5]", "[6]") in pairs
+    # [1] and [2] are below the insertion point -> never shifted.
+    assert all(s["marker"] not in ("[1]", "[2]") for s in rep["shifted_markers"])
+    # Every shift carries a real (non-negative) body offset — never synthesized.
+    assert all(isinstance(s["offset"], int) and s["offset"] >= 0 for s in rep["shifted_markers"])
+
+
+def test_renumber_preview_abstains_author_year():
+    body = (
+        "As shown by Smith (2020) and Jones (2019), and later Lee et al. (2021), "
+        "the effect holds across Brown (2018) replications."
+    )
+    rep = renumber_preview(body, _seq_refs(5), 2)
+    assert rep["abstained"] is True
+    assert rep["shifted_markers"] == []
+    assert rep["shifted_count"] == 0
+
+
+def test_renumber_preview_leaves_years_pages_sections_untouched():
+    body = (
+        "The method [1] improves on [2] and [3]. Earlier work in (2021) and pages "
+        "12-18 of vol 276(2):553 reported similar trends, see Eq. (3). Also [4], [5]."
+    )
+    rep = renumber_preview(body, _seq_refs(5), 2)
+    assert rep["abstained"] is False
+    markers = {s["marker"] for s in rep["shifted_markers"]}
+    # No year / page / issue:page / equation token leaked in as a citation marker.
+    assert "(2021)" not in markers
+    assert "(3)" not in markers
+    assert all(m.startswith("[") for m in markers)
+    # [1] is below the insertion point and stays put.
+    assert "[1]" not in markers
+
+
+def test_renumber_preview_range_and_list_markers():
+    body = "See [1] and the survey [2,5-7] for details. Also [3] and [8] later."
+    rep = renumber_preview(body, _seq_refs(8), 5)
+    assert rep["abstained"] is False
+    # The composite marker remaps only digit-runs >= 5, preserving delimiters.
+    composite = [s for s in rep["shifted_markers"] if s["marker"] == "[2,5-7]"]
+    assert composite, rep["shifted_markers"]
+    assert composite[0]["new_marker"] == "[2,6-8]"
+    pairs = {(s["marker"], s["new_marker"]) for s in rep["shifted_markers"]}
+    assert ("[8]", "[9]") in pairs
+    # [1] and [3] are below the insertion point -> untouched.
+    assert all(s["marker"] not in ("[1]", "[3]") for s in rep["shifted_markers"])
+
+
+def test_renumber_preview_append_yields_no_shift():
+    body = "Work [1], [2], [3], [4], [5] is cited; again [2] and [4]."
+    rep = renumber_preview(body, _seq_refs(5))  # default = append after the last ref
+    assert rep["abstained"] is False
+    assert rep["shifted_count"] == 0
+
+
+def test_renumber_preview_garbage_does_not_raise():
+    for text, refs in [(None, _seq_refs(3)), ("", []), (12345, [None, 7]), ("[1][2][3]", "nope")]:
+        rep = renumber_preview(text, refs, 2)
+        assert isinstance(rep, dict)
+        assert isinstance(rep["shifted_markers"], list)
+        assert isinstance(rep["abstained"], bool)

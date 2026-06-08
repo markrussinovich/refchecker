@@ -48,6 +48,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
   const [highlights, setHighlights] = useState({}) // pageIndex -> [{rects,band,score,reason,key}]
   const [citeHl, setCiteHl] = useState({})         // pageIndex -> [{rects,label,key}]
   const [citeStatus, setCiteStatus] = useState(null) // 'locating' | 'found' | 'missing' | null
+  const [citeFocus, setCiteFocus] = useState(null)   // { page, cx, cy } -> auto zoom + center
   const [findHl, setFindHl] = useState({})         // pageIndex -> [rects] for the query
   const [hoverHl, setHoverHl] = useState(null)
   const [zoom, setZoom] = useState(1)
@@ -59,8 +60,10 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
   const findInputRef = useRef(null)
   const scrollRef = useRef(null)
   const pageRefs = useRef([])
+  const citeFocusRef = useRef(null)              // invisible anchor at the focused citation rect
 
   const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
+  const CITE_FOCUS_ZOOM = 1.6                    // readable zoom when opening a citation
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
   // Image sizing: at 100% fit to viewport; when zoomed, grow past the
@@ -123,7 +126,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
   // (distinct blue), reusing the same PyMuPDF search. Auto-jump to its page.
   useEffect(() => {
     let alive = true
-    setCiteHl({}); setCiteStatus(null)
+    setCiteHl({}); setCiteStatus(null); setCiteFocus(null)
     const text = citationTarget?.text
     if (!checkId || checkId === -1 || !pageCount || !text) return undefined
     setCiteStatus('locating')
@@ -132,9 +135,13 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
         if (!alive) return
         const byPage = {}
         let firstPage = null
+        let firstRect = null
         for (const r of (res.data?.results || [])) {
           if (!r.found) continue
-          if (firstPage === null) firstPage = r.page
+          if (firstPage === null) {
+            firstPage = r.page
+            if (Array.isArray(r.rects) && r.rects.length) firstRect = r.rects[0]
+          }
           ;(byPage[r.page] = byPage[r.page] || []).push({
             rects: r.rects, label: citationTarget?.label || 'Citation context',
             status: citationTarget?.status, refId: citationTarget?.refId, refTitle: citationTarget?.refTitle,
@@ -143,11 +150,34 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
         }
         setCiteHl(byPage)
         setCiteStatus(firstPage === null ? 'missing' : 'found')
-        if (firstPage !== null) setTimeout(() => jumpToPage(firstPage), 140)
+        if (firstPage !== null) {
+          // Zoom to a readable level and center the highlighted sentence in the
+          // viewport (not just jump to the page top), so the eye lands on it.
+          const [x0, y0, x1, y1] = firstRect || [0, 0, 1, 0]
+          setZoom((z) => (z < CITE_FOCUS_ZOOM ? CITE_FOCUS_ZOOM : z))
+          setCiteFocus({ page: firstPage, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 })
+        }
       })
       .catch(() => { if (alive) setCiteStatus('missing') })
     return () => { alive = false }
   }, [checkId, pageCount, citationTarget]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Smooth-scroll the focused citation rect to the viewport CENTER once it (and
+  // its lazily-loaded page image) have laid out. Retried briefly to survive the
+  // layout shift when the image finishes loading.
+  useEffect(() => {
+    if (!citeFocus) return undefined
+    let n = 0
+    let t = 0
+    const tick = () => {
+      const el = citeFocusRef.current
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+      n += 1
+      if (n < 5) t = setTimeout(tick, 280)
+    }
+    t = setTimeout(tick, 180)
+    return () => clearTimeout(t)
+  }, [citeFocus, zoom])
 
   // Fetch the extracted body text once so Find can locate words. The pages are
   // rasterized images (no text layer), so we search the extracted text and jump
@@ -394,7 +424,13 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                   loading="lazy"
                   style={{ display: 'block', width: '100%', height: 'auto' }}
                   className="rounded-lg shadow-2xl bg-white"
+                  onLoad={() => { if (citeFocus && citeFocus.page === i) citeFocusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }) }}
                 />
+                {/* Invisible anchor at the focused citation rect — scroll target. */}
+                {citeFocus && citeFocus.page === i && (
+                  <div ref={citeFocusRef} aria-hidden="true"
+                    style={{ position: 'absolute', left: `${citeFocus.cx * 100}%`, top: `${citeFocus.cy * 100}%`, width: 1, height: 1, pointerEvents: 'none' }} />
+                )}
                 {/* Native-page AI highlight overlay (normalized rects -> %). */}
                 {(highlights[i] || []).flatMap((hl) =>
                   (hl.rects || []).map(([x0, y0, x1, y1], ri) => (

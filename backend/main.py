@@ -2205,6 +2205,31 @@ async def get_citation_integrity(check_id: int, current_user: UserInfo = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/check/{check_id}/citation-renumber-preview")
+async def get_citation_renumber_preview(
+    check_id: int,
+    insert_at: Optional[int] = None,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Read-only preview of how EXISTING inline numeric markers would renumber if
+    a new reference were inserted to take printed position ``insert_at`` (1-based;
+    omit to append). Abstains (empty shifts) whenever the inline-citation checker
+    abstains. Mutates nothing — the document/PDF is never edited."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        text = await _extract_paper_text_for_check(check_id, check)
+        from backend import export as _export
+        from backend.inline_citation_checker import renumber_preview
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        report = await asyncio.to_thread(renumber_preview, text, refs, insert_at)
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing renumber preview for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/check/{check_id}/gaps")
 async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require_user)):
     """"Did you miss these?" — works frequently co-cited by the bibliography's own
@@ -5394,6 +5419,10 @@ async def add_reference_to_check(
         "warnings": [],
         "suggestions": [{"message": "Added manually — re-run the check or click Verify to validate.", "error_type": "manual"}],
     }
+    # Snapshot the existing printed indices BEFORE any renumber, so we can
+    # return a real before/after renumber map (drives the "document changes"
+    # preview in the UI — no PDF is mutated; this is the list-level diff only).
+    before_index = {r.get("id"): r.get("index") for r in refs if r.get("id") is not None}
     # Insert at the requested position when the caller specified one
     # (Undo Remove sends the original index). Append otherwise so the
     # default "Add reference" button keeps adding at the bottom.
@@ -5411,7 +5440,26 @@ async def add_reference_to_check(
     ok = await db.replace_check_references(check_id, refs, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to persist reference")
-    return {"reference": new_ref, "total_refs": len(refs)}
+    # Additive renumber map: which existing references changed printed index.
+    renumbering = []
+    for r in refs:
+        rid = r.get("id")
+        if rid is None or rid == new_ref["id"]:
+            continue
+        old = before_index.get(rid)
+        if old is not None and old != r.get("index"):
+            renumbering.append({
+                "id": rid,
+                "title": (str(r.get("title") or "")[:80]),
+                "old_index": old,
+                "new_index": r.get("index"),
+            })
+    return {
+        "reference": new_ref,
+        "total_refs": len(refs),
+        "inserted_index": new_ref["index"],
+        "renumbering": renumbering,
+    }
 
 
 @app.delete("/api/history/{check_id}/references/{ref_id}")

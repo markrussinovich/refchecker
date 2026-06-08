@@ -170,6 +170,65 @@ export default function GraphLibraryView({ onClose }) {
   const graphData = useMemo(() => data || { nodes: [], links: [] }, [data])
   const nodeVal = (n) => Math.sqrt(Math.max(1, n.times_seen || 1)) * 2 + 2
 
+  // Neighbour index for click-to-spotlight: clicking a node keeps its links and
+  // co-seen neighbours highlighted (in 3D, mirroring the radial pin) until you
+  // click empty space or another node.
+  const neighborIndex = useMemo(() => {
+    const nodes = new Map(); const linksByNode = new Map()
+    for (const n of graphData.nodes) { nodes.set(n.id, new Set()); linksByNode.set(n.id, new Set()) }
+    for (const l of (graphData.links || [])) {
+      const s = _linkEnd(l.source), t = _linkEnd(l.target)
+      if (nodes.has(s) && nodes.has(t)) {
+        nodes.get(s).add(t); nodes.get(t).add(s)
+        linksByNode.get(s).add(l); linksByNode.get(t).add(l)
+      }
+    }
+    return { nodes, linksByNode }
+  }, [graphData])
+
+  const [hl, setHl] = useState({ id: null, nodes: new Set(), links: new Set() })
+  useEffect(() => { setHl({ id: null, nodes: new Set(), links: new Set() }) }, [graphData])
+
+  const focusNode = (n) => {
+    setSelected(n)
+    setHl((prev) => {
+      if (prev.id === n.id) return { id: null, nodes: new Set(), links: new Set() }
+      const nb = neighborIndex.nodes.get(n.id) || new Set()
+      return { id: n.id, nodes: new Set([n.id, ...nb]), links: neighborIndex.linksByNode.get(n.id) || new Set() }
+    })
+    const fg = fgRef.current
+    if (fg && typeof n.x === 'number') {
+      const d = 110
+      const r = 1 + d / Math.max(1, Math.hypot(n.x, n.y, n.z || 0))
+      try { fg.cameraPosition({ x: n.x * r, y: n.y * r, z: (n.z || 0) * r }, n, 1000) } catch { /* no-op */ }
+    }
+  }
+  const clearFocus = () => { setHl({ id: null, nodes: new Set(), links: new Set() }); setSelected(null) }
+
+  // Obsidian-style bloom/glow on the 3D scene (lazy — three stays out of the
+  // initial bundle). Retries until the post-processing composer is ready, and
+  // degrades silently if the bloom pass is unavailable.
+  useEffect(() => {
+    if (viewMode !== '3d' || !graphData.nodes.length) return undefined
+    let cancelled = false; let tries = 0
+    const add = async () => {
+      if (cancelled) return
+      const fg = fgRef.current
+      const composer = fg && fg.postProcessingComposer && fg.postProcessingComposer()
+      if (!composer) { if (tries++ < 25) setTimeout(add, 200); return }
+      if (composer.__bloomAdded) return
+      try {
+        const mod = await import('three/examples/jsm/postprocessing/UnrealBloomPass.js')
+        if (cancelled) return
+        const bloom = new mod.UnrealBloomPass()
+        bloom.strength = 1.1; bloom.radius = 0.55; bloom.threshold = 0.08
+        composer.addPass(bloom); composer.__bloomAdded = true
+      } catch (e) { logger.error?.('GraphLibrary', 'bloom unavailable', e) }
+    }
+    add()
+    return () => { cancelled = true }
+  }, [viewMode, graphData])
+
   const meta = data?.meta || {}
 
   return (
@@ -261,13 +320,20 @@ export default function GraphLibraryView({ onClose }) {
               backgroundColor="rgba(0,0,0,0)"
               nodeId="id"
               nodeVal={nodeVal}
-              nodeColor={(n) => n.color}
+              nodeColor={(n) => (!hl.id || hl.nodes.has(n.id)) ? n.color : 'rgba(120,124,150,0.16)'}
               nodeLabel={(n) => `${n.label}${n.year ? ` (${n.year})` : ''} — seen ${n.times_seen}×`}
-              nodeOpacity={0.92}
-              linkColor={() => 'rgba(140,140,160,0.25)'}
-              linkWidth={(l) => Math.min(2, (l.weight || 1) * 0.6)}
+              nodeOpacity={0.95}
+              nodeResolution={16}
+              linkColor={(l) => hl.links.has(l) ? 'rgba(96,165,250,0.95)' : (hl.id ? 'rgba(140,144,170,0.05)' : 'rgba(140,144,170,0.22)')}
+              linkWidth={(l) => hl.links.has(l) ? 2.4 : Math.min(1.6, (l.weight || 1) * 0.5)}
+              linkOpacity={1}
+              linkDirectionalParticles={(l) => hl.links.has(l) ? 4 : 0}
+              linkDirectionalParticleWidth={2}
+              linkDirectionalParticleSpeed={0.006}
+              linkDirectionalParticleColor={() => 'rgba(147,197,253,0.95)'}
               enableNodeDrag={false}
-              onNodeClick={(n) => setSelected(n)}
+              onNodeClick={focusNode}
+              onBackgroundClick={clearFocus}
               warmupTicks={40}
               cooldownTicks={120}
             />
@@ -289,7 +355,10 @@ export default function GraphLibraryView({ onClose }) {
                 {selected.doi ? `DOI: ${selected.doi}` : `arXiv: ${selected.arxiv_id}`}
               </div>
             )}
-            <button type="button" onClick={() => setSelected(null)} className="mt-1.5 underline" style={{ color: 'var(--color-accent)' }}>dismiss</button>
+            {hl.id && viewMode === '3d' && (
+              <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>Spotlighting common links · click empty space to reset</div>
+            )}
+            <button type="button" onClick={clearFocus} className="mt-1.5 underline" style={{ color: 'var(--color-accent)' }}>dismiss</button>
           </div>
         )}
 
