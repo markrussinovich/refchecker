@@ -1274,17 +1274,32 @@ class ProgressRefChecker:
             # Track if this was originally a warning_type (warning, not error)
             is_warning = 'warning_type' in err
             logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
-            sanitized.append({
+            # Backfill actual_value from the typed correction fields: "missing"
+            # issues (year/venue/title/authors) populate ONLY ref_*_correct, not
+            # actual_value, so the corrected-bibtex builder would otherwise drop
+            # exactly the value the warning told the user to add.
+            _actual = err.get('actual_value')
+            if not _actual:
+                _actual = (err.get('ref_year_correct') or err.get('ref_venue_correct')
+                           or err.get('ref_title_correct') or err.get('ref_authors_correct'))
+            _san = {
                 # Preserve original error_type for suggestion_type mapping;
                 # use is_suggestion flag for categorization instead.
                 # Map 'timeout' to 'unverified' since timeouts mean we couldn't verify
                 "error_type": 'unverified' if e_type == 'timeout' else (e_type or 'unknown'),
                 "error_details": details if e_type != 'timeout' else 'Verification timed out',
                 "cited_value": err.get('cited_value'),
-                "actual_value": err.get('actual_value'),
+                "actual_value": _actual,
                 "is_suggestion": is_info,  # Preserve info_type as suggestion flag
                 "is_warning": is_warning,  # Preserve warning_type as warning flag
-            })
+            }
+            # Carry the typed correction fields through so the FE corrected-bibtex
+            # builder can recover year/venue/title/authors even when the checker
+            # only set the typed field (belt-and-suspenders with the backfill).
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct"):
+                if err.get(_k):
+                    _san[_k] = err.get(_k)
+            sanitized.append(_san)
 
         # Determine status - items originally from warning_type are warnings, items from error_type are errors
         # Items originally from info_type are suggestions, not errors
@@ -1431,6 +1446,11 @@ class ProgressRefChecker:
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value')
             }
+            # Propagate typed correction fields so the FE corrected-bibtex builder
+            # always has year/venue/title/authors to insert.
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct"):
+                if err.get(_k):
+                    err_obj[_k] = err.get(_k)
             # Check is_suggestion flag (set when original had info_type)
             if err.get('is_suggestion'):
                 # Store as suggestion with full details

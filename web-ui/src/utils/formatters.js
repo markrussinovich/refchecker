@@ -622,8 +622,18 @@ function getCorrectedReferenceData(ref) {
   for (const issue of allIssues) {
     const errorType = (issue.error_type || '').toLowerCase()
     const parsed = parseErrorDetailsForMarkdown(issue.error_details)
-    const actualValue = parsed?.actual || issue.actual_value
-    
+    // Prefer the parsed/explicit actual_value; fall back to the typed correction
+    // fields the backend carries for "missing" issues (year/venue/title/authors),
+    // so the corrected bibtex includes exactly what the warning named.
+    const typedByType = {
+      title: issue.ref_title_correct,
+      author: issue.ref_authors_correct,
+      authors: issue.ref_authors_correct,
+      year: issue.ref_year_correct,
+      venue: issue.ref_venue_correct,
+    }
+    const actualValue = parsed?.actual || issue.actual_value || typedByType[errorType]
+
     if (actualValue) {
       switch (errorType) {
         case 'title':

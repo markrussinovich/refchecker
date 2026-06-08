@@ -110,7 +110,7 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal",
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate",
             "sort": "relevance"  # Ensure consistent ordering
         }
         
@@ -160,7 +160,7 @@ class NonArxivReferenceChecker:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
         
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
         }
         
         # Make the request with retries and backoff
@@ -210,7 +210,7 @@ class NonArxivReferenceChecker:
     def _get_paper_by_arxiv_id_uncached(self, clean_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/ARXIV:{clean_id}"
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
         }
 
         for attempt in range(2):  # Only 2 attempts for fast-path
@@ -245,7 +245,7 @@ class NonArxivReferenceChecker:
         endpoint = f"{self.base_url}/paper/search/match"
         params = {
             "query": title,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
         }
 
         for attempt in range(2):  # Only 2 attempts for fast-path
@@ -690,7 +690,7 @@ class NonArxivReferenceChecker:
                 corpus_id = corpus_match.group(1)
                 # Try to get the paper directly by CorpusID
                 endpoint = f"{self.base_url}/paper/CorpusId:{corpus_id}"
-                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"}
+                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"}
                 
                 for attempt in range(self.max_retries):
                     try:

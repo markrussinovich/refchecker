@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue } from './formatters'
+import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex } from './formatters'
 
 describe('formatters', () => {
   describe('formatDate', () => {
@@ -144,6 +144,36 @@ describe('formatters', () => {
       const result = formatReference(ref)
       expect(result).toBe('John Smith "Undated Tool"')
       expect(displayReferenceValue('n.d.')).toBe('')
+    })
+  })
+
+  describe('exportReferenceAsBibtex — corrected values', () => {
+    it('includes year + venue named by "missing" warnings via typed correction fields', () => {
+      // Regression for #53: warnings say year/venue are missing and carry only
+      // the typed ref_*_correct fields (no actual_value). The corrected bibtex
+      // must still include exactly those values, not just the DOI.
+      const ref = {
+        title: 'Comparison of osteoporosis pharmacotherapy fracture rates',
+        authors: ['Reynolds AW', 'Liu G', 'Kocis PT'],
+        doi: '10.5812/ijem.12104',
+        warnings: [
+          { error_type: 'year', error_details: "Year missing: should include '2018'", ref_year_correct: '2018' },
+          { error_type: 'venue', error_details: "Venue missing: should include 'International Journal of Endocrinology and Metabolism'", ref_venue_correct: 'International Journal of Endocrinology and Metabolism' },
+        ],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('2018')
+      expect(bibtex).toContain('International Journal of Endocrinology and Metabolism')
+    })
+
+    it('still honours explicit actual_value when present', () => {
+      const ref = {
+        title: 'Some paper',
+        authors: ['Doe J'],
+        errors: [{ error_type: 'year', actual_value: '2020' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('2020')
     })
   })
 })

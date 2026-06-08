@@ -17,6 +17,10 @@ Fields produced:
     mag_id               str   — Microsoft Academic Graph ID (legacy)
     fields_of_study      list  — top concept display names
     publication_type     str   — journal-article / preprint / book / …
+    is_preprint          bool  — True only when type is preprint/posted-content
+    abstract             str   — abstract text (S2/Crossref/OpenAlex), ≤1500 chars
+    tldr                 str   — Semantic Scholar machine TL;DR ("claim")
+    oa_pdf_url           str   — open-access PDF URL when one exists
     has_funding          bool  — at least one grant/funder listed
     funders              list  — distinct funder display names
     has_affiliation      bool  — at least one author has an institution
@@ -116,6 +120,57 @@ def _fields_of_study_from_openalex(concepts: List[Dict[str, Any]]) -> List[str]:
         key=lambda c: -(c.get('score') or 0),
     )
     return [c.get('display_name') for c in ranked[:3] if c.get('display_name')]
+
+
+def _strip_jats(s: str) -> str:
+    """Strip JATS/XML tags (Crossref abstracts arrive as <jats:p>…</jats:p>)."""
+    import re as _re
+    s = _re.sub(r'<[^>]+>', ' ', s)
+    s = _re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+
+def _reconstruct_inverted_index(inv: Any, cap: int = 1500) -> Optional[str]:
+    """Rebuild abstract text from OpenAlex `abstract_inverted_index`
+    ({word: [positions]}). Each word is placed at every one of its positions;
+    the result is ordered by position and capped at *cap* chars. Returns None on
+    empty/bad input — never fabricates."""
+    if not isinstance(inv, dict) or not inv:
+        return None
+    positions: List[tuple] = []
+    for word, idxs in inv.items():
+        if not isinstance(idxs, list):
+            continue
+        for i in idxs:
+            if isinstance(i, int) and i >= 0:
+                positions.append((i, word))
+    if not positions:
+        return None
+    positions.sort(key=lambda t: t[0])
+    text = " ".join(w for _i, w in positions).strip()
+    return text[:cap] if text else None
+
+
+def _extract_abstract(verified_data: Dict[str, Any], cap: int = 1500) -> Optional[str]:
+    """First real abstract wins: S2/Crossref plain string (JATS-stripped) →
+    OpenAlex inverted index. Never synthesized from title/other fields."""
+    abs_raw = verified_data.get('abstract')
+    if isinstance(abs_raw, str) and abs_raw.strip():
+        text = abs_raw.strip()
+        if '<' in text and '>' in text:
+            text = _strip_jats(text)
+        return text[:cap] if text else None
+    return _reconstruct_inverted_index(verified_data.get('abstract_inverted_index'), cap=cap)
+
+
+def _extract_oa_pdf_url(verified_data: Dict[str, Any]) -> Optional[str]:
+    """Open-access PDF URL: S2 openAccessPdf.url → OpenAlex open_access.oa_url →
+    primary_location.pdf_url. Returns None when no real OA link exists."""
+    for path in (('openAccessPdf', 'url'), ('open_access', 'oa_url'), ('primary_location', 'pdf_url')):
+        v = _safe_get(verified_data, *path)
+        if isinstance(v, str) and v.startswith('http'):
+            return v
+    return None
 
 
 def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -331,6 +386,28 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if any(a.get('institutions') for a in (enrichment.get('authors') or [])):
         enrichment['has_affiliation'] = True
 
+    # Abstract — first real source wins (S2/Crossref string or OpenAlex
+    # inverted index); omitted entirely when no source carries one.
+    abstract = _extract_abstract(verified_data)
+    if abstract:
+        enrichment['abstract'] = abstract
+
+    # TL;DR / "claim" — ONLY Semantic Scholar's machine-generated tldr.text.
+    # Never synthesized from the abstract/title.
+    tldr = _safe_get(verified_data, 'tldr', 'text')
+    if isinstance(tldr, str) and tldr.strip():
+        enrichment['tldr'] = tldr.strip()
+
+    # Open-access PDF URL (also added to links below).
+    oa_pdf_url = _extract_oa_pdf_url(verified_data)
+    if oa_pdf_url:
+        enrichment['oa_pdf_url'] = oa_pdf_url
+
+    # Preprint flag — omit when not a preprint (absence != False in the UI).
+    _ptype = (enrichment.get('publication_type') or '').lower()
+    if _ptype in ('preprint', 'posted-content'):
+        enrichment['is_preprint'] = True
+
     # Bibliographic detail (volume / issue / pages) — OpenAlex `biblio`
     # is exactly this shape; Crossref scatters them across top-level
     # `volume`, `issue`, `page` fields.
@@ -386,6 +463,8 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         links['worldcat'] = f"https://www.worldcat.org/search?q={quote(clean_doi, safe='')}"
     if enrichment.get('openalex_id'):
         links['openalex'] = f"https://openalex.org/{enrichment['openalex_id']}"
+    if oa_pdf_url:
+        links['oa_pdf'] = oa_pdf_url
     if links:
         enrichment['links'] = links
 
