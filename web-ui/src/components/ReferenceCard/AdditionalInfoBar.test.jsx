@@ -50,10 +50,31 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(screen.queryByText(/^Topics:/)).toBeNull()
   })
 
-  it('shows the Published badge only when enrichment.publication_date exists', () => {
+  it('shows the Published badge for the real backend human string ("Oct 1, 2021")', () => {
+    // enrichment.py pre-formats publication_date into a human string via
+    // strftime("%b %-d, %Y"); the FE must surface that verbatim, not abstain.
+    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: 'Oct 1, 2021' } }} />)
+    expect(screen.getByText('Published Oct 1, 2021')).toBeInTheDocument()
+  })
+
+  it('shows the Published badge for a bare-year fallback ("2021")', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '2021' } }} />)
+    expect(screen.getByText('Published 2021')).toBeInTheDocument()
+  })
+
+  it('normalizes a raw ISO publication_date without timezone drift', () => {
+    // Defensive path: if any code path passes a raw ISO date, render it as a
+    // no-drift local "Oct 1, 2021" rather than the previous day.
     render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '2021-10-01' } }} />)
-    // Parsed locally (no timezone drift) -> month/day/year present.
-    expect(screen.getByText(/^Published .*2021/)).toBeInTheDocument()
+    expect(screen.getByText('Published Oct 1, 2021')).toBeInTheDocument()
+  })
+
+  it('abstains from the Published badge when publication_date has no real content', () => {
+    // Empty / non-date strings carry no real signal -> badge omitted, never faked.
+    const { rerender } = render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '' } }} />)
+    expect(screen.queryByText(/^Published /)).toBeNull()
+    rerender(<AdditionalInfoBar reference={{ enrichment: { publication_date: 'n/a' } }} />)
+    expect(screen.queryByText(/^Published /)).toBeNull()
   })
 
   it('omits the Published badge when there is no publication_date', () => {

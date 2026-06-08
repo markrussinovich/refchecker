@@ -28,24 +28,31 @@ function Pill({ onClick, href, title, color, children }) {
   return <button type="button" onClick={onClick} title={title} style={style}>{children}</button>
 }
 
-// Render an OpenAlex publication_date (an ISO "YYYY-MM-DD" string) as a
-// human-readable "Published Oct 1, 2021" without timezone drift. We parse the
-// parts directly instead of `new Date(str)` because the latter treats a bare
-// date as UTC midnight and can render the previous day in negative-offset
-// locales. Returns null when the value is absent or unparseable — never
-// fabricates a date.
+// Render enrichment.publication_date for the "Published …" badge. The backend
+// (enrichment.py) already pre-formats this into a human string — "Oct 1, 2021"
+// for a full date, or a bare "2021" year fallback — so the common, real-data
+// case is to surface that string verbatim. We also defensively handle a raw
+// ISO "YYYY-MM-DD" (parsing the parts directly instead of `new Date(str)`,
+// which treats a bare date as UTC midnight and can render the previous day in
+// negative-offset locales). Returns null only when the value is absent or has
+// no usable content — never fabricates a date.
 function formatPublicationDate(value) {
   if (!value || typeof value !== 'string') return null
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!m) {
-    // Year-only or other shapes: surface a 4-digit year if present, else abstain.
-    const y = value.match(/^(\d{4})\b/)
-    return y ? y[1] : null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  // Raw ISO date (legacy/defensive path): normalize to a no-drift local string.
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) {
+    const [, y, mo, d] = m
+    const dt = new Date(Number(y), Number(mo) - 1, Number(d))
+    if (!Number.isNaN(dt.getTime())) {
+      return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    }
   }
-  const [, y, mo, d] = m
-  const dt = new Date(Number(y), Number(mo) - 1, Number(d))
-  if (Number.isNaN(dt.getTime())) return null
-  return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  // Already-human backend string ("Oct 1, 2021") or a bare year ("2021"):
+  // surface it as-is. Only require that it actually carries a 4-digit year so
+  // we never render a meaningless fragment.
+  return /\d{4}/.test(trimmed) ? trimmed : null
 }
 
 export default function AdditionalInfoBar({ reference, checkId }) {
