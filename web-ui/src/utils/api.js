@@ -55,6 +55,11 @@ export const health = () => api.get('/health', { timeout: 5000 })
 export const getAuthProviders = () => api.get('/auth/providers')
 export const getAuthMe = () => api.get('/auth/me', { timeout: 8000 })
 export const authLogout = () => api.post('/auth/logout')
+// In-app multi-user / OAuth enablement (Settings → Enable accounts & Teams).
+// getAuthConfig returns presence/state only (never secret values); setAuthConfig
+// persists creds + the multiuser flag for the next backend start.
+export const getAuthConfig = () => api.get('/auth/config')
+export const setAuthConfig = (config) => api.put('/auth/config', config)
 
 // User-scoped UI preferences
 export const getUserPreferences = () => api.get('/user/preferences')

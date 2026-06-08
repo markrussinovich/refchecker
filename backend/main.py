@@ -1266,6 +1266,110 @@ async def auth_providers():
     return {"providers": get_available_providers(), "multiuser": is_multiuser_mode()}
 
 
+def _auth_config_path() -> Path:
+    return get_data_dir() / "auth_config.env"
+
+
+def _read_auth_config_file() -> Dict[str, str]:
+    cfg: Dict[str, str] = {}
+    p = _auth_config_path()
+    try:
+        if p.exists():
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("auth_config read failed: %s", e)
+    return cfg
+
+
+@app.get("/api/auth/config")
+async def get_auth_config(current_user: UserInfo = Depends(require_user)):
+    """In-app multi-user / OAuth config STATE (presence only — never the secret
+    values). Powers Settings -> 'Enable accounts & Teams' so it can show what's
+    configured and whether a restart is pending."""
+    cfg = _read_auth_config_file()
+
+    def has(k: str) -> bool:
+        return bool(cfg.get(k) or os.environ.get(k))
+
+    want_multiuser = cfg.get("REFCHECKER_MULTIUSER", "").lower() in ("1", "true", "yes")
+    return {
+        "multiuser_active": is_multiuser_mode(),          # this running process
+        "multiuser_configured": want_multiuser,            # what's saved for next start
+        "needs_restart": want_multiuser != is_multiuser_mode(),
+        "providers": {
+            "google": has("GOOGLE_CLIENT_ID") and has("GOOGLE_CLIENT_SECRET"),
+            "github": has("GITHUB_CLIENT_ID") and has("GITHUB_CLIENT_SECRET"),
+            "microsoft": has("MS_CLIENT_ID") and has("MS_CLIENT_SECRET"),
+        },
+    }
+
+
+class _AuthConfigRequest(BaseModel):
+    """Multi-user + OAuth credentials saved from Settings. Secrets omitted (None)
+    are KEPT as-is so the UI never has to re-echo them."""
+    multiuser: bool = False
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    github_client_id: Optional[str] = None
+    github_client_secret: Optional[str] = None
+    ms_client_id: Optional[str] = None
+    ms_client_secret: Optional[str] = None
+
+
+@app.put("/api/auth/config")
+async def set_auth_config(payload: _AuthConfigRequest, current_user: UserInfo = Depends(require_user)):
+    """Persist the multi-user + OAuth config to a private app-data file that the
+    sidecar loads on its next start (server_entry.py). The desktop app then
+    relaunches to apply. Real-data only: nothing is invented; omitted secrets are
+    preserved. In multi-user mode this is restricted to admins."""
+    if is_multiuser_mode() and not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin only in multi-user mode")
+
+    existing = _read_auth_config_file()
+
+    def setk(k: str, v):
+        if v is not None and str(v).strip():
+            existing[k] = str(v).strip()
+
+    existing["REFCHECKER_MULTIUSER"] = "true" if payload.multiuser else "false"
+    setk("GOOGLE_CLIENT_ID", payload.google_client_id)
+    setk("GOOGLE_CLIENT_SECRET", payload.google_client_secret)
+    setk("GITHUB_CLIENT_ID", payload.github_client_id)
+    setk("GITHUB_CLIENT_SECRET", payload.github_client_secret)
+    setk("MS_CLIENT_ID", payload.ms_client_id)
+    setk("MS_CLIENT_SECRET", payload.ms_client_secret)
+
+    has_provider = any([
+        existing.get("GOOGLE_CLIENT_ID") and existing.get("GOOGLE_CLIENT_SECRET"),
+        existing.get("GITHUB_CLIENT_ID") and existing.get("GITHUB_CLIENT_SECRET"),
+        existing.get("MS_CLIENT_ID") and existing.get("MS_CLIENT_SECRET"),
+    ])
+    if payload.multiuser and not has_provider:
+        raise HTTPException(status_code=400, detail="Enabling accounts needs at least one provider's client id + secret")
+
+    lines = [
+        "# RefChecker multi-user / OAuth config — written by Settings -> Enable accounts & Teams.",
+        "# Loaded by the app's backend at startup. Delete this file to revert to single-user.",
+        "",
+    ] + [f"{k}={v}" for k, v in existing.items()]
+    p = _auth_config_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        try:
+            os.chmod(p, 0o600)  # restrict (best-effort)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not save config: {e}")
+
+    return {"saved": True, "multiuser": payload.multiuser, "has_provider": bool(has_provider), "restart_required": True}
+
+
 @app.get("/api/auth/login/{provider}")
 async def auth_login(provider: str, request: Request):
     """Redirect to the OAuth authorization URL for the given provider."""

@@ -76,6 +76,25 @@ def main() -> int:
     os.environ.setdefault("REFCHECKER_DATA_DIR", str(data_dir))
     os.environ.setdefault("REFCHECKER_LOG_DIR", str(data_dir / "logs"))
 
+    # Load the in-app auth config (multi-user + OAuth credentials) written by
+    # Settings -> "Enable accounts & Teams", so the desktop app can turn on
+    # accounts/Teams WITHOUT hand-editing a .env. Applied on each sidecar start;
+    # real environment variables still win (setdefault), so docker/.env deploys
+    # are unaffected. Delete <data_dir>/auth_config.env to revert to single-user.
+    _auth_cfg = data_dir / "auth_config.env"
+    try:
+        if _auth_cfg.exists():
+            for _line in _auth_cfg.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip()
+                if _k and _v:
+                    os.environ.setdefault(_k, _v)
+    except Exception as _e:  # noqa: BLE001
+        print(f"auth_config load skipped: {_e}", flush=True)
+
     import uvicorn  # noqa: E402  (imported after env is set; sys.path set above)
 
     uvicorn.run(

@@ -8,6 +8,7 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { invokeTauri, isTauri, openExternal, getAppVersion } from '../../utils/tauriBridge'
 import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
+import EnableAccountsForm from './EnableAccountsForm'
 
 const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
 // Bug reports / feature requests go upstream to Mark Russinovich's repo;
@@ -1073,35 +1074,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         </div>
 
         <div>
-          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Enable accounts &amp; Teams</div>
-          <div className="text-sm mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-            Multi-user mode adds OAuth login and team management (create a team, add/remove members,
-            shared checks). To turn it on, run the backend with these set in its environment
-            (e.g. a <code>.env</code> file or <code>docker-compose</code>), then restart:
-          </div>
-          <pre
-            className="text-[11px] rounded p-3 overflow-auto m-0"
-            style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)', whiteSpace: 'pre-wrap' }}
-          >{`REFCHECKER_MULTIUSER=true
-# at least one provider's client id + secret:
-GOOGLE_CLIENT_ID=...        GOOGLE_CLIENT_SECRET=...
-GITHUB_CLIENT_ID=...        GITHUB_CLIENT_SECRET=...
-MICROSOFT_CLIENT_ID=...     MICROSOFT_CLIENT_SECRET=...`}</pre>
-          <div className="text-xs mt-2" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>
-            Once the server reports a configured provider, the sign-in screen, the Teams menu, and your
-            account appear automatically — and this panel switches to the sign-in / account view.
-          </div>
-        </div>
-
-        <div className="pt-1">
-          <button
-            type="button"
-            onClick={() => openExternal(`${REPO_URL}#multi-user--teams`)}
-            className="text-xs underline"
-            style={{ color: accent }}
-          >
-            Read the multi-user &amp; Teams setup guide
-          </button>
+          <div className="font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>Enable accounts &amp; Teams</div>
+          {/* Actionable in-app enablement: enter OAuth creds + flip the switch,
+              the backend persists it and the app relaunches in multi-user mode. */}
+          <EnableAccountsForm accent={accent} repoUrl={REPO_URL} />
         </div>
       </div>
     )
