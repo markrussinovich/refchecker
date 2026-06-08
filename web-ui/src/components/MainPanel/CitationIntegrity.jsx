@@ -67,6 +67,16 @@ export default function CitationIntegrity({ checkId }) {
             {d.scheme && !d.abstained && (
               <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>scheme: {d.scheme}</span>
             )}
+            {d.ordering && !d.abstained && d.ordering.convention !== 'ambiguous' && (
+              <span className="text-xs" title={d.ordering.reason}
+                style={{ color: d.ordering.consistent === false ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
+                {d.ordering.convention === 'alphabetical'
+                  ? 'order: alphabetical ✓'
+                  : d.ordering.consistent
+                    ? 'order: by appearance ✓'
+                    : 'order: numbering doesn’t match ✗'}
+              </span>
+            )}
           </div>
           {d.abstained ? (
             <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>

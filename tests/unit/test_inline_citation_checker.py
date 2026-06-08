@@ -485,6 +485,57 @@ def test_uncited_coverage_gate_suppresses_low_recall():
     assert all(i["type"] != "uncited" for i in rep["issues"])
 
 
+# --------------------------------------------------------------------------- #
+# Ordering-consistency check (alphabetical vs order-of-appearance)            #
+# --------------------------------------------------------------------------- #
+
+def _nonalpha_refs(n):
+    # Surnames deliberately NOT in alphabetical order so _looks_alphabetical is
+    # False and the appearance-order convention can be judged.
+    names = ["Zegna", "Apexx", "Mintz", "Delos", "Yara", "Bronn", "Quill", "Ferro"]
+    return [{"index": i + 1, "title": f"Ref {i + 1}", "authors": [f"{names[i % len(names)]} {chr(65 + i)}"]}
+            for i in range(n)]
+
+
+def test_ordering_appearance_ascending_is_consistent():
+    body = "We first build on [1], then extend [2], improve [3], and finalize [4] in this work."
+    rep = inline_citation_report(body, _nonalpha_refs(4))
+    assert rep["abstained"] is False
+    assert rep["ordering"]["convention"] == "appearance"
+    assert rep["ordering"]["consistent"] is True
+    assert rep["counts"]["ordering_inconsistent"] == 0
+
+
+def test_ordering_appearance_inversion_is_inconsistent():
+    # First-mention order 1,3,2,4 (not ascending) and the list is NOT alphabetical
+    # -> the numbering matches neither convention.
+    body = "We use [1] and then [3], later [2], and finally [4] across the experiments here."
+    rep = inline_citation_report(body, _nonalpha_refs(4))
+    assert rep["abstained"] is False
+    assert rep["ordering"]["convention"] == "appearance"
+    assert rep["ordering"]["consistent"] is False
+    assert rep["counts"]["ordering_inconsistent"] == 1
+
+
+def test_ordering_alphabetical_is_consistent_and_suppresses_out_of_order():
+    refs = [{"index": i + 1, "title": f"Ref {i + 1}", "authors": [f"{s} {chr(65 + i)}"]}
+            for i, s in enumerate(["Adams", "Brown", "Clark", "Davis", "Evans"])]
+    body = "See [3] and [1], also [4], then [2], and finally [5] in the discussion section."
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["ordering"]["convention"] == "alphabetical"
+    assert rep["ordering"]["consistent"] is True
+    assert all(i["type"] != "out_of_order" for i in rep["issues"])
+
+
+def test_ordering_ambiguous_when_too_few_markers():
+    body = "We rely on [1], [2] and [3] throughout the analysis and the discussion of methods."
+    rep = inline_citation_report(body, _nonalpha_refs(3))
+    assert rep["abstained"] is False
+    assert rep["ordering"]["convention"] == "ambiguous"
+    assert rep["ordering"]["consistent"] is None
+
+
 def test_author_year_unicode_surnames_abstain():
     # German/French accented surnames are recognised as author-year (so the
     # numeric audit abstains rather than mis-routing to a numeric scheme).

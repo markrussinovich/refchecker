@@ -554,6 +554,63 @@ def _looks_alphabetical(references, index_by_pos):
     return (non_dec / float(pairs)) >= 0.8
 
 
+def _classify_ordering(references, index_by_pos, first_mention_order, cited_indices):
+    """Classify the bibliography's ordering convention and whether the inline
+    citations are CONSISTENT with it.
+
+    Two conventions: ALPHABETICAL (sorted by first-author surname — inline
+    numbers are NOT expected to ascend by first mention) and APPEARANCE
+    (order-of-first-use — the first-cited reference has the lowest number, so
+    first-mention order should ascend). Returns
+    ``{convention, consistent, appearance_ratio, alphabetical, reason}``.
+
+    Conservative / abstain-first: when neither signal is strong (or both are),
+    convention='ambiguous' and consistent=None — no affirmative claim.
+    """
+    alphabetical = _looks_alphabetical(references, index_by_pos)
+
+    appearance_ratio = None
+    if len(first_mention_order) >= 4:
+        pairs = list(zip(first_mention_order, first_mention_order[1:]))
+        appearance_ratio = sum(1 for a, b in pairs if a <= b) / float(len(pairs))
+
+    strong_appearance = appearance_ratio is not None and appearance_ratio >= 0.999
+
+    # Alphabetical list — but NOT if it is also strictly ascending (then we can't
+    # tell the two conventions apart -> ambiguous below).
+    if alphabetical and not strong_appearance:
+        return {
+            "convention": "alphabetical", "consistent": True,
+            "appearance_ratio": appearance_ratio, "alphabetical": True,
+            "reason": "The reference list is alphabetical by first author, so inline "
+                      "numbers are not expected to ascend by first mention.",
+        }
+
+    if not alphabetical and appearance_ratio is not None:
+        if appearance_ratio >= 0.999:
+            return {
+                "convention": "appearance", "consistent": True,
+                "appearance_ratio": appearance_ratio, "alphabetical": False,
+                "reason": "Inline numbers ascend in order of first appearance — consistent "
+                          "with an order-of-appearance bibliography.",
+            }
+        if appearance_ratio >= 0.6:
+            return {
+                "convention": "appearance", "consistent": False,
+                "appearance_ratio": appearance_ratio, "alphabetical": False,
+                "reason": "Numbering looks appearance-ordered, but some citations appear "
+                          "out of sequence (first-mention order is not ascending) and the "
+                          "reference list is not alphabetical — the numbering does not match "
+                          "either convention.",
+            }
+
+    return {
+        "convention": "ambiguous", "consistent": None,
+        "appearance_ratio": appearance_ratio, "alphabetical": alphabetical,
+        "reason": "Ordering convention is ambiguous; not flagging order mismatches.",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Issue assembly                                                               #
 # --------------------------------------------------------------------------- #
@@ -581,6 +638,7 @@ def _empty_counts():
         "out_of_order": 0,
         "duplicates": 0,
         "range_errors": 0,
+        "ordering_inconsistent": 0,
         "max_cited": None,
         "distinct_cited": 0,
         "total_markers": 0,
@@ -816,6 +874,12 @@ def inline_citation_report(paper_text, references):
     counts["max_cited"] = max_cited
     counts["distinct_cited"] = len(distinct_cited)
     counts["total_markers"] = len(occurrences)
+
+    # Ordering convention (alphabetical vs order-of-appearance) + whether the
+    # inline numbering is consistent with it. Additive — does not change the
+    # issues/scheme/badge shape; surfaced as a top-level ``ordering`` field.
+    ordering = _classify_ordering(references, index_by_pos, first_mention_order, cited_indices)
+    counts["ordering_inconsistent"] = 1 if ordering.get("consistent") is False else 0
     counts["issues"] = len(issues)
 
     # --- STEP 7: sort + badge ------------------------------------------------
@@ -828,6 +892,7 @@ def inline_citation_report(paper_text, references):
         "abstained": False,
         "counts": counts,
         "issues": issues,
+        "ordering": ordering,
         "badge": _badge_for(issues, abstained=False),
     }
 
