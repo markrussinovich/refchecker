@@ -1525,6 +1525,18 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Chat &amp; Summarize LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used to summarize and answer questions about an article, grounded only in its own text. Works with any configured provider.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="chat" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
           Key Storage
         </div>
         <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>

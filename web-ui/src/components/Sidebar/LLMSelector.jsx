@@ -17,9 +17,11 @@ export default function LLMSelector({ mode = 'extraction' }) {
     selectedConfigId,
     selectedExtractionConfigId,
     selectedHallucinationConfigId,
+    selectedChatConfigId,
     selectConfig,
     selectExtractionConfig,
     selectHallucinationConfig,
+    selectChatConfig,
     deleteConfig,
     isLoading,
   } = useConfigStore()
@@ -27,12 +29,15 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const hasKeyInBrowser = useKeyStore(state => state.hasKey)
   const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
   const isHallucinationMode = mode === 'hallucination'
+  const isChatMode = mode === 'chat'
   const visibleConfigs = isHallucinationMode
     ? configs.filter(config => hallucinationCapableProviders.includes(config.provider))
     : configs
   const activeSelectedId = isHallucinationMode
     ? selectedHallucinationConfigId
-    : (selectedExtractionConfigId || selectedConfigId)
+    : isChatMode
+      ? (selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)
+      : (selectedExtractionConfigId || selectedConfigId)
 
   // A config is "valid" (selectable) if it has a key:
   //   single-user: has_key flag from DB
@@ -124,6 +129,8 @@ export default function LLMSelector({ mode = 'extraction' }) {
     logger.info('LLMSelector', `Selected config ${config.id}`)
     if (isHallucinationMode) {
       selectHallucinationConfig(config.id)
+    } else if (isChatMode) {
+      selectChatConfig(config.id)
     } else if (selectExtractionConfig) {
       selectExtractionConfig(config.id)
     } else {

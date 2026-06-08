@@ -16,6 +16,7 @@ import HealthBadge from './HealthBadge'
 import RetractionCheck from './RetractionCheck'
 import GapFinder from './GapFinder'
 import CitationIntegrity from './CitationIntegrity'
+import ArticleAssistant from './ArticleAssistant'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -368,6 +369,9 @@ export default function MainPanel() {
               references={displayRefs}
             />
             <CitationIntegrity
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+            />
+            <ArticleAssistant
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
             />
           </div>

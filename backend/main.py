@@ -2206,6 +2206,148 @@ async def get_citation_integrity(check_id: int, current_user: UserInfo = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --------------------------------------------------------------------------- #
+# EPIC-D: grounded Chat-with-PDF + Summarize                                   #
+# --------------------------------------------------------------------------- #
+# Grounding is REAL DATA ONLY: the extracted paper body (source='pdf'), or an
+# Abstract section sliced from that body as a fallback (source='abstract'). If
+# neither exists (source='none') the feature is disabled honestly — no LLM call.
+
+# Below this many chars of body text we treat the available text as an abstract
+# rather than a full paper (e.g. a .bbl/.bib source where only the abstract was
+# captured, or a very short note). The summarize/chat answer is then explicitly
+# flagged "from abstract only" in the UI.
+_CHAT_PDF_BODY_MIN_CHARS = 2500
+
+
+def _slice_abstract(text: str) -> str:
+    """Best-effort: return the Abstract section of a paper body, or ''.
+
+    Real-data only — slices the existing extracted text between an 'Abstract'
+    heading and the next section heading (Introduction / Keywords / 1 ...). No
+    fabrication; returns '' when no abstract block is recognizable.
+    """
+    if not text:
+        return ""
+    m = re.search(r'(?im)^\s*abstract\s*[:.\-]?\s*$|(?i)\babstract\b\s*[:.\-]', text)
+    if not m:
+        return ""
+    tail = text[m.end():]
+    stop = re.search(
+        r'(?im)^\s*(?:\d+\s*[.\)]?\s*)?(introduction|keywords|index terms|'
+        r'1\s+introduction|background|related work)\b',
+        tail,
+    )
+    abstract = tail[: stop.start()] if stop else tail[:2000]
+    return abstract.strip()
+
+
+async def _resolve_chat_grounding(check_id: int, check: Dict[str, Any]) -> tuple[str, str]:
+    """Resolve (grounding_text, source) for chat/summarize. Real data only.
+
+    source is one of: 'pdf' (full body), 'abstract' (only an abstract is
+    available), 'none' (nothing to ground on — caller disables the feature).
+    """
+    text = (await _extract_paper_text_for_check(check_id, check)) or ""
+    text = text.strip()
+    if len(text) >= _CHAT_PDF_BODY_MIN_CHARS:
+        return text, "pdf"
+    abstract = _slice_abstract(text)
+    if abstract:
+        return abstract, "abstract"
+    if text:
+        # Short body that is not a recognizable abstract block — still real
+        # extracted text; treat it as an abstract-grade snippet, honestly.
+        return text, "abstract"
+    return "", "none"
+
+
+class _ArticleSummaryRequest(BaseModel):
+    llm_config_id: Optional[LLMConfigId] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class _ArticleChatRequest(_ArticleSummaryRequest):
+    messages: List[Dict[str, str]] = []
+
+
+async def _resolve_article_assistant(req: _ArticleSummaryRequest, user_id: int):
+    """Resolve the Chat & Summarize provider via the shared LLM config path."""
+    provider, model, api_key, endpoint = await _resolve_llm_config_for_request(
+        user_id=user_id,
+        use_llm=True,
+        llm_config_id=req.llm_config_id,
+        llm_provider=req.provider,
+        llm_model=req.model,
+        api_key=req.api_key,
+    )
+    if not provider:
+        raise HTTPException(status_code=400, detail="No LLM configured for Chat & Summarize.")
+    from backend.article_chat import ArticleAssistant
+    return ArticleAssistant(provider=provider, api_key=api_key, endpoint=endpoint, model=model)
+
+
+@app.post("/api/check/{check_id}/summarize")
+async def summarize_article(
+    check_id: int,
+    req: _ArticleSummaryRequest = Body(default=_ArticleSummaryRequest()),
+    current_user: UserInfo = Depends(require_user),
+):
+    """Grounded one-shot summary of the article, from its own text only.
+
+    Honest by construction: when no paper text is available (source='none')
+    the feature is disabled and no LLM is called."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        grounding, source = await _resolve_chat_grounding(check_id, check)
+        if source == "none":
+            return {"summary": None, "source": "none",
+                    "detail": "No article text is available to summarize."}
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user))
+        if not assistant.available:
+            raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
+        result = await asyncio.to_thread(assistant.summarize, grounding, source)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error summarizing check {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/check/{check_id}/chat")
+async def chat_article(
+    check_id: int,
+    req: _ArticleChatRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Grounded chat over the article: answers ONLY from the document text.
+
+    The system prompt is prompt-injection-safe (document text is untrusted
+    data) and abstains ("the article does not state this") rather than guess.
+    When no paper text is available (source='none') the feature is disabled."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        grounding, source = await _resolve_chat_grounding(check_id, check)
+        if source == "none":
+            return {"answer": None, "source": "none",
+                    "detail": "No article text is available to chat about."}
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="No message provided.")
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user))
+        if not assistant.available:
+            raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
+        result = await asyncio.to_thread(assistant.chat, req.messages, grounding, source)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in article chat for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/check/{check_id}/citation-renumber-preview")
 async def get_citation_renumber_preview(
     check_id: int,

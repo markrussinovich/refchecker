@@ -216,6 +216,13 @@ export const getCheckHealth = (checkId) => api.get(`/check/${checkId}/health`, {
 export const getCheckRetractions = (checkId) => api.get(`/check/${checkId}/retractions`, { timeout: 45000 })
 export const getCheckGaps = (checkId) => api.get(`/check/${checkId}/gaps`, { timeout: 60000 })
 export const getCitationIntegrity = (checkId) => api.get(`/check/${checkId}/citation-integrity`, { timeout: 60000 })
+// Grounded Chat-with-PDF + Summarize (EPIC-D). Answers ONLY from the article's
+// own text; abstains honestly when the article does not state something. The
+// optional config carries {llm_config_id, provider, model, api_key}.
+export const getArticleSummary = (checkId, config = {}) =>
+  api.post(`/check/${checkId}/summarize`, config, { timeout: 120000 })
+export const postArticleChat = (checkId, messages, config = {}) =>
+  api.post(`/check/${checkId}/chat`, { ...config, messages }, { timeout: 120000 })
 // Read-only preview of how inline numeric markers would renumber if a new
 // reference were inserted at the given 1-based printed position (omit to append).
 // Abstains (empty shifts) whenever the inline-citation checker abstains.
