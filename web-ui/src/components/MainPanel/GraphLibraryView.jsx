@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchReferenceLibraryGraph } from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { openExternal, isTauri } from '../../utils/tauriBridge'
 
 // 3D force graph is heavy (three.js); lazy-load so it never touches the
 // initial bundle — only paid when the user opens the library graph.
@@ -377,11 +378,31 @@ export default function GraphLibraryView({ onClose }) {
             <div style={{ color: 'var(--color-text-muted)' }}>
               {selected.venue || '—'}{selected.year ? ` · ${selected.year}` : ''} · seen {selected.times_seen}× · {selected.status}
             </div>
-            {(selected.doi || selected.arxiv_id) && (
-              <div className="mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {selected.doi ? `DOI: ${selected.doi}` : `arXiv: ${selected.arxiv_id}`}
-              </div>
-            )}
+            {(() => {
+              // Real-data gated: only when the node actually carries a DOI / arXiv id.
+              // Render it as a clickable link to the canonical resolver, routed
+              // through openExternal so it opens the system browser inside Tauri
+              // (where target="_blank" otherwise no-ops).
+              if (!selected.doi && !selected.arxiv_id) return null
+              const href = selected.doi
+                ? `https://doi.org/${selected.doi}`
+                : `https://arxiv.org/abs/${selected.arxiv_id}`
+              const label = selected.doi ? `DOI: ${selected.doi}` : `arXiv: ${selected.arxiv_id}`
+              return (
+                <div className="mt-1">
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open ${href}`}
+                    style={{ color: 'var(--color-accent)', textDecoration: 'underline', wordBreak: 'break-all' }}
+                    onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(href) } }}
+                  >
+                    {label}
+                  </a>
+                </div>
+              )
+            })()}
             {hl.id && viewMode === '3d' && (
               <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>Spotlighting common links · click empty space to reset</div>
             )}

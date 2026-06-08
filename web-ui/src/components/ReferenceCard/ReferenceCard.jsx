@@ -18,6 +18,7 @@ import { openExternal, isTauri } from '../../utils/tauriBridge'
 import { fetchAuthorProfile, getVenueProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
 import { useDocViewerStore } from '../../stores/useDocViewerStore'
+import { useHistoryStore } from '../../stores/useHistoryStore'
 import {
   shouldSuppressVenueWarning,
   acronymFor,
@@ -272,6 +273,18 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // when the user changes the style picker on the References tab.
   const activeFormat = useStyleStore(s => s.format)
   const activeStyleOptions = useStyleStore(s => s.styleOptions)
+
+  // Active check for the currently-viewed article. The per-reference Chat and
+  // the "In Library" confirm both need a real check id to ground/upsert against.
+  // `reference.last_seen_check_id` is only populated for refs already persisted
+  // in the Seen-References cache — it's frequently 0/undefined for the refs of
+  // the article you're looking at right now, which wrongly hid the Chat button.
+  // Fall back to the actively-selected check so it shows for the current
+  // article's references.
+  const selectedCheckId = useHistoryStore(s => s.selectedCheckId)
+  const activeCheckId = reference.last_seen_check_id > 0
+    ? reference.last_seen_check_id
+    : (selectedCheckId && selectedCheckId > 0 ? selectedCheckId : null)
 
   // "View in document": ask the preview overlay to locate + highlight this
   // citation context on the native PDF page (same machinery as AI highlights).
@@ -1053,19 +1066,25 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               enrichment data is available. */}
           <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
           {/* Additional Info: abstract / claim / preprint / full text + Add to Library */}
-          <AdditionalInfoBar reference={reference} checkId={reference.last_seen_check_id || null} />
+          <AdditionalInfoBar reference={reference} checkId={activeCheckId} />
 
           {/* Per-reference Chat & Summarize. Grounded on THIS reference (its
               title / identifiers / abstract / claim) rather than the host
               paper. Reuses the existing grounded chat backend via the shared
               ArticleAssistant component in reference mode — it self-omits when
               there's no real reference text to ground on (no fabrication), and
-              honestly states when it can only use the abstract/title. */}
-          {reference.last_seen_check_id > 0 && (
-            <div className="mt-2">
+              honestly states when it can only use the abstract/title.
+
+              Gated on `activeCheckId` (the live selected check, falling back to
+              the ref's own last_seen_check_id) rather than ONLY
+              last_seen_check_id — the latter is unset for the current article's
+              freshly-checked refs, which wrongly hid the button. */}
+          {activeCheckId > 0 && (
+            <div className="mt-3 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <ArticleAssistant
-                checkId={reference.last_seen_check_id}
+                checkId={activeCheckId}
                 reference={reference}
+                label="Chat about this reference"
               />
             </div>
           )}
@@ -1465,6 +1484,46 @@ function _authorColor(name) {
   return palette[h % palette.length]
 }
 
+// Small, recognizable inline-SVG marks for the author-profile links in the
+// hover popover. These are clean simple glyphs/monograms (not pixel-perfect
+// brand logos) sized to sit inline with the link text. Each is real-data gated
+// by its parent link, so a mark only renders when there's an actual profile to
+// open. `currentColor` keeps them themed (--color-accent) without extra props.
+function ProfileLinkIcon({ icon }) {
+  const common = { width: 13, height: 13, viewBox: '0 0 24 24', 'aria-hidden': true, style: { flexShrink: 0 } }
+  if (icon === 'semanticscholar') {
+    // Semantic Scholar — the open-book "S" mark, simplified to a clean monogram.
+    return (
+      <svg {...common} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 7.5c-1.2-1.3-2.8-2-4.5-2C8.5 5.5 7 7 7 9c0 4.5 9 2.5 9 6.5 0 2-1.8 3-4 3-1.8 0-3.4-.8-4.5-2" />
+      </svg>
+    )
+  }
+  if (icon === 'googlescholar') {
+    // Google Scholar — its graduation-cap mark, drawn as a simple mortarboard.
+    return (
+      <svg {...common} fill="currentColor">
+        <path d="M12 3 1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v3.5L12 20l7-3.32v-3.5L12 17l-7-3.82z" />
+      </svg>
+    )
+  }
+  if (icon === 'orcid') {
+    // ORCID — its circular "iD" mark as a simple monogram.
+    return (
+      <svg {...common} fill="currentColor">
+        <path d="M12 2a10 10 0 100 20 10 10 0 000-20zM8.3 7.2a1 1 0 110 2 1 1 0 010-2zM7.4 10.6h1.8v6.6H7.4v-6.6zm3.4 0h3.3c2.1 0 3.6 1.5 3.6 3.3s-1.5 3.3-3.6 3.3h-3.3v-6.6zm1.8 1.6v3.4h1.3c1.2 0 1.9-.7 1.9-1.7s-.7-1.7-1.9-1.7h-1.3z" />
+      </svg>
+    )
+  }
+  // OpenAlex — a simple ring/node glyph (matches its open-graph branding).
+  return (
+    <svg {...common} fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const [open, setOpen] = useState(false)
   const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
@@ -1593,12 +1652,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
         )
         const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
         const profileLinks = [
-          orcidUrl && { label: 'ORCID', url: orcidUrl },
-          openalexUrl && { label: 'OpenAlex', url: openalexUrl },
-          s2Url && { label: 'Semantic Scholar', url: s2Url },
+          orcidUrl && { label: 'ORCID', url: orcidUrl, icon: 'orcid' },
+          openalexUrl && { label: 'OpenAlex', url: openalexUrl, icon: 'openalex' },
+          s2Url && { label: 'Semantic Scholar', url: s2Url, icon: 'semanticscholar' },
           // Google Scholar has no author API — this is an honest name SEARCH
           // (not a claimed profile), always available.
-          { label: 'Google Scholar', url: scholarUrl },
+          { label: 'Google Scholar', url: scholarUrl, icon: 'googlescholar' },
         ].filter(Boolean)
         return (
         <div
@@ -1702,7 +1761,10 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
               {profileLinks.map((pl) => (
                 <a key={pl.label} href={pl.url} target="_blank" rel="noopener noreferrer"
                   onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(pl.url) } }}
-                  className="px-2 py-0.5 rounded-md" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  title={`Open ${pl.label}`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md"
+                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  <ProfileLinkIcon icon={pl.icon} />
                   {pl.label}
                 </a>
               ))}

@@ -287,6 +287,20 @@ export const lookupOclc = (doi) =>
 export const clearSeenReferences = () =>
   api.delete('/references/seen')
 
+// "Remove from Library": drop a single reference from the global
+// Seen-References cache. Counterpart to addSeenReference. When the ref
+// already carries an `identity_key` (Seen-Refs library rows do), delete by
+// path; otherwise POST the reference body so the server resolves the same
+// identity key the add/upsert path computes. Returns { removed: bool }.
+export const removeSeenReference = (reference) => {
+  const ref = reference && typeof reference === 'object' ? reference : {}
+  const identityKey = ref.identity_key
+  if (identityKey) {
+    return api.delete(`/references/seen/${encodeURIComponent(identityKey)}`)
+  }
+  return api.post('/references/seen/remove', { reference: ref })
+}
+
 // Manually re-run the Seen-Refs backfill from check_history. Returns
 // diagnostic counters (walked / inserted / updated / skipped) so the
 // FE can show the user whether their checks ARE producing new identity

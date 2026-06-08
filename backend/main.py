@@ -7981,6 +7981,43 @@ async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     return {"removed": removed}
 
 
+class _RemoveSeenReferenceRequest(BaseModel):
+    # Optional: pass the full reference and let the server resolve the same
+    # identity key the upsert/add path uses. Mirrors _AddSeenReferenceRequest
+    # so the FE can post the exact ref it rendered.
+    reference: Optional[Dict[str, Any]] = None
+
+
+@app.delete("/api/references/seen/{identity_key:path}")
+async def remove_seen_reference(identity_key: str,
+                                current_user: UserInfo = Depends(require_user)):
+    """'Remove from Library' — drop a single reference from the global
+    Seen-References cache by its identity key (DOI / arXiv / normalized
+    title — the same key the add/upsert path computes). Counterpart to the
+    whole-cache wipe above. Idempotent: returns {removed: False} when no
+    matching row exists. Same auth gating as the other /references/seen
+    endpoints."""
+    removed = await db.delete_verified_reference((identity_key or "").strip())
+    return {"removed": removed}
+
+
+@app.post("/api/references/seen/remove")
+async def remove_seen_reference_by_body(req: _RemoveSeenReferenceRequest,
+                                        current_user: UserInfo = Depends(require_user)):
+    """Body-based variant of the per-reference removal: accepts a full
+    reference dict, resolves its identity key exactly like the add/upsert
+    path (Database.reference_identity_key), and deletes that one row.
+    Returns {removed: bool}; removed=False when the ref yields no safe
+    identity key or no matching row exists. Same auth gating as the other
+    /references/seen endpoints."""
+    ref = req.reference if isinstance(req.reference, dict) else {}
+    ident = db.reference_identity_key(ref)
+    if not ident:
+        return {"removed": False, "reason": "no identity key"}
+    removed = await db.delete_verified_reference(ident)
+    return {"removed": removed, "identity_key": ident}
+
+
 class _VenueProfileRequest(BaseModel):
     venue_id: Optional[str] = None    # OpenAlex source id (S…)
     issn: Optional[str] = None

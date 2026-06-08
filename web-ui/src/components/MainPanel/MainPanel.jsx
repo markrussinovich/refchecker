@@ -337,18 +337,32 @@ export default function MainPanel() {
         {/* On-demand retraction check (OpenAlex is_retracted, real signal) */}
         {showContent && isComplete && (
           <div className="flex flex-wrap items-start gap-2">
+            {/*
+             * Per-article remount keys (#bug: cross-article result bleed).
+             * In a batch, these on-demand panels keep their fetched results
+             * in local state. Without a key tied to the selected article,
+             * React reuses the same instance when switching articles, so
+             * article A's Retraction / Gap-finder / Citation-numbering
+             * results leak onto article B. Keying each on `selectedCheckId`
+             * forces a fresh mount per article — every article gets its own
+             * clean state and never inherits a sibling's results.
+             */}
             <RetractionCheck
+              key={`ret-${selectedCheckId}`}
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
               references={displayRefs}
             />
             <GapFinder
+              key={`gap-${selectedCheckId}`}
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
               references={displayRefs}
             />
             <CitationIntegrity
+              key={`cite-${selectedCheckId}`}
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
             />
             <ArticleAssistant
+              key={`assist-${selectedCheckId}`}
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
             />
           </div>
@@ -357,6 +371,7 @@ export default function MainPanel() {
         {/* Document-level AI-generated-text detection (opt-in) */}
         {showContent && displayAiDetection && (
           <AIDetectionPanel
+            key={`ai-${selectedCheckId}`}
             detection={displayAiDetection}
             checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
           />

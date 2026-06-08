@@ -2869,6 +2869,29 @@ class Database:
             await db.commit()
         return before
 
+    async def delete_verified_reference(self, identity_key: str) -> bool:
+        """Remove a single reference from the global identity-keyed cache.
+
+        Counterpart to :meth:`upsert_verified_reference` — deletes just the
+        one row whose ``identity_key`` matches (the same column the upsert
+        keys on via ``ON CONFLICT(identity_key)``). Powers the per-reference
+        'Remove from Library' control, complementing the whole-library
+        :meth:`clear_verified_references` wipe.
+
+        Idempotent / no-op safe: returns ``False`` when ``identity_key`` is
+        blank or no matching row exists, ``True`` when a row was removed.
+        """
+        if not identity_key:
+            return False
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "DELETE FROM verified_reference_identity WHERE identity_key = ?",
+                (identity_key,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
     async def backfill_seen_references(self) -> Dict[str, Any]:
         """Manually re-run the Seen-Refs backfill on demand.
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
-import { addSeenReference } from '../../utils/api'
+import { addSeenReference, removeSeenReference } from '../../utils/api'
 
 /**
  * "Additional Info" row under a reference: surfaces the NEW article-intelligence
@@ -40,6 +40,7 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   const [panel, setPanel] = useState(null)  // 'abstract' | 'tldr' | null
   const [lib, setLib] = useState(null)      // null | 'adding' | 'done' | 'error'
   const [libN, setLibN] = useState(0)
+  const [rem, setRem] = useState(null)      // null | 'removing' | 'removed' | 'error'
 
   const oaUrl = e.oa_pdf_url || (e.links && e.links.oa_pdf) || null
   const toggle = (p) => setPanel((cur) => (cur === p ? null : p))
@@ -79,10 +80,12 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   // read-the-real-state path the FE has is the idempotent POST itself (it
   // returns {added, times_seen} for the existing row without creating a
   // duplicate), so "confirm" re-reads the live count rather than fabricating it.
-  // NOTE: there is no per-reference remove endpoint on the backend (only a
-  // wipe-everything DELETE /references/seen). We therefore do NOT render a
-  // per-reference "Remove" control — a non-functional / whole-library-clearing
-  // button here would be misleading. Removal stays on the Seen References tab.
+  // A per-reference remove endpoint now exists (removeSeenReference → backend
+  // delete-by-identity), so we surface a small "Remove" control next to the
+  // honest "✓ In Library" state. It removes THIS reference's row from the
+  // global Seen-References cache by its identity key (DOI / arXiv / title) — it
+  // does NOT wipe the whole library. Real-data only: on success we show
+  // "Removed"; on failure we say so plainly rather than pretending it worked.
   const canCache = !!(reference?.doi || reference?.verified_doi || reference?.arxiv_id || reference?.title)
   const confirmInLibrary = async () => {
     if (lib === 'adding') return
@@ -95,6 +98,16 @@ export default function AdditionalInfoBar({ reference, checkId }) {
       setLib(res?.data ? 'done' : 'error')
     } catch {
       setLib('error')
+    }
+  }
+  const removeFromLibrary = async () => {
+    if (rem === 'removing') return
+    setRem('removing')
+    try {
+      await removeSeenReference(reference)
+      setRem('removed')
+    } catch {
+      setRem('error')
     }
   }
 
@@ -113,31 +126,62 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   // we never render two pills pointing at the same destination.
   if (fullLink && fullLink !== oaUrl) actions.push(<Pill key="fl" href={fullLink} title={`Open the reference link: ${fullLink}`} color="var(--color-accent)">Full link ↗</Pill>)
   if (canCache) {
-    // Honest in-library state. Checked refs are auto-saved on check, so the
-    // resting label is "✓ In Library" (not a misleading "+ Add"). Clicking
-    // re-confirms the live times_seen count via the idempotent upsert (no
-    // duplicate row, no fabricated number). Removal isn't offered here because
-    // the backend has no per-reference remove endpoint (only a full cache wipe
-    // on the Seen References tab) — see the note above confirmInLibrary().
-    const libLabel = lib === 'adding'
-      ? 'Confirming…'
-      : lib === 'error'
-        ? 'Not in library'
+    // Once the user has removed THIS reference from the library, collapse the
+    // in-library state to a single honest "Removed" pill (no stale "✓ In
+    // Library" alongside it, no fabricated count).
+    if (rem === 'removed') {
+      actions.push(
+        <Pill key="lib" title="Removed from your Seen-References library." color="var(--color-text-muted)">
+          Removed
+        </Pill>
+      )
+    } else {
+      // Honest in-library state. Checked refs are auto-saved on check, so the
+      // resting label is "✓ In Library" (not a misleading "+ Add"). Clicking
+      // re-confirms the live times_seen count via the idempotent upsert (no
+      // duplicate row, no fabricated number). A small "Remove" action sits
+      // next to it (removeFromLibrary → per-reference delete-by-identity).
+      const libLabel = lib === 'adding'
+        ? 'Confirming…'
+        : lib === 'error'
+          ? 'Not in library'
+          : lib === 'done'
+            ? `✓ In Library${libN > 1 ? ` · ${libN}×` : ''}`
+            : '✓ In Library'
+      const libTitle = lib === 'error'
+        ? 'This reference has no stable identity key (DOI / arXiv / title), so it could not be saved to the library.'
         : lib === 'done'
-          ? `✓ In Library${libN > 1 ? ` · ${libN}×` : ''}`
-          : '✓ In Library'
-    const libTitle = lib === 'error'
-      ? 'This reference has no stable identity key (DOI / arXiv / title), so it could not be saved to the library.'
-      : lib === 'done'
-        ? `Saved in your Seen-References library${libN > 1 ? ` · seen ${libN}×` : ''}. Manage or remove it from the Seen References tab. Click to re-confirm the live count.`
-        : 'Auto-saved to your Seen-References library when this reference was checked. Click to confirm the live count. Remove it from the Seen References tab.'
-    actions.push(
-      <Pill key="lib" onClick={confirmInLibrary}
-        title={libTitle}
-        color={lib === 'error' ? 'var(--color-error)' : 'var(--color-success)'}>
-        {libLabel}
-      </Pill>
-    )
+          ? `Saved in your Seen-References library${libN > 1 ? ` · seen ${libN}×` : ''}. Click to re-confirm the live count.`
+          : 'Auto-saved to your Seen-References library when this reference was checked. Click to confirm the live count.'
+      actions.push(
+        <Pill key="lib" onClick={confirmInLibrary}
+          title={libTitle}
+          color={lib === 'error' ? 'var(--color-error)' : 'var(--color-success)'}>
+          {libLabel}
+        </Pill>
+      )
+      // Per-reference "Remove" — deletes only THIS reference from the
+      // Seen-References cache by its identity key. Not offered while the
+      // library is mid-confirm or known to have no identity key.
+      if (lib !== 'error') {
+        const remLabel = rem === 'removing'
+          ? 'Removing…'
+          : rem === 'error'
+            ? 'Remove failed'
+            : 'Remove'
+        const remTitle = rem === 'error'
+          ? 'Could not remove this reference from the library — it may already be gone, or the request failed. Try again.'
+          : 'Remove this reference from your Seen-References library.'
+        actions.push(
+          <Pill key="rem"
+            onClick={rem === 'removing' ? undefined : removeFromLibrary}
+            title={remTitle}
+            color={rem === 'error' ? 'var(--color-error)' : 'var(--color-text-muted)'}>
+            {remLabel}
+          </Pill>
+        )
+      }
+    }
   }
 
   if (badges.length === 0 && actions.length === 0) return null

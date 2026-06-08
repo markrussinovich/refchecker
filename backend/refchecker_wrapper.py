@@ -220,16 +220,41 @@ def _diff_cited_vs_truth(reference, truth):
     errors = []
     warnings = []
 
+    # Diacritic/unicode folding so a field that matches the cached truth
+    # modulo accents/encoding (e.g. venue "Émergent" vs "Emergent", author
+    # "Béngio" vs "Bengio", or a PDF-split combining accent "Z ̈ugner" vs
+    # "Zügner") is NOT flagged as a mismatch. Without this, the raw
+    # lower()-only comparison below treated those as genuine differences and
+    # emitted a spurious venue/author "mismatch" warning on a reference whose
+    # fields actually agree — which is the false-positive that surfaced as the
+    # confusing "Unknown mismatch" badge. REAL DATA ONLY: this only suppresses
+    # warnings when the values are genuinely the same string after
+    # accent/case/whitespace folding; true differences still warn.
+    try:
+        from refchecker.utils.text_utils import normalize_diacritics as _fold_diacritics
+    except Exception:  # pragma: no cover - util import shouldn't fail
+        _fold_diacritics = None
+
     def _norm(s):
         if s is None:
             return ""
-        s = str(s).strip().lower()
-        return _re_dvt.sub(r"\s+", " ", s)
+        s = str(s).strip()
+        if _fold_diacritics is not None:
+            try:
+                # normalize_diacritics already lowercases + strips accents.
+                s = _fold_diacritics(s)
+            except Exception:
+                s = s.lower()
+        else:
+            s = s.lower()
+        return _re_dvt.sub(r"\s+", " ", s).strip()
 
     def _first_surname(s):
         s = (s or "").split(",")[0].split(";")[0].strip()
         parts = s.split()
-        return parts[-1].lower() if parts else ""
+        if not parts:
+            return ""
+        return _norm(parts[-1])
 
     # ── Title (v0.7.55 per ML round 2) ────────────────────────────────
     # A fuzzy hit landed us here; if the fuzzy 60–80 char prefix match

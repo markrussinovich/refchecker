@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useStyleStore } from '../../stores/useStyleStore'
-import ShareAnimationCanvas from '../Modals/ShareAnimationCanvas'
 import {
   exportResultsAsMarkdown,
   exportResultsAsPlainText,
@@ -91,14 +90,7 @@ function PerStageChip({ stats, references }) {
 export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource, healthBadge, usageChip }) {
   const statusFilter = useCheckStore(s => s.statusFilter)
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
-  // Real AI-text detection result for THIS check (null until it runs / if
-  // disabled). Only used to enrich the walkthrough — never fabricated.
-  const aiDetection = useCheckStore(s => s.aiDetection)
   const [showExportMenu, setShowExportMenu] = useState(false)
-  // The per-check "walkthrough" — a looping animated summary of THIS
-  // article's real numbers (same canvas the Share dialog uses). Collapsed by
-  // default so the compact summary stays compact; expands on demand.
-  const [showWalkthrough, setShowWalkthrough] = useState(false)
   const [sortMode, setSortMode] = useState('citation')
   // 'original' = export references as RefChecker saw them (the "report" view)
   // 'corrected' = apply every verifier suggestion before exporting
@@ -229,23 +221,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsHallucinated = summaryCounts.references.hallucinated
   const processedRefs = summaryCounts.processedRefs
   const totalRefs = summaryCounts.totalRefs
-
-  // Stats fed to the walkthrough animation — derived from the same real,
-  // style-aware summary counts shown in the chips above (no fabrication).
-  // `errors` here groups errors + hallucinations so the gauge/chips line up
-  // with the "problem" references the user sees. The walkthrough only renders
-  // when the check is complete and actually has references.
-  const walkthroughStats = useMemo(() => ({
-    total: processedRefs,
-    verified: refsVerified,
-    warnings: refsWithWarningsOnly,
-    errors: refsWithErrors + refsHallucinated,
-  }), [processedRefs, refsVerified, refsWithWarningsOnly, refsWithErrors, refsHallucinated])
-  // Only surface AI-text likelihood in the walkthrough when there's a real,
-  // conclusive result for this check — otherwise omit it entirely.
-  const aiBand = aiDetection?.band
-  const hasAiBand = !!aiBand && aiBand !== 'unavailable' && aiBand !== 'inconclusive'
-  const canShowWalkthrough = isComplete && processedRefs > 0
 
   // Count REFERENCES per issue type (not raw issue items) so these chips agree
   // with the "References" status badges above — clicking a chip filters to
@@ -378,31 +353,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               </svg>
             </button>
           )}
-          {/* Walkthrough toggle — plays the looping animated summary of THIS
-              article's real numbers. Only enabled once the check is complete
-              and has references (no fabricated/placeholder video). */}
-          {canShowWalkthrough && (
-            <button
-              type="button"
-              onClick={() => setShowWalkthrough(v => !v)}
-              aria-expanded={showWalkthrough}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition-all cursor-pointer hover:opacity-80"
-              style={{
-                backgroundColor: showWalkthrough ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
-                color: showWalkthrough ? 'white' : 'var(--color-text-secondary)',
-                border: '1px solid var(--color-border)',
-              }}
-              title={showWalkthrough
-                ? 'Hide the animated walkthrough of this article’s results'
-                : 'Play an animated walkthrough of this article’s results'}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M10 8l6 4-6 4V8z" fill="currentColor" stroke="none" />
-              </svg>
-              <span>Walkthrough</span>
-            </button>
-          )}
           {/* Export dropdown - only enabled when check is complete */}
           <div className="relative" ref={exportMenuRef}>
             <button
@@ -520,26 +470,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           </div>
         </div>
       </div>
-
-      {/* Walkthrough player — an animated, looping summary of THIS article's
-          real results (the same canvas the Share dialog renders). Mounted only
-          while expanded so the requestAnimationFrame loop isn't running when
-          hidden. Stats and the optional AI band come straight from this
-          check's verified data — nothing here is generated or placeholder. */}
-      {canShowWalkthrough && showWalkthrough && (
-        <div className="mb-3">
-          <ShareAnimationCanvas
-            title={paperTitle}
-            stats={walkthroughStats}
-            aiBand={hasAiBand ? aiBand : undefined}
-            aiScore={hasAiBand && typeof aiDetection?.overall_score === 'number' ? aiDetection.overall_score : undefined}
-            height={232}
-          />
-          <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-muted)' }}>
-            Animated walkthrough of this article’s results — loops automatically.
-          </p>
-        </div>
-      )}
 
       {/* Reference counts row */}
       <div className="flex items-center gap-2 flex-wrap">
