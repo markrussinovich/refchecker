@@ -50,10 +50,12 @@ The desktop app wraps the same engine in a native Tauri shell and layers on a fu
 review workspace. **The highlights below are grouped and collapsed** — click any
 section to expand it.
 
-> **Newest in v0.7.x** — **AI-generated-text detection** with rich visualizations ·
-> **Share & export** (HTML report, public link, video) · an **Obsidian-style 3D graph**
-> of your whole reference library · a **native-feeling document viewer** with zoom + find ·
-> **richer author cards** · and a **run-mode switch** (references only / AI only / both).
+> **Newest in v0.9.x** — **Chat-with-PDF & Summarize**, grounded in the article text ·
+> **Similar papers + "Cites & Refs"** with a ResearchRabbit-style **Explore graph** ·
+> **Teams & realtime shared-batch presence** · **journal-name & author hovers**
+> (h-index · ORCID · author guidelines) · an **inline-citation numbering checker** ·
+> **AI-generated-text detection** with rich visualizations · and a **fully legible,
+> colour-gradient CLI banner**.
 
 <details>
 <summary><strong>🤖 AI-generated-text detection</strong> — opt-in, advisory, never proof of misconduct</summary>
