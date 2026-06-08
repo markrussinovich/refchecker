@@ -25,6 +25,7 @@ import {
   styleAcceptsAbbreviatedVenue,
 } from '../../utils/venueAbbreviations'
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
+import AdditionalInfoBar from './AdditionalInfoBar'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -1050,6 +1051,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               per-author ORCID popover. Renders nothing when no
               enrichment data is available. */}
           <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
+          {/* Additional Info: abstract / claim / preprint / full text + Add to Library */}
+          <AdditionalInfoBar reference={reference} checkId={reference.last_seen_check_id || null} />
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (

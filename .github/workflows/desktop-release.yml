@@ -242,6 +242,11 @@ jobs:
           # by the previous step ONLY when the key parses, so a malformed
           # or missing secret doesn't block the build.
           CI: "true"
+          # Run linuxdeploy/AppImage tools by extracting them instead of
+          # mounting via FUSE — GitHub runners lack FUSE, which intermittently
+          # fails AppImage bundling with "failed to run linuxdeploy" / 504s.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         shell: bash
         run: |
           # If no valid updater key is available, disable updater-artifact

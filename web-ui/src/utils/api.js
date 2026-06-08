@@ -145,6 +145,10 @@ export const listLLMModels = (provider, api_key, endpoint) =>
 // Global identity-keyed reference cache ("Seen References" tab)
 export const listSeenReferences = (limit = 200, offset = 0, q = null) =>
   api.get('/references/seen', { params: { limit, offset, ...(q ? { q } : {}) } })
+// "Add to Library": persist a single reference (+ its enrichment) into the
+// global Seen-References cache. Idempotent; returns {added, times_seen}.
+export const addSeenReference = (reference, checkId = null, paperTitle = null) =>
+  api.post('/references/seen', { reference, check_id: checkId, paper_title: paperTitle })
 
 // Similar-papers recommendations + co-citation tally — Semantic Scholar's
 // /recommendations endpoint is slow, so this can legitimately take longer

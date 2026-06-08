@@ -7277,6 +7277,33 @@ async def list_seen_references(
     }
 
 
+class _AddSeenReferenceRequest(BaseModel):
+    reference: Dict[str, Any]
+    check_id: Optional[int] = None
+    paper_title: Optional[str] = None
+
+
+@app.post("/api/references/seen")
+async def add_seen_reference(req: _AddSeenReferenceRequest,
+                             current_user: UserInfo = Depends(require_user)):
+    """'Add to Library' — persist a single reference (with its enrichment blob)
+    into the global identity-keyed Seen-References cache. Idempotent: repeated
+    adds bump times_seen. Returns {added, times_seen}; added=False when the ref
+    has no safe identity key (DOI/arXiv/normalized title) so nothing is stored."""
+    try:
+        ref = req.reference if isinstance(req.reference, dict) else {}
+        ident = await db.upsert_verified_reference(ref, check_id=req.check_id, paper_title=req.paper_title)
+        if not ident:
+            return {"added": False, "times_seen": 0, "reason": "no identity key"}
+        row = await db.lookup_verified_reference(ref)
+        return {"added": True, "times_seen": (row or {}).get("times_seen") or 1}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding seen reference: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/references/seen")
 async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     """Wipe the entire Seen References cache. Powers the 'Clear cache'

@@ -25,7 +25,21 @@
   --color-suggestion-bg: #f5f3ff;
   --color-hallucination: #dc6b1d;
   --color-hallucination-bg: #fff7ed;
-  
+  /* Previously referenced-but-undefined tokens (were falling back to hardcoded
+     values in MainPanel/UserMenu/LoginPage). */
+  --color-text-tertiary: #9aa0ad;
+  --color-accent-muted: rgba(16, 163, 127, 0.12);
+  /* Structural tokens for a calmer, Mac-native feel: system font stack
+     (SF/-apple-system first), radii, card shadow, panel surface. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 10px rgba(0, 0, 0, 0.06);
+  --panel-bg: #ffffff;
+
   /* Sidebar */
   --sidebar-width: 280px;
   --sidebar-bg: #f9f9f9;
@@ -55,8 +69,21 @@
   --color-suggestion-bg: #2e1f4d;
   --color-hallucination: #fb923c;
   --color-hallucination-bg: #431c07;
+  --color-text-tertiary: #8b8b96;
+  --color-accent-muted: rgba(16, 163, 127, 0.18);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 12px rgba(0, 0, 0, 0.4);
+  --panel-bg: #2f2f2f;
   --sidebar-bg: #171717;
 }
+
+/* Mac-native typography: SF/-apple-system first, smoothed, controls inherit. */
+html, body, #root {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; }
 
 /* Base styles */
 html {
