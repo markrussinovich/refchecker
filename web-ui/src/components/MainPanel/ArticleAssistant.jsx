@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { getArticleSummary, postArticleChat } from '../../utils/api'
 import { useConfigStore } from '../../stores/useConfigStore'
+import { useSettingsStore } from '../../stores/useSettingsStore'
 
 /**
  * Grounded Chat-with-PDF + Summarize (EPIC-D). Two tabs:
@@ -15,9 +16,34 @@ import { useConfigStore } from '../../stores/useConfigStore'
  *     "answering from abstract only" banner is shown.
  *   • When no article text is available (source==='none') the feature is
  *     disabled honestly — no LLM call is made.
+ *   • When no Chat & Summarize LLM is configured, a clear, non-blocking
+ *     empty-state links straight to Settings → LLM rather than failing on
+ *     the first request.
  */
 
 const SOURCE_LABEL = { pdf: 'full text', abstract: 'abstract only', none: 'no text' }
+
+/**
+ * Non-blocking empty-state shown when no Chat & Summarize LLM is configured.
+ * Honest: explains why nothing can run yet and links to the exact Settings
+ * pane where the model is selected, instead of a silent disable or a
+ * confusing backend error on the first request.
+ */
+function NoModelEmptyState({ verb }) {
+  const openSettings = useSettingsStore(s => s.openSettings)
+  return (
+    <div className="text-sm rounded-md px-3 py-2.5"
+      style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+      No Chat &amp; Summarize model is configured yet, so there’s nothing to {verb} with.
+      {' '}
+      <button type="button" onClick={() => openSettings('LLM')}
+        className="underline font-medium"
+        style={{ color: 'var(--color-accent)' }}>
+        Configure a Chat &amp; Summarize model in Settings →
+      </button>
+    </div>
+  )
+}
 
 function SourceBadge({ source }) {
   if (!source) return null
@@ -33,18 +59,28 @@ function SourceBadge({ source }) {
   )
 }
 
-function AbstractBanner({ source }) {
-  if (source !== 'abstract') return null
+// Honest grounding banner. Shown when answers are limited by the available
+// source text: 'abstract' (abstract only) or 'none' (no document text at all).
+function SourceBanner({ source }) {
+  if (source !== 'abstract' && source !== 'none') return null
+  const text = source === 'abstract'
+    ? 'Answering from the abstract only — the full text wasn’t available for this article, so answers are limited to what the abstract states.'
+    : 'No document text is available for this article, so there’s nothing to ground answers in. This can happen when the PDF couldn’t be read or hasn’t been processed yet.'
   return (
     <div className="text-xs mt-2 rounded-md px-2.5 py-1.5"
       style={{ color: 'var(--color-warning)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-warning)' }}>
-      Answering from the abstract only — the full text wasn’t available for this article, so answers are limited to what the abstract states.
+      {text}
     </div>
   )
 }
 
 export default function ArticleAssistant({ checkId }) {
   const getSelectedChatConfig = useConfigStore(s => s.getSelectedChatConfig)
+  // Reactively track whether any chat-capable LLM is configured. The resolved
+  // chat config falls back to the extraction/default config, so this is null
+  // only when no LLM is configured at all (subscribe to configs so the
+  // empty-state clears the moment a model is added in Settings).
+  const hasChatModel = useConfigStore(s => (s.configs?.length || 0) > 0)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('summarize')
 
@@ -85,7 +121,9 @@ export default function ArticleAssistant({ checkId }) {
       const d = res.data || {}
       setChatSource(d.source || null)
       if (d.source === 'none') {
-        setChat({ loading: false, error: d.detail || 'No article text is available to chat about.' })
+        // Not an error — an honest limitation. The SourceBanner explains it
+        // clearly above the thread instead of a red failure message.
+        setChat({ loading: false, error: null })
         return
       }
       setMessages([...nextMessages, { role: 'assistant', content: d.answer || '' }])
@@ -130,7 +168,8 @@ export default function ArticleAssistant({ checkId }) {
 
           {tab === 'summarize' ? (
             <div>
-              {!summary && (
+              {!hasChatModel && <NoModelEmptyState verb="summarize" />}
+              {hasChatModel && !summary && (
                 <button type="button" onClick={runSummary} disabled={sum.loading}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
                   style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: sum.loading ? 0.6 : 1 }}>
@@ -139,8 +178,9 @@ export default function ArticleAssistant({ checkId }) {
               )}
               {sum.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{sum.error}</div>}
               {summaryNone && (
-                <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                  {summary.detail || 'No article text is available to summarize.'}
+                <div className="mt-1">
+                  <SourceBadge source="none" />
+                  <SourceBanner source="none" />
                 </div>
               )}
               {summary && !summaryNone && (
@@ -149,7 +189,7 @@ export default function ArticleAssistant({ checkId }) {
                     <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Summary</span>
                     <SourceBadge source={summary.source} />
                   </div>
-                  <AbstractBanner source={summary.source} />
+                  <SourceBanner source={summary.source} />
                   <div className="text-sm mt-2 whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>
                     {summary.summary}
                   </div>
@@ -163,9 +203,10 @@ export default function ArticleAssistant({ checkId }) {
                   <SourceBadge source={chatSource} />
                 </div>
               )}
-              <AbstractBanner source={chatSource} />
+              <SourceBanner source={chatSource} />
+              {!hasChatModel && <div className="mb-2"><NoModelEmptyState verb="chat" /></div>}
               <div className="space-y-2 mb-2 max-h-72 overflow-y-auto">
-                {messages.length === 0 && (
+                {hasChatModel && messages.length === 0 && (
                   <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                     Ask a question about this article. Answers come only from the article’s own text — if it isn’t in the article, the assistant will say so.
                   </div>
@@ -193,14 +234,14 @@ export default function ArticleAssistant({ checkId }) {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-                  placeholder="Ask about the article…"
+                  placeholder={hasChatModel ? 'Ask about the article…' : 'Configure a model in Settings to chat'}
                   className="flex-1 px-2.5 py-1.5 rounded-md text-sm border"
                   style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}
-                  disabled={chat.loading}
+                  disabled={chat.loading || !hasChatModel}
                 />
-                <button type="button" onClick={sendChat} disabled={chat.loading || !input.trim()}
+                <button type="button" onClick={sendChat} disabled={chat.loading || !input.trim() || !hasChatModel}
                   className="px-3 py-1.5 rounded-md text-xs font-medium border"
-                  style={{ background: 'var(--color-accent)', color: 'white', borderColor: 'var(--color-accent)', opacity: (chat.loading || !input.trim()) ? 0.6 : 1 }}>
+                  style={{ background: 'var(--color-accent)', color: 'white', borderColor: 'var(--color-accent)', opacity: (chat.loading || !input.trim() || !hasChatModel) ? 0.6 : 1 }}>
                   Send
                 </button>
               </div>
