@@ -416,3 +416,83 @@ def test_renumber_preview_garbage_does_not_raise():
         assert isinstance(rep, dict)
         assert isinstance(rep["shifted_markers"], list)
         assert isinstance(rep["abstained"], bool)
+
+
+# --------------------------------------------------------------------------- #
+# Adversarial-hardening regressions (false-positive reductions)               #
+# --------------------------------------------------------------------------- #
+
+def test_bracket_enumeration_not_treated_as_citations():
+    # A sentence-initial '[1] ... [2] ... [3] ...' itemised list (with back-
+    # references) must ABSTAIN like the paren case — not emit false issues.
+    body = (
+        "We address three problems. [1] Scaling is hard. [2] Memory is limited. "
+        "[3] Latency matters. We solve [1] with batching, [2] with quantization, "
+        "[3] with caching. Problem [1] is the most severe of these challenges."
+    )
+    refs = [{"index": i, "title": f"Ref {i}"} for i in range(1, 13)]
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is True
+    assert rep["issues"] == []
+
+
+def test_paren_enumeration_with_backreferences_abstains():
+    # Back-references ('as described in (1)') must not defeat the enumeration
+    # guard (the old each-about-once test broke here -> false 'uncited').
+    body = (
+        "In this paper we make three contributions. (1) We propose a new method. "
+        "(2) We show strong results. (3) We release code. As described in (1), the "
+        "method is fast. Our results in (2) confirm the hypothesis. The code in (3) "
+        "is open-source and documented for the community to build upon over time."
+    )
+    refs = [{"index": i, "title": f"Ref {i}"} for i in range(1, 13)]
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is True
+    assert rep["issues"] == []
+
+
+def test_superscript_exponents_not_citations():
+    # x²/y³/z² maths exponents must not be detected as a superscript scheme.
+    body = (
+        "The area scales as x² and the volume as y³ across the domain. We also "
+        "observe z² growth and a² decay in the measured fields over long times."
+    )
+    rep = inline_citation_report(body, _numeric_refs(5))
+    assert rep["abstained"] is True
+    assert all(i["type"] != "undefined" for i in rep["issues"])
+
+
+def test_sparse_ref_num_high_marker_not_undefined():
+    # Marker [10] with a real ref_num=10 entry (sparse list) must NOT be flagged
+    # undefined just because len(references) == 4.
+    body = (
+        "We cite [1] and [2] and also [3] and finally [10] in this work. "
+        "Additional discussion of [10] and [2] appears later in the paper text."
+    )
+    refs = [{"ref_num": 1, "title": "a"}, {"ref_num": 2, "title": "b"},
+            {"ref_num": 3, "title": "c"}, {"ref_num": 10, "title": "d"}]
+    rep = inline_citation_report(body, refs)
+    assert not any(i["type"] == "undefined" and i.get("ref_index") == 10 for i in rep["issues"])
+
+
+def test_uncited_coverage_gate_suppresses_low_recall():
+    # Only 3 of 10 references cited (coverage 0.3 < 0.5) -> suppress per-ref
+    # 'uncited' alarms (likely parser under-recall, not a real omission).
+    body = "We rely on [1] and [2] and [3] throughout this analysis and discussion of methods."
+    refs = [{"index": i, "title": f"Ref {i}"} for i in range(1, 11)]
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert all(i["type"] != "uncited" for i in rep["issues"])
+
+
+def test_author_year_unicode_surnames_abstain():
+    # German/French accented surnames are recognised as author-year (so the
+    # numeric audit abstains rather than mis-routing to a numeric scheme).
+    body = (
+        "Müller et al. (2019) zeigten X. Schäfer und Wagner (2020) erweiterten dies. "
+        "Étienne (2018) bestätigte. Wir folgen Müller (2019) und Schäfer (2020)."
+    )
+    refs = [{"index": i, "title": f"Ref {i}", "authors": [f"Autor{i}"]} for i in range(1, 6)]
+    rep = inline_citation_report(body, refs)
+    assert rep["scheme"] == "author-year"
+    assert rep["abstained"] is True

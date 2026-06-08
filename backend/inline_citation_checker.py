@@ -82,11 +82,15 @@ _PAREN_PAT = re.compile(r"(?<![\w.])\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)
 # comma/dash-joined superscript groups.
 _SUPER_PAT = re.compile(r"(?<=\w)[⁰-⁹¹²³]+(?:[·,‐‑‒–—][⁰-⁹¹²³]+)*")
 
-# Author-year families (mirrors refchecker_wrapper.au_yr_patterns).
+# Author-year families (mirrors refchecker_wrapper.au_yr_patterns). Surname
+# classes are Unicode-aware so accented non-English names (Müller, Schäfer,
+# Étienne) are recognised, and the connector set covers und/et/y.
+_SUR = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ\-']+"
+_CONN = r"(?:and|&|und|et|y)"
 _AU_YR_PATTERNS = (
-    re.compile(r"\[\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\]"),
-    re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
-    re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*[\(\[](\d{4})[a-z]?[\)\]]"),
+    re.compile(rf"\[\s*({_SUR})(?:\s+et\s+al\.?|\s+{_CONN}\s+{_SUR})?[\s,]+(\d{{4}})[a-z]?\s*\]"),
+    re.compile(rf"\(\s*({_SUR})(?:\s+et\s+al\.?|\s+{_CONN}\s+{_SUR})?[\s,]+(\d{{4}})[a-z]?\s*\)"),
+    re.compile(rf"\b({_SUR})(?:\s+et\s+al\.?|\s+{_CONN}\s+{_SUR})?\s*[\(\[](\d{{4}})[a-z]?[\)\]]"),
 )
 
 # Bibliography heading -> truncate the body here so reference-list digits
@@ -111,9 +115,12 @@ _HEADER_NOISE_RE = re.compile(
 )
 
 # Structural cross-references that look like paren-numerics but are not
-# citations: 'Eq. (3)', 'Figure 2', 'Section (2)', etc.
+# citations: 'Eq. (3)', 'Figure 2', 'Section (2)', 'Figures (2)', 'Eqs. (3)',
+# 'Refs. (5)', etc. (singular AND plural/abbreviated forms).
 _CROSSREF_LEFT_RE = re.compile(
-    r"(?i)(?:eq|eqn|equation|fig|figure|section|sect|sec|table|appendix|chapter|step|item|line|row|col)\.?\s*$"
+    r"(?i)(?:eqn?s?|equations?|figs?|figures?|sects?|sections?|secs?|tables?"
+    r"|appendix|appendices|chapters?|steps?|items?|lines?|rows?|cols?|columns?"
+    r"|refs?|references?|notes?|panels?|parts?)\.?\s*$"
 )
 
 
@@ -228,33 +235,77 @@ def _count_author_year(body, ref_count):
     return len(seen)
 
 
-# Single-number paren marker (with capture), for enumeration detection.
+def _superscript_is_exponent(body, start):
+    """True when the superscript at *start* is a maths exponent, scientific-
+    notation digit, or unit (x², 10⁶, cm², Sr⁹⁰) rather than a citation marker.
+
+    Citations attach to the END of a real word ('result³'); exponents attach to a
+    digit ('10⁶', '2³') or to a standalone single-letter variable ('x²', 'E²').
+    """
+    prev = body[start - 1] if start >= 1 else ""
+    if prev.isdigit():
+        return True  # 10⁶, 2³ — scientific notation / exponent
+    if prev.isalpha():
+        before = body[start - 2] if start >= 2 else " "
+        if not before.isalpha():
+            return True  # standalone single-letter base: x², m³, E², z²
+    return False
+
+
+def _count_superscript_citations(body, cap):
+    """Plausible-superscript-citation count: in-range (1..cap) and NOT an
+    exponent/unit/scientific-notation glyph (mirrors _plausible_count's bound
+    plus the exponent guard, so x²/10⁶/cm² never inflate the scheme vote)."""
+    n = 0
+    for m in _SUPER_PAT.finditer(body):
+        if _superscript_is_exponent(body, m.start()):
+            continue
+        ascii_txt = m.group(0).translate(_SUPERSCRIPT_MAP)
+        digits = [int(d) for d in re.findall(r"\d{1,3}", ascii_txt)]
+        if digits and all(1 <= d <= cap for d in digits):
+            n += 1
+    return n
+
+
+# Single-number markers (with capture), for enumeration detection.
 _PAREN_SINGLE = re.compile(r"(?<![\w.])\(\s*(\d{1,3})\s*\)")
+_BRACKET_SINGLE = re.compile(r"\[\s*(\d{1,3})\s*\]")
 
 
-def _paren_is_enumeration(body):
-    """True if the bare-paren numbers look like a sentence-initial list
-    enumeration — '(1) We propose ... (2) We release ...' — rather than
-    scattered citations. Such enumerations form a contiguous 1..k run, each
-    used about once, mostly at the start of a sentence/line followed by a
-    capitalised word. Treating them as citations yields false 'uncited' issues,
-    so the caller must abstain. (Real citations are scattered, repeat, and are
-    not a perfect once-each 1..k run.)
+def _is_list_enumeration(body, single_pat):
+    """True if the single-number markers matched by *single_pat* look like a
+    sentence-initial itemised list — '(1) We propose ... (2) We release ...' or
+    '[1] Scaling is hard. [2] Memory is limited.' — rather than scattered
+    citations. Treating such lists as citations yields false 'uncited'/'gap'
+    issues, so the caller must abstain.
+
+    Robust to BACK-REFERENCES ('as described in (1)'): keyed on each number's
+    FIRST appearance. A list (a) covers a contiguous 1..k, (b) introduces the
+    numbers in ascending first-appearance order, and (c) has most first
+    appearances sentence-initial and followed by a capitalised word. Real
+    citations are mid-sentence and are not a 1..k ascending-introduction run.
     """
     try:
-        ms = list(_PAREN_SINGLE.finditer(body or ""))
+        ms = list(single_pat.finditer(body or ""))
     except Exception:
         return False
     if len(ms) < 3:
         return False
-    nums = [int(m.group(1)) for m in ms]
-    distinct = sorted(set(nums))
-    contiguous_from_one = distinct == list(range(1, len(distinct) + 1))
-    each_about_once = len(nums) <= len(distinct) + 1
-    if not (contiguous_from_one and each_about_once):
+    first_seen = {}
+    for m in ms:
+        n = int(m.group(1))
+        if n not in first_seen:
+            first_seen[n] = m
+    distinct = sorted(first_seen)
+    if distinct != list(range(1, len(distinct) + 1)):
+        return False
+    # First-appearance order must be ascending 1,2,3,...,k.
+    order = [n for n, _m in sorted(first_seen.items(), key=lambda kv: kv[1].start())]
+    if order != distinct:
         return False
     initial = 0
-    for m in ms:
+    for n in distinct:
+        m = first_seen[n]
         j = m.start() - 1
         while j >= 0 and body[j] in " \t":
             j -= 1
@@ -263,19 +314,23 @@ def _paren_is_enumeration(body):
         first = after[:1]
         if prev in "\n.:;" and first.isalpha() and first.isupper():
             initial += 1
-    return (initial / len(ms)) >= 0.6
+    return (initial / len(distinct)) >= 0.6
 
 
-def _detect_scheme(body, ref_count):
+def _detect_scheme(body, ref_count, max_index=0):
     """Return (scheme, confidence, family_counts).
 
     scheme in {'bracket','superscript','paren','author-year','mixed',None}.
+
+    *max_index* is the largest reference index actually in use (which can exceed
+    ``ref_count`` for sparse / non-1..N ``ref_num`` lists); the plausibility cap
+    is the larger of the two so a high-numbered real citation is not dropped.
     """
-    cap = ref_count if ref_count and ref_count > 0 else 999
+    cap = max(max_index or 0, ref_count or 0) or 999
 
     counts = {
         "bracket": _plausible_count(_BRACKET_PAT.findall(body), cap),
-        "superscript": len(_SUPER_PAT.findall(body)),
+        "superscript": _count_superscript_citations(body, cap),
         "paren": _plausible_count(_PAREN_PAT.findall(body), cap),
     }
     au = _count_author_year(body, ref_count)
@@ -309,10 +364,13 @@ def _detect_scheme(body, ref_count):
     if top_name == "paren":
         # Paren is stat-ambiguous: require a higher bar AND reject sentence-initial
         # '(1) ... (2) ...' list enumerations (abstain beats a wrong badge).
-        if top >= 5 and top >= 3 * second and not _paren_is_enumeration(body):
+        if top >= 5 and top >= 3 * second and not _is_list_enumeration(body, _PAREN_SINGLE):
             conf = _clamp(0.45 + 0.5 * (top - second) / float(top))
             return "paren", conf, counts
     elif top >= _MIN_NUMERIC_MARKERS:
+        # Reject sentence-initial '[1] ... [2] ...' itemised lists the same way.
+        if top_name == "bracket" and _is_list_enumeration(body, _BRACKET_SINGLE):
+            return None, 0.0, counts
         conf = _clamp(0.5 + 0.5 * (top - second) / float(top))
         return top_name, conf, counts
 
@@ -397,10 +455,11 @@ def _line_for_offset(body, offset):
     return body[start:end]
 
 
-def _extract_numeric_occurrences(body, scheme, ref_count):
+def _extract_numeric_occurrences(body, scheme, ref_count, max_index=0):
     """Single pass over *body* in document order. Returns
-    (occurrences, raw_out_of_range, range_errors)."""
-    cap = ref_count if ref_count and ref_count > 0 else 999
+    (occurrences, raw_out_of_range, range_errors). The plausibility cap is the
+    larger of *max_index* and *ref_count* (sparse / non-1..N ``ref_num`` lists)."""
+    cap = max(max_index or 0, ref_count or 0) or 999
     if scheme == "bracket":
         pat = _BRACKET_PAT
     elif scheme == "superscript":
@@ -421,10 +480,14 @@ def _extract_numeric_occurrences(body, scheme, ref_count):
         if _is_header_noise(context) or _is_table_noise(context):
             continue
         if scheme == "paren":
-            # Reject equation/figure cross-references.
-            left = body[max(0, offset - 16):offset]
+            # Reject equation/figure cross-references ('Eqs. (3)', 'Figures (2)').
+            left = body[max(0, offset - 24):offset]
             if _CROSSREF_LEFT_RE.search(left):
                 continue
+        if scheme == "superscript" and _superscript_is_exponent(body, offset):
+            # Maths exponent / scientific notation / unit (x², 10⁶, cm²), not a
+            # citation.
+            continue
         ascii_text = marker.translate(_SUPERSCRIPT_MAP)
         # Strip the surrounding bracket/paren for content parsing.
         inner = ascii_text.strip("[]() \t")
@@ -603,7 +666,7 @@ def inline_citation_report(paper_text, references):
     max_ref_index = max(ref_indices) if ref_indices else 0
 
     # --- STEP 2: detect scheme ------------------------------------------------
-    scheme, confidence, _families = _detect_scheme(body, ref_count)
+    scheme, confidence, _families = _detect_scheme(body, ref_count, max_ref_index)
 
     if scheme is None:
         return _abstain_report(None, confidence, ref_count, "no recognizable scheme")
@@ -616,7 +679,7 @@ def inline_citation_report(paper_text, references):
 
     # --- STEP 3: enumerate numeric occurrences -------------------------------
     occurrences, raw_out, range_errors = _extract_numeric_occurrences(
-        body, scheme, ref_count
+        body, scheme, ref_count, max_ref_index
     )
 
     distinct_cited = {o.number for o in occurrences}
@@ -632,7 +695,10 @@ def inline_citation_report(paper_text, references):
                                "reference list likely incomplete")
 
     # --- STEP 4: derived structures ------------------------------------------
-    cited_indices = {n for n in distinct_cited if 1 <= n <= max_ref_index or n in ref_indices}
+    # Only numbers that map to a REAL reference count as cited — an in-range but
+    # non-existent index (sparse list) is reported as 'undefined' below, never
+    # inflated into counts['cited'] / the gap scan as a phantom reference.
+    cited_indices = {n for n in distinct_cited if n in ref_indices}
     first_offset = {}
     for o in occurrences:
         if o.number not in first_offset or o.offset < first_offset[o.number][0]:
@@ -719,17 +785,23 @@ def inline_citation_report(paper_text, references):
                 ))
 
     # --- STEP 5f: UNCITED references (medium) --------------------------------
-    for pos, ref in enumerate(references):
-        idx = index_by_pos[pos]
-        if idx not in cited_indices:
-            title = _short_title(_ref_title(ref))
-            tail = (" (%r)" % title) if title else ""
-            issues.append(_issue(
-                "uncited", "medium",
-                "Reference %d%s is in the list but never cited in the text." % (
-                    idx, tail),
-                ref_index=idx,
-            ))
+    # 'uncited' is the highest false-positive-risk check: it accuses the author
+    # based on the PARSER's own recall. If we matched fewer than half the listed
+    # references, the dominant hypothesis is parser under-recall (OCR, exotic
+    # markers), not a genuinely uncited bibliography -> suppress to avoid alarms.
+    coverage = (len(cited_indices) / float(ref_count)) if ref_count else 0.0
+    if coverage >= 0.5:
+        for pos, ref in enumerate(references):
+            idx = index_by_pos[pos]
+            if idx not in cited_indices:
+                title = _short_title(_ref_title(ref))
+                tail = (" (%r)" % title) if title else ""
+                issues.append(_issue(
+                    "uncited", "medium",
+                    "Reference %d%s is in the list but never cited in the text." % (
+                        idx, tail),
+                    ref_index=idx,
+                ))
 
     # --- STEP 6: counts ------------------------------------------------------
     counts = _empty_counts()
@@ -829,7 +901,8 @@ def renumber_preview(paper_text, references, new_printed_number=None):
     if not has_text:
         return _abstain_preview(None, 0.0, False, "body too short")
 
-    scheme, confidence, _families = _detect_scheme(body, ref_count)
+    max_index = max((_ref_index(r, i + 1) for i, r in enumerate(references)), default=0)
+    scheme, confidence, _families = _detect_scheme(body, ref_count, max_index)
     if scheme in (None, "mixed", "author-year"):
         return _abstain_preview(scheme, confidence, True,
                                 "no numeric scheme to renumber")
@@ -845,7 +918,7 @@ def renumber_preview(paper_text, references, new_printed_number=None):
         new_printed_number = 1
 
     occurrences, _raw_out, _range_errors = _extract_numeric_occurrences(
-        body, scheme, ref_count)
+        body, scheme, ref_count, max_index)
     distinct = {o.number for o in occurrences}
     if len(distinct) < _MIN_NUMERIC_MARKERS:
         return _abstain_preview(scheme, confidence * 0.7, True,

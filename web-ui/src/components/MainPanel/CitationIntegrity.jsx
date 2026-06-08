@@ -13,6 +13,17 @@ const BADGE_BG = {
   '#f59e0b': 'rgba(245,158,11,0.14)', '#ef4444': 'rgba(239,68,68,0.12)',
 }
 const SEV_COLOR = { high: 'var(--color-error)', medium: 'var(--color-warning)', low: 'var(--color-text-secondary)' }
+// Humanised messages for the backend's abstain_reason (so the UI explains WHY
+// it abstained instead of a single generic line).
+const ABSTAIN_MSG = {
+  'author-year style has no numeric sequence': 'Author-year citation style detected — there is no numeric sequence to audit.',
+  'mixed citation schemes': 'Mixed citation styles detected — not flagging to avoid false alarms.',
+  'no recognizable scheme': 'No consistent numeric citation scheme detected — not flagging to avoid false alarms.',
+  'too few resolved markers': 'Too few inline citation markers to audit the numbering reliably.',
+  'reference list likely incomplete': 'The reference list looks incomplete relative to the citations — not flagging.',
+  'body too short': 'Not enough body text to analyze.',
+  'empty input': 'No body text or references available to analyze.',
+}
 
 export default function CitationIntegrity({ checkId }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
@@ -59,7 +70,9 @@ export default function CitationIntegrity({ checkId }) {
           </div>
           {d.abstained ? (
             <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
-              {!d.has_text ? 'No body text available to analyze.' : 'Citation scheme could not be determined confidently (e.g. author-year or too few numeric markers) — not flagging to avoid false alarms.'}
+              {!d.has_text
+                ? 'No body text available to analyze.'
+                : (ABSTAIN_MSG[d.abstain_reason] || 'Citation scheme could not be determined confidently (e.g. author-year or too few numeric markers) — not flagging to avoid false alarms.')}
             </div>
           ) : issues.length === 0 ? (
             <div className="text-xs mt-1.5" style={{ color: 'var(--color-success)' }}>
