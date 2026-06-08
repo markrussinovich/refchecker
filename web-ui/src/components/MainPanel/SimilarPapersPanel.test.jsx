@@ -56,6 +56,34 @@ describe('SimilarPapersPanel mode toggle (#63)', () => {
   })
 })
 
+describe('SimilarPapersPanel mode-aware cache key (#63)', () => {
+  it('re-queries the backend when switching modes instead of serving the other mode from cache', async () => {
+    findSimilarPapers.mockResolvedValue({ data: { candidates: [], source_counts: {} } })
+    // Shared title across both modes — the cache key is `${mode}::${title}`,
+    // so each mode must keep its own entry and NOT reuse the other's result.
+    render(<SimilarPapersPanel references={REFS} paperTitle="Cache Key Paper" paperSource="" />)
+
+    // Search in the default "Similar" mode -> caches under "similar::…".
+    fireEvent.click(screen.getByRole('button', { name: 'Find similar papers' }))
+    await waitFor(() => expect(findSimilarPapers).toHaveBeenCalledTimes(1))
+    expect(findSimilarPapers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: 'similar' }),
+    )
+
+    // Flip to "Cites & Refs". A mode-aware cache key means there is no cached
+    // entry for this mode yet, so the search button is shown (not "Refresh").
+    fireEvent.click(screen.getByRole('tab', { name: 'Cites & Refs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find cites & refs' }))
+
+    // A second backend call fires for the new mode rather than the Similar
+    // result being reused from cache.
+    await waitFor(() => expect(findSimilarPapers).toHaveBeenCalledTimes(2))
+    expect(findSimilarPapers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: 'cites_refs' }),
+    )
+  })
+})
+
 describe('SimilarPapersPanel relation chips (#63)', () => {
   it('tags cites/refs candidates as Reference or Citation, and shows shared-refs for similar rows', async () => {
     findSimilarPapers.mockResolvedValue({
