@@ -48,6 +48,13 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     links = {},
   } = enrichment
 
+  // Honest publication date: a display-ready string from the backend.
+  // Guard against empty / placeholder values so a content-free date never
+  // gates an otherwise-empty strip (R01/K2). Used both for the gate below
+  // and for the Row-1 render so the two stay in lock-step.
+  const pubDateRaw = (typeof publication_date === 'string' ? publication_date.trim() : '')
+  const hasPubDate = !!pubDateRaw && !/^(n\/?a|none|null|unknown)$/i.test(pubDateRaw)
+
   const hasAnyBadge = (
     cited_by_count != null ||
     reference_count != null ||
@@ -56,7 +63,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     openalex_id || pubmed_id || pmc_id || mag_id ||
     publication_type ||
     venue ||
-    publication_date ||
+    hasPubDate ||
     (Array.isArray(fields_of_study) && fields_of_study.length > 0) ||
     (Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)) ||
     has_funding ||
@@ -136,7 +143,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           detail. The type chip used to float alone with no context; now
           it's labelled "Type:" so the user can tell what it means at
           a glance. Year is NOT repeated here — main metadata above. */}
-      {(prettyPubType || metaLine) && (
+      {(prettyPubType || metaLine || hasPubDate) && (
         <div className="flex flex-wrap items-center gap-2">
           {prettyPubType && (
             <>
@@ -146,6 +153,14 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           )}
           {metaLine && (
             <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}</span>
+          )}
+          {/* Real full publication date (e.g. "Oct 1, 2021"). Rendered as
+              plain text — it is NOT a link/button (no dead-button risk) and
+              shows only when the backend supplied a real value (R01/K2). */}
+          {hasPubDate && (
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              Published: <span style={{ color: 'var(--color-text-secondary)' }}>{pubDateRaw}</span>
+            </span>
           )}
         </div>
       )}

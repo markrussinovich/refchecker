@@ -52,9 +52,11 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(screen.queryByText(/^Topics:/)).toBeNull()
   })
 
-  it('no longer renders a "Published …" pill (it was removed as redundant — the date is shown under the title)', () => {
-    // The publication date is already displayed under the reference title, so
-    // the duplicate, looks-clickable-but-inert "Published" pill was removed.
+  it('no longer renders a "Published …" pill (the date is rendered by ReferenceEnrichmentStrip, not here)', () => {
+    // AdditionalInfoBar deliberately does NOT render the publication date: the
+    // real full date (e.g. "Oct 1, 2021") is rendered as plain "Published:"
+    // text in Row-1 of ReferenceEnrichmentStrip (see R01/K2). Keeping it out of
+    // this bar avoids a duplicate, looks-clickable-but-inert "Published" pill.
     for (const publication_date of ['Oct 1, 2021', '2021', '2021-10-01']) {
       const { unmount } = render(<AdditionalInfoBar reference={{ enrichment: { publication_date } }} />)
       expect(screen.queryByText(/^Published /)).toBeNull()
