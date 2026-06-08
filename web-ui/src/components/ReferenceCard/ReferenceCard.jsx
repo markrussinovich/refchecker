@@ -275,10 +275,37 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // citation context on the native PDF page (same machinery as AI highlights).
   const requestCitation = useDocViewerStore(s => s.requestCitation)
   const viewContextInDoc = (ctx, i) => {
-    const text = (ctx?.sentence || ctx?.text || '').trim()
-    if (!text) return
-    requestCitation({ text, label: ctx?.marker || `Excerpt ${i + 1}` })
+    // Locate the WHOLE referenced sentence (with its surrounding before/after
+    // when present) and colour the highlight by this reference's check status,
+    // and carry the ref id so the highlight can link back to it.
+    const sentence = (ctx?.sentence || ctx?.text || '').trim()
+    if (!sentence) return
+    const text = [ctx?.before, sentence, ctx?.after].filter(Boolean).join(' ').trim() || sentence
+    requestCitation({
+      text,
+      label: ctx?.marker || `Excerpt ${i + 1}`,
+      status,
+      refId: String(reference.id ?? numberToShow),
+      refTitle: reference.title || '',
+    })
   }
+
+  // Scroll to + flash this card when a citation highlight links back to it
+  // (the "hyperlink the highlighted text back to the reference" flow).
+  const cardRef = useRef(null)
+  useEffect(() => {
+    const myId = String(reference.id ?? numberToShow)
+    const onFocus = (e) => {
+      if (String(e?.detail?.refId) !== myId) return
+      const el = cardRef.current
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('rc-ref-flash')
+      setTimeout(() => { try { el.classList.remove('rc-ref-flash') } catch { /* unmounted */ } }, 1700)
+    }
+    window.addEventListener('refchecker:focus-reference', onFocus)
+    return () => window.removeEventListener('refchecker:focus-reference', onFocus)
+  }, [reference.id, numberToShow])
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -576,6 +603,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
   return (
     <div
+      ref={cardRef}
       className="py-4 border-b font-mono text-sm"
       style={{ borderColor: 'var(--color-border)', contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
     >

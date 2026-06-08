@@ -6,6 +6,7 @@ import asyncio
 import time
 import uuid
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -2143,6 +2144,67 @@ async def get_check_retractions(check_id: int, current_user: UserInfo = Depends(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _extract_paper_text_for_check(check_id: int, check: Dict[str, Any]) -> str:
+    """Best-effort extracted body text for a check (cache-first), for analyses
+    that need the full paper body. Mirrors get_paper_text's retrieval."""
+    try:
+        cache_dir = await _get_configured_cache_dir()
+        if cache_dir:
+            p = os.path.join(str(cache_dir), "paper_text", f"{check_id}.txt")
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                cached = await asyncio.to_thread(_read_cached_paper_text, p)
+                if cached and cached.strip():
+                    return cached
+    except Exception as _e:
+        logger.debug("citation-integrity cache read skipped: %s", _e)
+    source_type = check.get("source_type", "") or ""
+    paper_source = check.get("paper_source", "") or ""
+    from backend.refchecker_wrapper import _extract_pdf_text_cli_style
+    text = ""
+    if source_type == "file" and paper_source and os.path.exists(paper_source):
+        if paper_source.lower().endswith(".pdf"):
+            text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+        else:
+            try:
+                with open(paper_source, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except Exception:
+                text = ""
+    if not (text or "").strip() and paper_source:
+        try:
+            from refchecker.utils.cache_utils import get_cached_artifact_path
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                for artifact in ("ai_body.pdf", "paper.pdf"):
+                    pp = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                    if pp and os.path.exists(pp) and os.path.getsize(pp) > 0:
+                        text = await asyncio.to_thread(_extract_pdf_text_cli_style, pp, None)
+                        break
+        except Exception as _e:
+            logger.debug("citation-integrity pdf lookup failed: %s", _e)
+    return text or ""
+
+
+@app.get("/api/check/{check_id}/citation-integrity")
+async def get_citation_integrity(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Inline-citation numbering integrity (gaps / out-of-order / duplicates /
+    undefined / uncited), scheme-aware. Abstains when the scheme is unclear."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        text = await _extract_paper_text_for_check(check_id, check)
+        from backend import export as _export
+        from backend.inline_citation_checker import inline_citation_report
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        report = await asyncio.to_thread(inline_citation_report, text, refs)
+        report["has_text"] = bool((text or "").strip())
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking citation integrity for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/check/{check_id}/gaps")
 async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require_user)):
     """"Did you miss these?" — works frequently co-cited by the bibliography's own
@@ -2270,23 +2332,29 @@ async def publish_check(check_id: int, req: _PublishRequest,
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
     import httpx
 
-    # Quick link: zero-config anonymous host (no domain, no token). Uploads the
-    # standalone HTML to an ephemeral public file host and returns the link.
-    # The report is then PUBLIC to anyone with the URL and expires — surfaced as
-    # such in the UI. No credentials involved.
+    # Quick link: zero-config anonymous host (no domain, no token). The host
+    # (tmpfiles.org) rejects HTML uploads (anti-phishing), so we upload the PDF
+    # report instead — which renders/downloads for anyone with the URL and is
+    # ephemeral + public (surfaced as such in the UI). No credentials involved.
     if req.adapter == "quick_link":
         try:
-            files = {"file": (f"{safe}.html", html_str.encode("utf-8"), "text/html")}
+            user_id = get_user_id_filter(current_user)
+            check = await db.get_check_by_id(check_id, user_id=user_id)
+            if not check:
+                raise HTTPException(status_code=404, detail="Check not found")
+            from backend import export as _export
+            pdf_bytes = await asyncio.to_thread(_export.render_check_to_pdf, check)
+            files = {"file": (f"{safe}.pdf", pdf_bytes, "application/pdf")}
             async with httpx.AsyncClient() as client:
-                r = await client.post("https://tmpfiles.org/api/v1/upload", files=files, timeout=30.0)
+                r = await client.post("https://tmpfiles.org/api/v1/upload", files=files, timeout=45.0)
             if r.status_code not in (200, 201):
-                raise HTTPException(status_code=502, detail=f"Quick-link host returned {r.status_code}.")
+                raise HTTPException(status_code=502, detail=f"Quick-link host unavailable (HTTP {r.status_code}). Try 'Publish to web', or download the report.")
             url = ((r.json() or {}).get("data") or {}).get("url")
             if not url:
-                raise HTTPException(status_code=502, detail="Quick-link host did not return a URL.")
-            # tmpfiles serves a direct file via /dl/ ; rewrite for a clean view.
+                raise HTTPException(status_code=502, detail="Quick-link host did not return a URL. Try 'Publish to web'.")
+            # tmpfiles serves the raw file at /dl/ ; rewrite so the PDF opens directly.
             view = url.replace("tmpfiles.org/", "tmpfiles.org/dl/", 1) if "/dl/" not in url else url
-            return {"url": view, "page_url": url, "ephemeral": True, "adapter": "quick_link"}
+            return {"url": view, "page_url": url, "ephemeral": True, "adapter": "quick_link", "format": "pdf"}
         except HTTPException:
             raise
         except Exception as e:

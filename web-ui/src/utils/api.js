@@ -198,6 +198,7 @@ export const publishCheck = (checkId, { adapter = 'github_gist', token = '', pub
 export const getCheckHealth = (checkId) => api.get(`/check/${checkId}/health`, { timeout: 15000 })
 export const getCheckRetractions = (checkId) => api.get(`/check/${checkId}/retractions`, { timeout: 45000 })
 export const getCheckGaps = (checkId) => api.get(`/check/${checkId}/gaps`, { timeout: 60000 })
+export const getCitationIntegrity = (checkId) => api.get(`/check/${checkId}/citation-integrity`, { timeout: 60000 })
 
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>

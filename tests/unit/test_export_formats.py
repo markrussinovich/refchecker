@@ -275,6 +275,21 @@ def test_health_appears_in_all_formats():
     assert "Citation health" in doc
 
 
+def test_export_route_filename_uses_re_at_module_scope():
+    """Regression: the export ROUTE builds the download filename with re.sub at
+    module scope. main.py historically did all re uses via local imports, so the
+    export routes raised NameError: name 're' is not defined -> 500 on EVERY
+    share/export. Direct render_export tests missed it (they skip the route).
+    """
+    import importlib
+    main = importlib.import_module("backend.main")
+    fn = main._export_filename("A/B: messy! title", 7, "html")
+    assert fn.endswith(".html")
+    assert "/" not in fn and ":" not in fn and "!" not in fn
+    # empty/garbage title still yields a safe fallback, not a crash
+    assert main._export_filename("", 7, "pdf") == "refchecker-7.pdf"
+
+
 def test_orphan_detector_flags_uncited_when_extraction_ran():
     # ref 1 is inline-cited; ref 3 has neither inline flag nor contexts -> orphan.
     md = export.serialize_check_to_markdown(_check())

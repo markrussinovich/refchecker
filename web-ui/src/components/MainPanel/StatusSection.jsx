@@ -29,6 +29,18 @@ const _BAND_HL = {
 }
 // Citation-context highlight fill (distinct blue, so it never reads as AI).
 const _CITE_HL = 'rgba(59,130,246,0.32)'
+// Citation-context highlight tinted by the reference's CHECK STATUS, so the
+// reader instantly sees whether the cited source is verified / has issues.
+const _STATUS_HL = {
+  verified: 'rgba(34,197,94,0.34)', error: 'rgba(239,68,68,0.36)',
+  warning: 'rgba(245,158,11,0.34)', unverified: 'rgba(148,163,184,0.30)',
+  hallucination: 'rgba(168,85,247,0.34)', hallucinated: 'rgba(168,85,247,0.34)',
+}
+const _STATUS_STROKE = {
+  verified: 'rgba(22,163,74,0.85)', error: 'rgba(220,38,38,0.9)',
+  warning: 'rgba(202,138,4,0.85)', unverified: 'rgba(100,116,139,0.7)',
+  hallucination: 'rgba(147,51,234,0.85)', hallucinated: 'rgba(147,51,234,0.85)',
+}
 
 function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, citationTarget, onClose }) {
   const [pageCount, setPageCount] = useState(null)
@@ -124,7 +136,9 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
           if (!r.found) continue
           if (firstPage === null) firstPage = r.page
           ;(byPage[r.page] = byPage[r.page] || []).push({
-            rects: r.rects, label: citationTarget?.label || 'Citation context', key: `cite-${r.span_index}`,
+            rects: r.rects, label: citationTarget?.label || 'Citation context',
+            status: citationTarget?.status, refId: citationTarget?.refId, refTitle: citationTarget?.refTitle,
+            key: `cite-${r.span_index}`,
           })
         }
         setCiteHl(byPage)
@@ -411,35 +425,47 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                     </div>
                   ))
                 )}
-                {/* Citation-context highlight overlay (blue), with hover label. */}
-                {(citeHl[i] || []).flatMap((hl) =>
-                  (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
+                {/* Citation-context highlight — tinted by the reference's CHECK
+                    STATUS, pulses on appear, and links back to the reference. */}
+                {(citeHl[i] || []).flatMap((hl) => {
+                  const st = (hl.status || '').toLowerCase()
+                  const fill = _STATUS_HL[st] || _CITE_HL
+                  const stroke = _STATUS_STROKE[st] || 'rgba(37,99,235,0.6)'
+                  const clickable = !!hl.refId
+                  return (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
                     <div
                       key={`${hl.key}-${ri}`}
+                      className={ri === 0 ? 'rc-cite-pulse' : undefined}
                       onMouseEnter={() => setHoverHl(hl)}
                       onMouseLeave={() => setHoverHl((h) => (h === hl ? null : h))}
-                      title="Citation context"
+                      onClick={clickable ? (e) => {
+                        e.stopPropagation()
+                        try { window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId: hl.refId } })) } catch { /* no-op */ }
+                        onClose()
+                      } : undefined}
+                      title={hl.refTitle ? `Cited: ${hl.refTitle} — click to open this reference` : 'Citation context'}
                       style={{
                         position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
                         width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
-                        background: _CITE_HL, borderRadius: 2, cursor: 'help',
-                        mixBlendMode: 'multiply', boxShadow: '0 0 0 1px rgba(37,99,235,0.55)',
+                        background: fill, borderRadius: 2, cursor: clickable ? 'pointer' : 'help',
+                        mixBlendMode: 'multiply', boxShadow: `0 0 0 1.5px ${stroke}`,
                       }}
                     >
                       {hoverHl === hl && ri === 0 && (
                         <div style={{
                           position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
                           background: 'rgba(17,24,39,0.96)', color: '#fff', fontSize: 11,
-                          padding: '6px 8px', borderRadius: 6, width: 240, lineHeight: 1.4,
+                          padding: '6px 8px', borderRadius: 6, width: 250, lineHeight: 1.4,
                           pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
                         }}>
-                          <strong style={{ color: '#93c5fd' }}>Citation context</strong>
-                          {hl.label ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>Marker: {hl.label}</div> : null}
+                          <strong style={{ color: '#fff' }}>Citation context{st ? ` · ${st}` : ''}</strong>
+                          {hl.refTitle ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>{hl.refTitle.slice(0, 90)}</div> : null}
+                          {clickable ? <div style={{ color: '#93c5fd', marginTop: 3 }}>Click to open this reference ↗</div> : null}
                         </div>
                       )}
                     </div>
                   ))
-                )}
+                })}
                 {/* Find-query highlight overlay (yellow) — shows where it is. */}
                 {(findHl[i] || []).map(([x0, y0, x1, y1], ri) => (
                   <div key={`find-${ri}`} title="Search match"

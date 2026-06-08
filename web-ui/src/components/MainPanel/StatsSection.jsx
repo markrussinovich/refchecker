@@ -222,10 +222,14 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const processedRefs = summaryCounts.processedRefs
   const totalRefs = summaryCounts.totalRefs
 
+  // Count REFERENCES per issue type (not raw issue items) so these chips agree
+  // with the "References" status badges above — clicking a chip filters to
+  // references, so a ref with 2 errors is 1 filterable item, not 2. (Fixes the
+  // "1 vs 2" mismatch between the two summary rows.)
   const issueFilters = [
-    { ...allFilters.error, value: summaryCounts.issues.errors },
-    { ...allFilters.warning, value: summaryCounts.issues.warnings },
-    { ...allFilters.suggestion, value: summaryCounts.issues.suggestions },
+    { ...allFilters.error, value: refsWithErrors },
+    { ...allFilters.warning, value: refsWithWarningsOnly },
+    { ...allFilters.suggestion, value: refsWithSuggestionsOnly },
     { ...allFilters.unverified, value: refsUnverified },
     { ...allFilters.hallucination, value: refsHallucinated },
   ]
@@ -658,21 +662,17 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
       </div>
 
-      {/* Issue counts row - separate line. Label disambiguated from
-          the "References" row above: each chip here counts INDIVIDUAL
-          issue items (a single ref can contribute multiple), whereas
-          the References row counts REFS-WITH-STATUS. That distinction
-          was confusing users who saw "6 warnings" on References but
-          "8 Warnings" here for the same dataset (8 warning items
-          spread across 6 refs). */}
+      {/* Issue filter row - separate line. Each chip counts REFERENCES with
+          that issue type (same granularity as the References row above), so the
+          two rows agree — clicking a chip filters the list to those references. */}
       {issueFilters.some(f => f.value > 0) && (
         <div className="flex items-center gap-2 flex-wrap mt-2">
           <span
             className="text-xs font-medium"
             style={{ color: 'var(--color-text-muted)' }}
-            title="Total individual issue items across all refs (a single ref can contribute more than one). The References row above counts refs-with-status instead."
+            title="References with each issue type — click to filter the list. Matches the References row above."
           >
-            Issue items
+            Filter by issue
           </span>
           {issueFilters.filter(f => f.value > 0).map(filter => {
             const isSelected = statusFilter.includes(filter.id)

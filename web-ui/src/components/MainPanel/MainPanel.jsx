@@ -15,6 +15,7 @@ import AIDetectionPanel from './AIDetectionPanel'
 import HealthBadge from './HealthBadge'
 import RetractionCheck from './RetractionCheck'
 import GapFinder from './GapFinder'
+import CitationIntegrity from './CitationIntegrity'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -35,6 +36,14 @@ export default function MainPanel() {
   const [buttonLeft, setButtonLeft] = useState(null)
   const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
   const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
+
+  // When a citation highlight in the document links back to its reference,
+  // make sure the References tab is showing so the target card can flash.
+  useEffect(() => {
+    const onFocus = () => { setGlobalView(null); setResultsTab('references') }
+    window.addEventListener('refchecker:focus-reference', onFocus)
+    return () => window.removeEventListener('refchecker:focus-reference', onFocus)
+  }, [])
   
   const {
     status: checkStoreStatus,
@@ -357,6 +366,9 @@ export default function MainPanel() {
             <GapFinder
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
               references={displayRefs}
+            />
+            <CitationIntegrity
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
             />
           </div>
         )}

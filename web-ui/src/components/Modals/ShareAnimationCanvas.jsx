@@ -2,10 +2,10 @@ import { forwardRef, useEffect, useRef } from 'react'
 
 /**
  * An in-modal animated walkthrough of the check results, drawn live on a
- * <canvas>. Shown while the shareable HTML is being generated, and reused as
- * the source for the "walkthrough video" export (the parent records this very
- * canvas via captureStream + MediaRecorder). Loops until unmounted. The canvas
- * element is forwarded so the parent can capture it.
+ * <canvas> — a "walkthrough video" feel without any recording. Shown in the
+ * share dialog (and while the shareable report is generated) as a looping
+ * preview; loops until unmounted. Pure canvas + requestAnimationFrame, no
+ * MediaRecorder/captureStream.
  */
 const C = {
   bg: '#0f1117', fg: '#f3f4f6', muted: '#9aa0ad',
@@ -28,7 +28,13 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
     const canvas = ref.current
     if (!canvas) return undefined
     const ctx = canvas.getContext('2d')
-    const W = canvas.width, H = canvas.height
+    // Render at devicePixelRatio for a crisp, high-quality result (the logical
+    // drawing coords stay 460xH; the backing store is scaled up).
+    const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
+    const W = 460, H = height
+    canvas.width = Math.round(W * dpr)
+    canvas.height = Math.round(H * dpr)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const DUR = 5200
     const total = Math.max(0, stats.total || 0)
     const verified = stats.verified || 0

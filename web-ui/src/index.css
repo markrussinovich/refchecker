@@ -225,3 +225,23 @@ a[href^="https"]:hover,
 a[href^="mailto:"]:hover {
   text-decoration-thickness: 2px;
 }
+
+/* Citation-context highlight: a brief attention pulse on appear so the reader
+   immediately spots where the cited sentence is on the page. */
+@keyframes rcCitePulse {
+  0%   { box-shadow: 0 0 0 1.5px currentColor, 0 0 0 0 rgba(59,130,246,0.55); }
+  40%  { box-shadow: 0 0 0 1.5px currentColor, 0 0 0 10px rgba(59,130,246,0.0); }
+  100% { box-shadow: 0 0 0 1.5px currentColor, 0 0 0 0 rgba(59,130,246,0.0); }
+}
+.rc-cite-pulse { animation: rcCitePulse 1.5s ease-out 2; }
+
+/* Reference card flash when navigated to from a citation highlight. */
+@keyframes rcRefFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); }
+  20%  { box-shadow: 0 0 0 3px rgba(59,130,246,0.65); }
+  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); }
+}
+.rc-ref-flash { animation: rcRefFlash 1.6s ease-out 1; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .rc-cite-pulse, .rc-ref-flash { animation: none; }
+}

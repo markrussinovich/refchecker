@@ -24,6 +24,9 @@ const _linkEnd = (v) => (v && typeof v === 'object' ? v.id : v)
  */
 function RadialChordGraph({ data, width, height, onNodeClick }) {
   const [hover, setHover] = useState(null)
+  // Clicking a node PINS its connections (common articles stay spotlighted)
+  // until you click empty space or another node. Hover still previews.
+  const [pinned, setPinned] = useState(null)
   const layout = useMemo(() => {
     const nodes = data?.nodes || []
     const w = Math.max(320, width), h = Math.max(320, height)
@@ -46,19 +49,23 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
 
   const { ordered, pos, links, cx, cy, w, h } = layout
   const chord = (a, b) => `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`
+  const focus = pinned || hover // pinned wins; hover previews when nothing pinned
 
   return (
-    <svg width={w} height={h} style={{ display: 'block' }}>
+    <svg width={w} height={h} style={{ display: 'block' }}
+      onClick={(e) => { if (e.target === e.currentTarget) setPinned(null) }}>
+      {/* Background catcher: click empty space to clear the pinned node. */}
+      <rect x={0} y={0} width={w} height={h} fill="transparent" onClick={() => setPinned(null)} />
       <g>
         {links.map((l, i) => {
           const a = pos[l.s], b = pos[l.t]
           if (!a || !b) return null
-          const active = hover && (l.s === hover || l.t === hover)
+          const active = focus && (l.s === focus || l.t === focus)
           return (
-            <path key={i} d={chord(a, b)} fill="none"
+            <path key={i} d={chord(a, b)} fill="none" pointerEvents="none"
               stroke={active ? 'var(--color-accent, #3b82f6)' : 'rgba(140,140,160,0.18)'}
-              strokeWidth={active ? 1.4 : Math.min(1.5, l.weight * 0.5)}
-              opacity={hover && !active ? 0.06 : 1} />
+              strokeWidth={active ? 1.7 : Math.min(1.5, l.weight * 0.5)}
+              opacity={focus && !active ? 0.05 : 1} />
           )
         })}
       </g>
@@ -67,30 +74,37 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
           const p = pos[node.id]
           if (!p) return null
           const r = Math.sqrt(Math.max(1, node.times_seen || 1)) * 1.7 + 2.5
-          const dim = hover && hover !== node.id && !links.some((l) => (l.s === hover && l.t === node.id) || (l.t === hover && l.s === node.id))
+          const connected = links.some((l) => (l.s === focus && l.t === node.id) || (l.t === focus && l.s === node.id))
+          const dim = focus && focus !== node.id && !connected
+          const isPinned = pinned === node.id
           return (
-            <circle key={node.id} cx={p.x} cy={p.y} r={r}
+            <circle key={node.id} cx={p.x} cy={p.y} r={isPinned ? r + 1.5 : r}
               fill={STATUS_COLOR[node.status] || STATUS_COLOR.unverified}
-              opacity={dim ? 0.25 : 1}
-              stroke={hover === node.id ? 'var(--color-text-primary)' : 'rgba(0,0,0,0.25)'}
-              strokeWidth={hover === node.id ? 1.5 : 0.5}
+              opacity={dim ? 0.2 : 1}
+              stroke={focus === node.id ? 'var(--color-text-primary)' : 'rgba(0,0,0,0.25)'}
+              strokeWidth={focus === node.id ? 1.8 : 0.5}
               style={{ cursor: 'pointer' }}
               onMouseEnter={() => setHover(node.id)}
               onMouseLeave={() => setHover((hh) => (hh === node.id ? null : hh))}
-              onClick={() => onNodeClick(node)}>
+              onClick={(e) => { e.stopPropagation(); setPinned((pp) => (pp === node.id ? null : node.id)); onNodeClick(node) }}>
               <title>{`${node.label}${node.year ? ` (${node.year})` : ''} — seen ${node.times_seen}×`}</title>
             </circle>
           )
         })}
       </g>
-      {hover && pos[hover] && (
+      {focus && pos[focus] && (
         <g pointerEvents="none">
-          <text x={pos[hover].x} y={pos[hover].y - 10} textAnchor="middle"
+          <text x={pos[focus].x} y={pos[focus].y - 10} textAnchor="middle"
             fontSize="11" fill="var(--color-text-primary)"
             style={{ paintOrder: 'stroke', stroke: 'var(--color-bg-primary)', strokeWidth: 3 }}>
-            {(pos[hover].node.label || '').slice(0, 48)}
+            {(pos[focus].node.label || '').slice(0, 48)}
           </text>
         </g>
+      )}
+      {pinned && (
+        <text x={10} y={h - 10} fontSize="11" fill="var(--color-text-muted)" pointerEvents="none">
+          Pinned · click empty space to reset
+        </text>
       )}
     </svg>
   )

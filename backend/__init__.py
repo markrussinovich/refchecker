@@ -31,6 +31,17 @@ try:
 except ImportError:
     pass
 
-from .main import app
+# Expose `app` LAZILY (PEP 562). Eagerly importing backend.main here forced the
+# entire FastAPI app + refchecker.core (tqdm/fitz/…) to load whenever ANY leaf
+# backend module was imported — which broke lightweight imports/tests of pure
+# modules like backend.inline_citation_checker in minimal environments. Serving
+# still uses `backend.main:app` directly, and `from backend import app` keeps
+# working via this hook.
+def __getattr__(name):
+    if name == "app":
+        from .main import app
+        return app
+    raise AttributeError(f"module 'backend' has no attribute {name!r}")
+
 
 __all__ = ["app"]

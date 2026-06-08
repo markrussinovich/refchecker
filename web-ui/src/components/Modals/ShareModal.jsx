@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { exportCheckFile, exportBatchFile, publishCheck } from '../../utils/api'
 import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -41,8 +41,6 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
   const [shareUrl, setShareUrl] = useState('')
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [videoOpen, setVideoOpen] = useState(false)
-  const canvasRef = useRef(null)
 
   // Best-effort summary for the included-scans state + the build animation.
   const summary = useMemo(() => {
@@ -85,34 +83,6 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
     } finally { setBusy(null) }
   }
 
-  // Record the live walkthrough canvas to a real .webm via MediaRecorder —
-  // a genuine "html-to-video" of the report (no external service).
-  const recordVideo = () => {
-    const canvas = canvasRef.current
-    if (!canvas || typeof canvas.captureStream !== 'function' || typeof window.MediaRecorder === 'undefined') {
-      setError('Video capture is not supported in this browser. Try the PDF/HTML export.')
-      return
-    }
-    setError(''); setBusy('video')
-    try {
-      const stream = canvas.captureStream(30)
-      const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-        .find((m) => window.MediaRecorder.isTypeSupported(m)) || 'video/webm'
-      const rec = new window.MediaRecorder(stream, { mimeType: mime })
-      const chunks = []
-      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data) }
-      rec.onstop = () => {
-        downloadBlob(new Blob(chunks, { type: 'video/webm' }), `${safeName(title)}.webm`)
-        setBusy(null)
-      }
-      rec.start()
-      // One full animation loop (~5.2s) plus a beat.
-      setTimeout(() => { try { rec.stop() } catch { /* already stopped */ } }, 5600)
-    } catch (e) {
-      setError(e?.message || 'Video recording failed'); setBusy(null)
-    }
-  }
-
   const [shareNote, setShareNote] = useState('')
 
   const handlePublish = async () => {
@@ -132,7 +102,7 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
     try {
       const res = await publishCheck(checkId, { adapter: 'quick_link' })
       setShareUrl(res.data?.url || '')
-      setShareNote('Anonymous ephemeral link — public to anyone with the URL, and expires after a while. No account or domain needed.')
+      setShareNote('Anonymous PDF report link — no account or domain needed. Public to anyone with the URL and expires after a while.')
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Quick link failed')
     } finally { setBusy(null) }
@@ -170,6 +140,19 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
         </div>
 
         <div className="px-5 py-4 space-y-4">
+          {/* Walkthrough video — the animated summary for THIS check, shown at
+              the top (auto-generated per check, reflects its real numbers).
+              No record/download button: it's a live preview. */}
+          {!isBatch && summary.stats.total > 0 && (
+            <ShareAnimationCanvas
+              title={title}
+              stats={summary.stats}
+              aiBand={summary.ai?.band}
+              aiScore={summary.ai?.overall_score}
+              height={232}
+            />
+          )}
+
           {/* Format selector */}
           <div>
             <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>Format</div>
@@ -206,18 +189,9 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
             </label>
           </div>
 
-          {/* Live results animation while the report is being generated. */}
           {busy === 'download' && (
-            <div>
-              <ShareAnimationCanvas
-                title={title}
-                stats={summary.stats}
-                aiBand={summary.ai?.band}
-                aiScore={summary.ai?.overall_score}
-              />
-              <div className="text-xs mt-1.5 text-center" style={{ color: 'var(--color-text-muted)' }}>
-                Building your {FORMATS.find((f) => f.id === fmt)?.label} report…
-              </div>
+            <div className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
+              Building your {FORMATS.find((f) => f.id === fmt)?.label} report…
             </div>
           )}
 
@@ -247,40 +221,6 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
               </button>
             )}
           </div>
-
-          {/* Walkthrough video (.webm) — records the live animated summary */}
-          {!isBatch && (
-            <div>
-              <button type="button" onClick={() => setVideoOpen((v) => !v)} aria-expanded={videoOpen}
-                className="flex items-center gap-1.5 text-xs font-medium"
-                style={{ color: 'var(--color-text-secondary)' }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                  style={{ transform: videoOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 160ms ease' }}><polyline points="6 9 12 15 18 9" /></svg>
-                Walkthrough video (.webm)
-              </button>
-              {videoOpen && (
-                <div className="mt-2">
-                  <ShareAnimationCanvas
-                    ref={canvasRef}
-                    title={title}
-                    stats={summary.stats}
-                    aiBand={summary.ai?.band}
-                    aiScore={summary.ai?.overall_score}
-                    height={200}
-                  />
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <button type="button" onClick={recordVideo} disabled={busy === 'video'}
-                      className="px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-1.5"
-                      style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', opacity: busy === 'video' ? 0.6 : 1 }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
-                      {busy === 'video' ? 'Recording…' : 'Record & download (~6s)'}
-                    </button>
-                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>A short animated summary for slides or social.</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Publish panel */}
           {!isBatch && publishOpen && (
