@@ -1356,10 +1356,12 @@ function AuthorsLine({ authors, enrichedAuthors }) {
     return null
   }
 
-  // Cap at 10 visible names + " et al." so very long author lists don't
-  // dominate the card. Matches the legacy formatAuthors() behaviour.
-  const visible = list.slice(0, 10)
-  const overflow = list.length > 10
+  // Cap at 10 visible names; an overflow list is expandable to reveal ALL
+  // authors (replaces the old static " et al.").
+  const [showAll, setShowAll] = useState(false)
+  const CAP = 10
+  const overflow = list.length > CAP
+  const visible = (showAll || !overflow) ? list : list.slice(0, CAP)
   return (
     <div style={{ color: 'var(--color-text-secondary)' }}>
       {visible.map((name, i) => {
@@ -1394,10 +1396,19 @@ function AuthorsLine({ authors, enrichedAuthors }) {
         return (
           <span key={`${name}-${i}`}>
             <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} />
-            {i < visible.length - 1 ? ', ' : (overflow ? ', et al.' : '')}
+            {i < visible.length - 1 ? ', ' : ''}
           </span>
         )
       })}
+      {overflow && !showAll && (
+        <button type="button" onClick={() => setShowAll(true)}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+          title="Show all authors">, +{list.length - CAP} more</button>
+      )}
+      {overflow && showAll && (
+        <button type="button" onClick={() => setShowAll(false)}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
+      )}
     </div>
   )
 }
