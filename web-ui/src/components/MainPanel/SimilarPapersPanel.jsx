@@ -23,15 +23,32 @@ const SIMILAR_INFLIGHT = new Map()
  * /api/check pipeline. Disabled until a check has actually produced
  * references.
  */
-// Discovery modes (#63). 'similar' is the existing co-citation/overlap
-// pipeline; 'cites_refs' shows the source paper's real OpenAlex
-// references + citations; 'both' merges the two (Similar results first,
-// then cites/refs candidates not already surfaced, deduped server-side).
+// Discovery modes. Three CLEARLY-SCOPED, real-OpenAlex bibliography-overlap
+// modes:
+//   'references' — papers that SHARE REFERENCES with this paper (their
+//                  bibliographies overlap this paper's references).
+//   'citations'  — papers that SHARE CITATIONS with this paper (co-cited
+//                  works: what the papers citing this one also cite).
+//   'both'       — the union of the two.
 const MODES = [
-  { id: 'similar', label: 'Similar' },
-  { id: 'cites_refs', label: 'Cites & Refs' },
+  { id: 'references', label: 'References' },
+  { id: 'citations', label: 'Citations' },
   { id: 'both', label: 'Both' },
 ]
+
+// Map any persisted/legacy mode value onto the current vocabulary so an
+// older saved preference ('similar' / 'cites_refs') still resolves to a
+// valid toggle instead of leaving none selected.
+const LEGACY_MODE_MAP = {
+  similar: 'both',
+  cites_refs: 'both',
+  reference: 'references',
+  citation: 'citations',
+}
+function normalizeMode(mode) {
+  if (MODES.some((m) => m.id === mode)) return mode
+  return LEGACY_MODE_MAP[mode] || 'both'
+}
 
 // Extract a DOI or arXiv id from the source string (a URL or raw id) so
 // 'cites_refs' mode can resolve the SOURCE paper on OpenAlex. Returns ''
@@ -51,8 +68,8 @@ function deriveSourceId(paperSource) {
 
 export default function SimilarPapersPanel({ references, paperTitle, paperSource, onCheckPaper }) {
   const paperId = deriveSourceId(paperSource)
-  const [mode, setMode] = useState('similar')
-  // Cache key is mode-aware so switching Similar <-> Cites & Refs keeps
+  const [mode, setMode] = useState(() => normalizeMode('both'))
+  // Cache key is mode-aware so switching References <-> Citations keeps
   // each mode's results independently and never cross-contaminates.
   const cacheKey = `${mode}::${paperTitle || ''}`
   const cached = SIMILAR_CACHE.get(cacheKey)
@@ -169,9 +186,10 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
 
   return (
     <div className="space-y-2">
-      {/* Segmented mode toggle (#63): Similar = co-citation/overlap path;
-          Cites & Refs = the source paper's real OpenAlex references +
-          citations. Switching modes re-runs against the matching path. */}
+      {/* Segmented mode toggle: References = papers sharing this paper's
+          references (bibliography overlap); Citations = papers sharing its
+          citations (co-cited); Both = the union. Switching re-runs the
+          matching OpenAlex query. */}
       <div className="flex" role="tablist" aria-label="Discovery mode"
         style={{
           border: '1px solid var(--color-border)',
@@ -207,11 +225,11 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}
       >
         <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          {mode === 'cites_refs'
-            ? "This paper's real citation neighbourhood from OpenAlex — the works it cites and the works that cite it."
-            : mode === 'both'
-            ? 'Similar papers (shared references) plus this paper\'s real OpenAlex cites & refs, merged into one list.'
-            : 'Find up to 5 papers from Semantic Scholar that share the most references with this paper.'}
+          {mode === 'references'
+            ? 'Find papers that share the most references with this paper — overlap in their bibliographies (real OpenAlex data).'
+            : mode === 'citations'
+            ? 'Find papers that share the most citations with this paper — works co-cited alongside it (real OpenAlex data).'
+            : 'Find papers that share this paper\'s references AND its citations, merged into one list (real OpenAlex data).'}
         </div>
         <button
           onClick={load}
@@ -224,11 +242,11 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
             ? `Searching… ${elapsedSec}s`
             : (loaded
               ? 'Refresh'
-              : (mode === 'cites_refs'
-                ? 'Find cites & refs'
-                : mode === 'both'
-                ? 'Find similar + cites & refs'
-                : 'Find similar papers'))}
+              : (mode === 'references'
+                ? 'Find shared references'
+                : mode === 'citations'
+                ? 'Find shared citations'
+                : 'Find shared references + citations'))}
         </button>
       </div>
 
@@ -327,7 +345,11 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                     {(c.authors || []).slice(0, 3).join(', ')}
                     {(c.authors || []).length > 3 ? ', et al.' : ''}
                     {c.year ? ` · ${c.year}` : ''}
-                    {c.shared_with_source ? ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}` : ''}
+                    {c.shared_with_source
+                      ? (c.relation === 'citation'
+                        ? ` · co-cited ×${c.shared_with_source}`
+                        : ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}`)
+                      : ''}
                   </div>
                   <div className="text-xs mt-0.5 flex flex-wrap gap-1">
                     {(c.sources || []).map((s) => (
@@ -344,9 +366,10 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                         {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
                       </span>
                     ))}
-                    {/* Relation chip (#63): in cites_refs / both mode each
-                        candidate is tagged as a work the source paper
-                        cites (Reference) or one that cites it (Citation). */}
+                    {/* Relation chip: in References / Citations / Both mode each
+                        candidate is tagged by HOW it overlaps the source —
+                        sharing references (Shared refs) or sharing citations
+                        / being co-cited (Shared cites). */}
                     {(c.relation === 'reference' || c.relation === 'citation') && (
                       <span
                         className="px-1.5 py-0.5 rounded"
@@ -360,10 +383,10 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                             ? '1px solid rgba(139,92,246,0.35)' : '1px solid rgba(234,179,8,0.4)',
                         }}
                         title={c.relation === 'reference'
-                          ? 'This paper is cited BY the source paper (a reference).'
-                          : 'This paper CITES the source paper (a citation).'}
+                          ? 'Shares references with this paper — their bibliographies overlap.'
+                          : 'Shares citations with this paper — they are co-cited together.'}
                       >
-                        {c.relation === 'reference' ? 'Reference' : 'Citation'}
+                        {c.relation === 'reference' ? 'Shared refs' : 'Shared cites'}
                       </span>
                     )}
                     {/* Reference-overlap chip — the user's primary signal.

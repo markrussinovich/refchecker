@@ -18,6 +18,7 @@ export default function GapFinder({ checkId, references }) {
   const [added, setAdded] = useState({})       // key -> 'adding'|'done'|'error'
   const [info, setInfo] = useState({})         // key -> { insertedIndex }
   const [preview, setPreview] = useState({})   // key -> { open, loading, data, error }
+  const [diffOpen, setDiffOpen] = useState({}) // key -> bool: per-preview "show renumbering" detail toggle
   const [collapsed, setCollapsed] = useState(false) // collapse the results panel
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
@@ -74,6 +75,23 @@ export default function GapFinder({ checkId, references }) {
   const d = state.data
   const suggestions = Array.isArray(d?.suggestions) ? d.suggestions : []
   const doiLink = (doi) => `https://doi.org/${doi}`
+
+  // Render a marker string with the digit runs that actually changed (>= the
+  // insertion number) tinted in the accent colour, so the eye lands on the part
+  // that renumbers. Real-data only: we tint by comparing the backend's matched
+  // numbers against new_printed_number — never inventing positions.
+  const renderMarker = (markerStr, changedNums, highlight) => {
+    const text = String(markerStr ?? '')
+    const nums = new Set((changedNums || []).map((n) => String(n)))
+    const parts = text.split(/(\d+)/) // keep the digit runs as captured groups
+    return parts.map((part, idx) => {
+      const isChanged = /^\d+$/.test(part) && nums.has(String(parseInt(part, 10)))
+      if (isChanged && highlight) {
+        return <span key={idx} style={{ color: 'var(--color-accent)', fontWeight: 700 }}>{part}</span>
+      }
+      return <span key={idx}>{part}</span>
+    })
+  }
 
   return (
     <div className="mb-3">
@@ -135,22 +153,65 @@ export default function GapFinder({ checkId, references }) {
                         <div className="mt-1.5 rounded-md p-2" style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}>
                           {pv.loading && <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Checking document…</div>}
                           {pv.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{pv.error}</div>}
-                          {pv.data && (
+                          {pv.data && (() => {
+                            const markers = pv.data.shifted_markers || []
+                            const shiftCount = pv.data.shifted_count || markers.length
+                            const insertAt = pv.data.new_printed_number // 1-based printed position the new ref takes
+                            const numericChanges = !pv.data.abstained && markers.length > 0
+                            const showDiff = diffOpen[k] !== false // default open when there are changes
+                            return (
                             <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                              <div className="rc-diff-row"><span className="rc-diff-added">+ new reference</span><span className="rc-diff-arrow">appended to the list</span></div>
-                              {pv.data.abstained || !(pv.data.shifted_markers || []).length ? (
-                                <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                                  Existing inline citation markers are unchanged{pv.data.scheme ? ` (${pv.data.scheme} style)` : ''}.
+                              {/* List-level BEFORE -> AFTER: where the new reference lands. */}
+                              <div className="rounded" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', overflow: 'hidden' }}>
+                                <div className="grid" style={{ gridTemplateColumns: '1fr 16px 1fr' }}>
+                                  <div className="px-2 py-1" style={{ borderRight: '1px solid var(--color-border)' }}>
+                                    <div style={{ color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Before</div>
+                                    <div className="mt-0.5" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                                      {insertAt ? `…[${Math.max(1, insertAt - 1)}] (last reference)` : '(end of reference list)'}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-center" style={{ color: 'var(--color-accent)', fontWeight: 700 }}>→</div>
+                                  <div className="px-2 py-1">
+                                    <div style={{ color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>After</div>
+                                    <div className="mt-0.5" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                                      {insertAt ? <>…[{Math.max(1, insertAt - 1)}], <span style={{ color: 'var(--color-accent)', fontWeight: 700 }}>[{insertAt}] new reference</span></> : <span style={{ color: 'var(--color-success, #22c55e)', fontWeight: 700 }}>+ new reference appended</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Inline-marker BEFORE -> AFTER pairs (only what the backend reports). */}
+                              {numericChanges ? (
+                                <div className="mt-1.5">
+                                  <button type="button" onClick={() => setDiffOpen((o) => ({ ...o, [k]: !showDiff }))}
+                                    className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                                    <span style={{ color: 'var(--color-text-muted)' }}>{showDiff ? '▾' : '▸'}</span>
+                                    {shiftCount} inline marker{shiftCount === 1 ? '' : 's'} renumber
+                                  </button>
+                                  {showDiff && (
+                                    <div className="mt-1 rounded" style={{ border: '1px solid var(--color-border)', overflow: 'hidden' }}>
+                                      <div className="grid" style={{ gridTemplateColumns: '1fr 16px 1fr', background: 'var(--color-bg-secondary)' }}>
+                                        <div className="px-2 py-0.5" style={{ color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em', borderRight: '1px solid var(--color-border)' }}>Before</div>
+                                        <div />
+                                        <div className="px-2 py-0.5" style={{ color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>After</div>
+                                      </div>
+                                      {markers.slice(0, 8).map((sm, mi) => {
+                                        const changed = sm.numbers || []
+                                        const changedAfter = changed.map((n) => n + 1)
+                                        return (
+                                          <div key={mi} className="grid" style={{ gridTemplateColumns: '1fr 16px 1fr', borderTop: '1px solid var(--color-border)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                                            <div className="px-2 py-0.5" style={{ borderRight: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>{renderMarker(sm.marker, changed, false)}</div>
+                                            <div className="flex items-center justify-center" style={{ color: 'var(--color-text-muted)' }}>→</div>
+                                            <div className="px-2 py-0.5">{renderMarker(sm.new_marker, changedAfter, true)}</div>
+                                          </div>
+                                        )
+                                      })}
+                                      {markers.length > 8 && <div className="px-2 py-0.5" style={{ color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)' }}>+{markers.length - 8} more marker{markers.length - 8 === 1 ? '' : 's'}…</div>}
+                                    </div>
+                                  )}
                                 </div>
                               ) : (
-                                <div className="mt-1">
-                                  <div style={{ color: 'var(--color-text-muted)' }}>{pv.data.shifted_count} inline marker{pv.data.shifted_count === 1 ? '' : 's'} would shift:</div>
-                                  {(pv.data.shifted_markers || []).slice(0, 5).map((sm, mi) => (
-                                    <div key={mi} className="rc-diff-row mt-0.5">
-                                      <span className="rc-diff-old">{sm.marker}</span><span className="rc-diff-arrow">→</span><span className="rc-diff-new">{sm.new_marker}</span>
-                                    </div>
-                                  ))}
-                                  {pv.data.shifted_count > 5 && <div style={{ color: 'var(--color-text-muted)' }}>+{pv.data.shifted_count - 5} more…</div>}
+                                <div className="mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                                  Existing inline citation markers are unchanged{pv.data.scheme && pv.data.scheme !== 'numeric' ? ` (${pv.data.scheme} style — renumbering not applicable)` : ''}.
                                 </div>
                               )}
                               <div className="mt-1.5" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
@@ -164,7 +225,8 @@ export default function GapFinder({ checkId, references }) {
                                 <button type="button" onClick={() => closePreview(k)} className="text-xs underline" style={{ color: 'var(--color-text-muted)' }}>Cancel</button>
                               </div>
                             </div>
-                          )}
+                            )
+                          })()}
                         </div>
                       )}
                     </>

@@ -7,14 +7,29 @@ import { logger } from '../../utils/logger'
 // the initial bundle — only paid when the user opens the Explore graph.
 const ForceGraph2D = lazy(() => import('react-force-graph-2d'))
 
-// Discovery modes mirror SimilarPapersPanel (#63): 'similar' is the
-// co-citation/overlap path; 'cites_refs' is the source paper's real OpenAlex
-// references + citations; 'both' merges them.
+// Discovery modes mirror SimilarPapersPanel: three real-OpenAlex
+// bibliography-overlap modes.
+//   'references' — papers that SHARE REFERENCES with this paper.
+//   'citations'  — papers that SHARE CITATIONS with it (co-cited).
+//   'both'       — the union of the two.
 const MODES = [
-  { id: 'similar', label: 'Similar' },
-  { id: 'cites_refs', label: 'Cites & Refs' },
+  { id: 'references', label: 'References' },
+  { id: 'citations', label: 'Citations' },
   { id: 'both', label: 'Both' },
 ]
+
+// Map a persisted/legacy mode value onto the current vocabulary so an older
+// saved preference ('similar' / 'cites_refs') still resolves to a valid tab.
+const LEGACY_MODE_MAP = {
+  similar: 'both',
+  cites_refs: 'both',
+  reference: 'references',
+  citation: 'citations',
+}
+function normalizeMode(mode) {
+  if (MODES.some((m) => m.id === mode)) return mode
+  return LEGACY_MODE_MAP[mode] || 'both'
+}
 
 // Literal value of the app's --color-accent green. Used for anything painted
 // onto the <canvas> (the source node, its halo, the selected highlight), which
@@ -122,6 +137,9 @@ function buildGraph(candidates, paperTitle, width, height) {
       url: c.semantic_scholar_url || c.url || null,
       relation: c.relation || null,
       shared_refs_count: c.shared_refs_count || 0,
+      // Overlap count for the bibliography-overlap (References/Citations)
+      // candidates: shared references, or co-citation count.
+      shared_with_source: c.shared_with_source || 0,
       sources: c.sources || [],
       color: yearColor(c.year, minYear, maxYear),
       x: seedX,
@@ -139,17 +157,17 @@ function buildGraph(candidates, paperTitle, width, height) {
 
 /**
  * ResearchRabbit-style EXPLORE graph (#68). Opens as a fullscreen overlay from
- * the results panel and graphs the SIMILAR / CITES&REFS neighbourhood of the
+ * the results panel and graphs the bibliography-overlap neighbourhood of the
  * current check's references — reusing the exact /api/papers/similar pipeline
- * (incl. the #63 modes) the Similar Papers tab already drives. Nodes are
- * coloured by publication year, laid out as a year-axis force cluster, and are
- * individually selectable.
+ * (References / Citations / Both modes) the Similar Papers tab already drives.
+ * Nodes are coloured by publication year, laid out as a year-axis force
+ * cluster, and are individually selectable.
  */
 export default function ExploreGraphView({ references, paperTitle, paperSource, onClose }) {
   const containerRef = useRef(null)
   const fgRef = useRef(null)
   const [dims, setDims] = useState({ w: 800, h: 600 })
-  const [mode, setMode] = useState('similar')
+  const [mode, setMode] = useState(() => normalizeMode('both'))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [candidates, setCandidates] = useState([])
@@ -334,14 +352,14 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
               nodeId="id"
               nodeLabel={(node) => `${node.label}${node.year ? ` (${node.year})` : ''}`}
               nodeColor={(node) => (selected && selected.id === node.id) ? SOURCE_GREEN : node.color}
-              nodeVal={(node) => (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || 0))}
+              nodeVal={(node) => (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || node.shared_with_source || 0))}
               nodeRelSize={4}
               // Custom paint: draw the dot, the distinct green ring on the
               // source, and an always-on short label so the graph is readable
               // at a glance (tooltips still show the full title on hover).
               nodeCanvasObjectMode={() => 'after'}
               nodeCanvasObject={(node, ctx, globalScale) => {
-                const r = (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || 0))
+                const r = (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || node.shared_with_source || 0))
                 if (node.isSource) {
                   // Distinct green halo around the centre node.
                   ctx.beginPath()
@@ -385,8 +403,12 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
               {(selected.authors || []).slice(0, 3).join(', ')}
               {(selected.authors || []).length > 3 ? ', et al.' : ''}
               {selected.year ? ` · ${selected.year}` : ''}
-              {selected.relation ? ` · ${selected.relation === 'reference' ? 'Reference' : 'Citation'}` : ''}
-              {selected.shared_refs_count ? ` · shares ${selected.shared_refs_count} ref${selected.shared_refs_count === 1 ? '' : 's'}` : ''}
+              {selected.relation ? ` · ${selected.relation === 'reference' ? 'Shared refs' : 'Shared cites'}` : ''}
+              {selected.shared_with_source
+                ? (selected.relation === 'citation'
+                  ? ` · co-cited ×${selected.shared_with_source}`
+                  : ` · shares ${selected.shared_with_source} ref${selected.shared_with_source === 1 ? '' : 's'}`)
+                : (selected.shared_refs_count ? ` · shares ${selected.shared_refs_count} ref${selected.shared_refs_count === 1 ? '' : 's'}` : '')}
             </div>
             {(selected.doi || selected.arxiv_id || selected.url) && (
               <button

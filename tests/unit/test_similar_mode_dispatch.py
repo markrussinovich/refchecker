@@ -1,15 +1,15 @@
-"""Integration-style tests for ``/api/papers/similar`` MODE DISPATCH (#63).
+"""Integration-style tests for ``/api/papers/similar`` MODE DISPATCH.
 
 The endpoint ``backend.main.find_similar_papers`` routes on
-``_SimilarPapersRequest.mode`` to one of three implementations:
+``_SimilarPapersRequest.mode``:
 
-  * ``mode='similar'`` (default) -> ``_find_similar_papers_impl`` — the
-    existing co-citation / reference-overlap pipeline, returned untouched.
-  * ``mode='cites_refs'``        -> ``_cites_refs_papers_impl`` — the SOURCE
-    paper's real OpenAlex citation neighbourhood (relation-tagged rows).
-  * ``mode='both'``              -> ``_both_papers_impl`` — merges the
-    Similar candidates with the cites/refs ones and dedupes via
-    ``_candidate_key`` (no duplicate ``candidate_key``).
+  * ``mode='references' | 'citations' | 'both'`` (+ legacy ``'cites_refs'``)
+    -> ``_cites_refs_papers_impl`` — the real OpenAlex bibliography-overlap
+    neighbourhood, relation-tagged ('reference' = shares references,
+    'citation' = shares citations / co-cited).
+  * ``mode='similar'`` -> ``_find_similar_papers_impl`` — the historical
+    Semantic-Scholar co-citation pipeline, kept reachable for backward
+    compatibility and returned untouched.
 
 ``backend.main`` cannot be imported here: it pulls in the full refchecker
 stack (pdfplumber, GROBID wrappers) and ``refchecker.utils.error_utils``
@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from backend.cites_refs import fetch_cites_and_refs
+from backend.cites_refs import fetch_cites_and_refs, normalize_mode
 
 # --------------------------------------------------------------------------- #
 # Load the REAL dispatch functions out of backend/main.py                      #
@@ -50,7 +50,6 @@ _WANTED = [
     "find_similar_papers",
     "_cites_refs_papers_impl",
     "_shape_cites_refs_candidates",
-    "_both_papers_impl",
 ]
 
 
@@ -83,8 +82,9 @@ def _load_dispatch_namespace():
     code = compile(module, filename=str(_MAIN_PATH), mode="exec")
 
     ns = {
-        # Real, deps-free collaborator the cites_refs impl calls.
+        # Real, deps-free collaborators the cites_refs impl calls.
         "fetch_cites_and_refs": fetch_cites_and_refs,
+        "_normalize_overlap_mode": normalize_mode,
         # Stdlib the function bodies reference.
         "Optional": __import__("typing").Optional,
         "Dict": __import__("typing").Dict,
@@ -166,7 +166,7 @@ class _PatchAsyncClient:
 
 # A lightweight request stand-in matching the attrs the dispatch reads.
 class _Req:
-    def __init__(self, *, references=None, paper_title=None, paper_id=None, limit=5, mode="similar"):
+    def __init__(self, *, references=None, paper_title=None, paper_id=None, limit=5, mode="both"):
         self.references = references or []
         self.paper_title = paper_title
         self.paper_id = paper_id
@@ -203,47 +203,57 @@ SOURCE_WORK = {
     ],
 }
 
-REF_WORKS = {
-    "W_R1": {
-        "id": "https://openalex.org/W_R1",
-        "title": "Referenced Work One",
-        "publication_year": 2015,
-        "authorships": [{"author": {"display_name": "Ada Lovelace"}}],
-        "doi": "https://doi.org/10.1/ref1",
-    },
-    "W_R2": {
-        "id": "https://openalex.org/W_R2",
-        "title": "Referenced Work Two",
-        "publication_year": 2016,
-        "authorships": [{"author": {"display_name": "Alan Turing"}}],
-        "doi": None,
-    },
+# Paper that shares both of the source's references.
+SHAREREF = {
+    "id": "https://openalex.org/W_SHAREREF",
+    "title": "Shares References",
+    "publication_year": 2019,
+    "authorships": [{"author": {"display_name": "Ada Lovelace"}}],
+    "doi": "https://doi.org/10.1/shareref",
 }
 
-CITING_WORKS = [
-    {
-        "id": "https://openalex.org/W_C1",
-        "title": "Citing Work One",
-        "publication_year": 2022,
-        "authorships": [{"author": {"display_name": "Grace Hopper"}}],
-        "doi": "https://doi.org/10.2/cite1",
-    },
-]
+# A citer of the source whose bibliography co-references W_COCITE.
+CITER = {
+    "id": "https://openalex.org/W_CITER",
+    "referenced_works": [
+        "https://openalex.org/W_SRC",
+        "https://openalex.org/W_COCITE",
+    ],
+}
+CITER2 = {
+    "id": "https://openalex.org/W_CITER2",
+    "referenced_works": [
+        "https://openalex.org/W_SRC",
+        "https://openalex.org/W_COCITE",
+    ],
+}
+COCITE = {
+    "id": "https://openalex.org/W_COCITE",
+    "title": "Co-cited Work",
+    "publication_year": 2017,
+    "authorships": [{"author": {"display_name": "Grace Hopper"}}],
+    "doi": "https://doi.org/10.2/cocite",
+}
 
 
 def _openalex_handler(request: httpx.Request) -> httpx.Response:
-    """Offline OpenAlex: DOI resolve, batch hydrate, cites filter."""
+    """Offline OpenAlex for the bibliography-overlap neighbourhood."""
     url = str(request.url)
     qs = parse_qs(urlparse(url).query)
     filt = (qs.get("filter") or [""])[0]
 
     if "/works/doi:" in url:
         return httpx.Response(200, json=SOURCE_WORK)
+    # Shared references: works that also cite the source's references.
+    if filt in ("cites:W_R1", "cites:W_R2"):
+        return httpx.Response(200, json={"results": [SHAREREF]})
+    # Shared citations: the source's citers (with bibliographies).
+    if filt == "cites:W_SRC":
+        return httpx.Response(200, json={"results": [CITER, CITER2]})
     if filt.startswith("openalex_id:"):
         ids = filt[len("openalex_id:"):].split("|")
-        return httpx.Response(200, json={"results": [REF_WORKS[i] for i in ids if i in REF_WORKS]})
-    if filt.startswith("cites:"):
-        return httpx.Response(200, json={"results": CITING_WORKS})
+        table = {"W_COCITE": COCITE}
+        return httpx.Response(200, json={"results": [table[i] for i in ids if i in table]})
     if filt.startswith("title.search:"):
         return httpx.Response(200, json={"results": []})
     return httpx.Response(404, json={"results": []})
@@ -276,15 +286,15 @@ def test_dispatch_key_matches_cites_refs_helper_key():
         assert _candidate_key(title, doi, arxiv) == _ref_candidate_key(title, doi, arxiv)
 
 
-def test_cites_refs_mode_returns_relation_tagged_candidates():
-    """mode='cites_refs' -> real OpenAlex neighbourhood, every row relation-tagged."""
-    req = _Req(paper_id="10.1234/source", paper_title="The Source Paper", limit=5, mode="cites_refs")
+def test_both_mode_returns_relation_tagged_overlap():
+    """mode='both' -> real OpenAlex overlap, every row relation-tagged."""
+    req = _Req(paper_id="10.1234/source", paper_title="The Source Paper", limit=5, mode="both")
     out = _call(req)
 
-    assert out["mode"] == "cites_refs"
+    assert out["mode"] == "both"
     assert out["source_work"] == "W_SRC"
     cands = out["candidates"]
-    assert cands, "cites_refs should surface the real neighbourhood"
+    assert cands, "both should surface the real overlap neighbourhood"
 
     relations = {c["relation"] for c in cands}
     assert relations == {"reference", "citation"}
@@ -295,21 +305,57 @@ def test_cites_refs_mode_returns_relation_tagged_candidates():
         assert "title" in c and "sources" in c and c["sources"] == ["openalex"]
 
     titles = {c["title"] for c in cands}
-    assert "Referenced Work One" in titles
-    assert "Citing Work One" in titles
+    assert "Shares References" in titles   # shared-references row
+    assert "Co-cited Work" in titles       # shared-citations row
     # source_counts tallies by relation.
-    assert out["source_counts"].get("reference") == 2
+    assert out["source_counts"].get("reference") == 1
     assert out["source_counts"].get("citation") == 1
+    # The overlap count that earned each row a place is carried through.
+    shareref = next(c for c in cands if c["title"] == "Shares References")
+    assert shareref["shared_with_source"] == 2  # shares both source refs
+    cocite = next(c for c in cands if c["title"] == "Co-cited Work")
+    assert cocite["shared_with_source"] == 2    # co-cited by 2 citers
 
 
-def test_cites_refs_mode_no_duplicate_candidate_key():
-    """A work appearing as both reference and citation collapses to one row."""
+def test_references_mode_only_shared_reference_rows():
+    """mode='references' -> only shared-references rows (relation='reference')."""
+    req = _Req(paper_id="10.1234/source", limit=5, mode="references")
+    out = _call(req)
+    assert out["mode"] == "references"
+    assert {c["relation"] for c in out["candidates"]} == {"reference"}
+
+
+def test_citations_mode_only_shared_citation_rows():
+    """mode='citations' -> only shared-citations rows (relation='citation')."""
+    req = _Req(paper_id="10.1234/source", limit=5, mode="citations")
+    out = _call(req)
+    assert out["mode"] == "citations"
+    assert {c["relation"] for c in out["candidates"]} == {"citation"}
+
+
+def test_legacy_cites_refs_mode_maps_to_both():
+    """The legacy 'cites_refs' alias resolves to the 'both' overlap union."""
+    req = _Req(paper_id="10.1234/source", limit=5, mode="cites_refs")
+    out = _call(req)
+    assert out["mode"] == "both"
+    assert {c["relation"] for c in out["candidates"]} == {"reference", "citation"}
+
+
+def test_overlap_mode_no_duplicate_candidate_key():
+    """A work surfacing as both a shared-reference and a co-citation collapses."""
     dup = {
         "id": "https://openalex.org/W_DUP",
         "title": "Appears Twice",
         "publication_year": 2019,
         "authorships": [],
         "doi": "https://doi.org/10.5/dup",
+    }
+    dup_citer = {
+        "id": "https://openalex.org/W_DUPCITER",
+        "referenced_works": [
+            "https://openalex.org/W_SRC2",
+            "https://openalex.org/W_DUP",
+        ],
     }
 
     def handler(request):
@@ -320,91 +366,27 @@ def test_cites_refs_mode_no_duplicate_candidate_key():
             return httpx.Response(200, json={
                 "id": "https://openalex.org/W_SRC2",
                 "title": "Source Two",
-                "referenced_works": ["https://openalex.org/W_DUP"],
+                "referenced_works": ["https://openalex.org/W_REF"],
             })
-        if filt.startswith("openalex_id:"):
+        if filt == "cites:W_REF":
             return httpx.Response(200, json={"results": [dup]})
-        if filt.startswith("cites:"):
+        if filt == "cites:W_SRC2":
+            return httpx.Response(200, json={"results": [dup_citer]})
+        if filt.startswith("openalex_id:"):
             return httpx.Response(200, json={"results": [dup]})
         return httpx.Response(200, json={"results": []})
 
-    req = _Req(paper_id="10.5/src2", limit=5, mode="cites_refs")
+    req = _Req(paper_id="10.5/src2", limit=5, mode="both")
     out = _call(req, handler=handler)
 
     keys = [_candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id")) for c in out["candidates"]]
-    assert len(keys) == len(set(keys)), f"duplicate candidate_key in cites_refs: {keys}"
+    assert len(keys) == len(set(keys)), f"duplicate candidate_key in overlap modes: {keys}"
     assert keys.count("doi:10.5/dup") == 1
 
 
-def test_both_mode_merges_and_dedupes_no_duplicate_candidate_key():
-    """mode='both' merges Similar + cites/refs and dedupes via _candidate_key.
-
-    A paper that the Similar pipeline ALSO surfaces (here: the citing work
-    W_C1, doi 10.2/cite1) must appear exactly once — the Similar copy wins
-    (it carries the richer overlap signal), the cites/refs duplicate drops.
-    """
-    # Similar pipeline returns two rows; one (10.2/cite1) overlaps a citing work.
-    similar_rows = [
-        {
-            "title": "Similar Only Paper",
-            "doi": "10.99/similar-only",
-            "arxiv_id": None,
-            "authors": ["Margaret Hamilton"],
-            "sources": ["semantic_scholar"],
-            "shared_with_source": 3,
-        },
-        {
-            "title": "Citing Work One",  # same DOI as CITING_WORKS[0]
-            "doi": "10.2/cite1",
-            "arxiv_id": None,
-            "authors": ["Grace Hopper"],
-            "sources": ["semantic_scholar"],
-            "shared_with_source": 2,
-        },
-    ]
-
-    async def _similar_impl(req, user):
-        assert user is _USER
-        return {
-            "source_paper": req.paper_title,
-            "candidates": list(similar_rows),
-            "source_counts": {"semantic_scholar": 2},
-            "total_candidates": 2,
-        }
-
-    req = _Req(paper_id="10.1234/source", paper_title="The Source Paper", limit=5, mode="both")
-    out = _call(req, similar_impl=_similar_impl)
-
-    assert out["mode"] == "both"
-    assert out["source_work"] == "W_SRC"
-    cands = out["candidates"]
-
-    # No duplicate candidate_key across the merged set.
-    keys = [_candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id")) for c in cands]
-    assert len(keys) == len(set(keys)), f"duplicate candidate_key after both-merge: {keys}"
-
-    # The overlapping paper (10.2/cite1) appears exactly once...
-    assert keys.count("doi:10.2/cite1") == 1
-    # ...and the Similar copy won (kept its overlap signal, not the cites/refs row).
-    cite1 = next(c for c in cands if c.get("doi") == "10.2/cite1")
-    assert cite1.get("shared_with_source") == 2
-    assert "relation" not in cite1 or cite1.get("relation") is None
-
-    # Similar-only row preserved; cites/refs unique rows (the two refs) merged in.
-    titles = {c["title"] for c in cands}
-    assert "Similar Only Paper" in titles
-    assert "Referenced Work One" in titles and "Referenced Work Two" in titles
-    # Merged total = 2 similar + 2 unique refs (citation 10.2/cite1 was the dup) = 4.
-    assert out["total_candidates"] == len(cands) == 4
-    # source_counts is summed across both pipelines.
-    assert out["source_counts"].get("semantic_scholar") == 2
-    assert out["source_counts"].get("reference") == 2
-
-
-def test_similar_default_path_is_guarded_and_unchanged():
-    """mode='similar' (and unknown/empty modes) fall through to the existing
-    pipeline untouched — the dispatcher returns its result verbatim and never
-    touches the cites/refs path."""
+def test_similar_legacy_path_is_guarded_and_unchanged():
+    """mode='similar' falls through to the historical pipeline untouched — the
+    dispatcher returns its result verbatim and never touches the overlap path."""
     sentinel = {
         "source_paper": "The Source Paper",
         "candidates": [{"title": "Untouched Row", "doi": "10.0/keep"}],
@@ -416,18 +398,9 @@ def test_similar_default_path_is_guarded_and_unchanged():
         assert user is _USER
         return sentinel
 
-    # Default mode.
     out = _call(_Req(paper_id="10.1234/source", mode="similar", limit=5), similar_impl=_similar_impl)
     assert out is sentinel  # returned verbatim, no re-shaping
-    assert "mode" not in out  # default path doesn't stamp a mode key
-
-    # Unknown mode is guarded -> also falls through to the similar pipeline.
-    out2 = _call(_Req(paper_id="10.1234/source", mode="totally-unknown", limit=5), similar_impl=_similar_impl)
-    assert out2 is sentinel
-
-    # Empty/whitespace mode normalises to the default similar path too.
-    out3 = _call(_Req(paper_id="10.1234/source", mode="  ", limit=5), similar_impl=_similar_impl)
-    assert out3 is sentinel
+    assert "mode" not in out  # the legacy path doesn't stamp a mode key
 
 
 def test_dispatch_swallows_errors_into_safe_envelope():

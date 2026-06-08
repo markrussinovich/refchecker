@@ -26,6 +26,7 @@ import {
 } from '../../utils/venueAbbreviations'
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 import AdditionalInfoBar from './AdditionalInfoBar'
+import ArticleAssistant from '../MainPanel/ArticleAssistant'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -1054,6 +1055,21 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           {/* Additional Info: abstract / claim / preprint / full text + Add to Library */}
           <AdditionalInfoBar reference={reference} checkId={reference.last_seen_check_id || null} />
 
+          {/* Per-reference Chat & Summarize. Grounded on THIS reference (its
+              title / identifiers / abstract / claim) rather than the host
+              paper. Reuses the existing grounded chat backend via the shared
+              ArticleAssistant component in reference mode — it self-omits when
+              there's no real reference text to ground on (no fabrication), and
+              honestly states when it can only use the abstract/title. */}
+          {reference.last_seen_check_id > 0 && (
+            <div className="mt-2">
+              <ArticleAssistant
+                checkId={reference.last_seen_check_id}
+                reference={reference}
+              />
+            </div>
+          )}
+
           {/* Unverified message */}
           {reference.status === 'unverified' && (
             <div
@@ -1575,6 +1591,25 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
               {affs.length > 0 && (
                 <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
                   {affs.slice(0, 2).join(' · ')}
+                </div>
+              )}
+              {/* Author standing — h-index + total citations from the fetched
+                  Semantic Scholar / OpenAlex profile. Real-data gated: each
+                  metric renders only when the profile actually carries it, so
+                  the line disappears entirely when neither is known (no
+                  invented numbers). Surfaced inline in the header so the
+                  h-index is visible immediately, alongside the metric chips. */}
+              {profile?.available && (profile.hIndex != null || profile.citationCount != null) && (
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2 }}>
+                  {profile.hIndex != null && (
+                    <span title="h-index">h-index <span style={{ fontWeight: 700 }}>{fmt(profile.hIndex)}</span></span>
+                  )}
+                  {profile.hIndex != null && profile.citationCount != null && (
+                    <span style={{ color: 'var(--color-text-muted)' }}> · </span>
+                  )}
+                  {profile.citationCount != null && (
+                    <span title="Total citations">{fmt(profile.citationCount)} citations</span>
+                  )}
                 </div>
               )}
             </div>

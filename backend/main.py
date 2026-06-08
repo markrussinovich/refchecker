@@ -40,7 +40,7 @@ from .websocket_manager import manager, presence
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
-from .cites_refs import fetch_cites_and_refs
+from .cites_refs import fetch_cites_and_refs, normalize_mode as _normalize_overlap_mode
 from .auth import (
     SITE_URL,
     is_multiuser_mode,
@@ -6491,14 +6491,17 @@ class _SimilarPapersRequest(BaseModel):
     paper_title: Optional[str] = None
     paper_id: Optional[str] = None  # arXiv ID or DOI of the SOURCE paper
     limit: int = 5
-    # Discovery mode (#63):
-    #   'similar'    — the existing co-citation / reference-overlap pipeline
-    #                  (byte-identical default path).
-    #   'cites_refs' — the SOURCE paper's real OpenAlex citation
-    #                  neighbourhood: the works it cites + the works that
-    #                  cite it. A CLEAN, SEPARATE path (backend/cites_refs.py).
-    #   'both'       — merge the cites/refs candidates into the similar ones.
-    mode: str = 'similar'
+    # Discovery mode. Three CLEARLY-SCOPED, bibliography-overlap modes
+    # backed by real OpenAlex data (backend/cites_refs.py):
+    #   'references' — papers that SHARE REFERENCES with the source
+    #                  (overlap in their bibliographies / referenced_works).
+    #   'citations'  — papers that SHARE CITATIONS with the source
+    #                  (co-cited works: things the source's citers also cite).
+    #   'both'       — the union of the two.
+    # Legacy aliases are mapped: 'cites_refs' -> 'both'. The historical
+    # 'similar' co-citation pipeline (_find_similar_papers_impl) is still
+    # reachable for backward compatibility but is no longer a public mode.
+    mode: str = 'both'
 
 
 def _candidate_key(title: Optional[str], doi: Optional[str], arxiv: Optional[str]) -> str:
@@ -6541,13 +6544,15 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
     'unknown'.
     """
     try:
-        mode = (req.mode or "similar").strip().lower()
-        if mode == "cites_refs":
-            return await _cites_refs_papers_impl(req)
-        if mode == "both":
-            return await _both_papers_impl(req, current_user)
-        # Default 'similar' path is byte-identical to before.
-        return await _find_similar_papers_impl(req, current_user)
+        raw_mode = (req.mode or "both").strip().lower()
+        # The historical Semantic-Scholar co-citation pipeline stays reachable
+        # for backward compatibility, but the public modes are now the three
+        # bibliography-overlap kinds (References / Citations / Both), all of
+        # which run on real OpenAlex data via _cites_refs_papers_impl.
+        if raw_mode == "similar":
+            return await _find_similar_papers_impl(req, current_user)
+        # 'references' | 'citations' | 'both' (+ legacy 'cites_refs' alias).
+        return await _cites_refs_papers_impl(req)
     except HTTPException:
         raise
     except Exception as e:
@@ -6560,12 +6565,21 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
 
 
 async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
-    """CLEAN SEPARATE path (#63): the SOURCE paper's real OpenAlex
-    citation neighbourhood — the works it references + the works that
-    cite it. REAL OpenAlex data only; empty in -> empty out.
+    """CLEAN SEPARATE path: papers that overlap the SOURCE paper's
+    bibliography on real OpenAlex data. ``mode`` selects the overlap kind:
+
+      * 'references' — papers that SHARE REFERENCES with the source
+        (their bibliographies overlap the source's referenced_works).
+      * 'citations'  — papers that SHARE CITATIONS with the source
+        (co-cited works: what the source's citers also cite).
+      * 'both'       — the union of the two.
+
+    Legacy 'cites_refs' is mapped to 'both'. REAL OpenAlex data only;
+    empty in -> empty out.
     """
     import httpx
     limit = max(1, min(20, int(req.limit or 5)))
+    resolved_mode = _normalize_overlap_mode(req.mode)
     timeout = 12.0
 
     async with httpx.AsyncClient() as client:
@@ -6584,9 +6598,12 @@ async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
             paper_id=req.paper_id,
             paper_title=req.paper_title,
             limit=limit,
+            mode=resolved_mode,
         )
 
     candidates = _shape_cites_refs_candidates(result.get("candidates", []))
+    # Tally by relation: 'reference' = shared-references match,
+    # 'citation' = shared-citations (co-cited) match.
     source_counts: Dict[str, int] = {}
     for c in candidates:
         rel = c.get("relation") or "openalex"
@@ -6596,7 +6613,7 @@ async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
         "candidates": candidates,
         "source_counts": source_counts,
         "total_candidates": len(candidates),
-        "mode": "cites_refs",
+        "mode": resolved_mode,
         "source_work": result.get("source_work"),
     }
 
@@ -6617,7 +6634,10 @@ def _shape_cites_refs_candidates(raw: list) -> list:
             "venue": None,
             "reason": None,
             "relation": c.get("relation"),  # 'reference' | 'citation'
-            "shared_with_source": 0,
+            # Overlap count that earned this candidate a place: number of the
+            # source's references it shares ('reference' rows), or number of
+            # the source's citers that co-cite it ('citation' rows).
+            "shared_with_source": c.get("shared_with_source") or 0,
             "shared_refs_count": 0,
             "shared_refs_pct": 0.0,
             "shared_refs_jaccard": 0.0,
@@ -6633,43 +6653,6 @@ def _shape_cites_refs_candidates(raw: list) -> list:
             "times_seen": 0,
         })
     return out
-
-
-async def _both_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo) -> Dict[str, Any]:
-    """'both' mode: the existing Similar pipeline merged with the new
-    cites/refs neighbourhood. Dedupe is via _candidate_key so a paper
-    surfaced by both paths appears once; the relation tag is preserved."""
-    similar = await _find_similar_papers_impl(req, current_user)
-    cites_refs = await _cites_refs_papers_impl(req)
-
-    merged: list = []
-    seen: set = set()
-    # Similar results first (they carry the richer overlap/verification
-    # signal), then fill in cites/refs candidates not already present.
-    for c in (similar.get("candidates") or []):
-        key = _candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id"))
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(c)
-    for c in (cites_refs.get("candidates") or []):
-        key = _candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id"))
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(c)
-
-    source_counts = dict(similar.get("source_counts") or {})
-    for k, v in (cites_refs.get("source_counts") or {}).items():
-        source_counts[k] = source_counts.get(k, 0) + v
-    return {
-        "source_paper": req.paper_title,
-        "candidates": merged,
-        "source_counts": source_counts,
-        "total_candidates": len(merged),
-        "mode": "both",
-        "source_work": cites_refs.get("source_work"),
-    }
 
 
 async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo):

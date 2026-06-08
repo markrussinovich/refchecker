@@ -18,23 +18,22 @@ beforeEach(() => {
   findSimilarPapers.mockReset()
 })
 
-describe('SimilarPapersPanel mode toggle (#63)', () => {
-  it('exposes all three discovery modes including "Both"', () => {
+describe('SimilarPapersPanel mode toggle', () => {
+  it('exposes the three discovery modes References / Citations / Both', () => {
     render(<SimilarPapersPanel references={REFS} paperTitle="P" paperSource="" />)
     const tabs = screen.getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent)).toEqual(['Similar', 'Cites & Refs', 'Both'])
+    expect(tabs.map((t) => t.textContent)).toEqual(['References', 'Citations', 'Both'])
   })
 
-  it('sends mode="both" to the backend when "Both" is selected and searched', async () => {
+  it('defaults to "Both" and sends mode="both" when searched', async () => {
     findSimilarPapers.mockResolvedValue({ data: { candidates: [], source_counts: {} } })
     // Unique title per test: the panel keeps a module-level result cache
     // keyed by `${mode}::${title}`, so a shared title would let one test's
     // cached (empty) result swap the search button for "Refresh".
     render(<SimilarPapersPanel references={REFS} paperTitle="Both Paper" paperSource="" />)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Both' }))
-    // Button label switches to the "both" affordance.
-    fireEvent.click(screen.getByRole('button', { name: 'Find similar + cites & refs' }))
+    // "Both" is the default selected tab; its search affordance is shown.
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared references + citations' }))
 
     await waitFor(() => expect(findSimilarPapers).toHaveBeenCalled())
     expect(findSimilarPapers).toHaveBeenCalledWith(
@@ -42,50 +41,63 @@ describe('SimilarPapersPanel mode toggle (#63)', () => {
     )
   })
 
-  it('sends mode="cites_refs" when that tab is searched', async () => {
+  it('sends mode="references" when the References tab is searched', async () => {
     findSimilarPapers.mockResolvedValue({ data: { candidates: [], source_counts: {} } })
-    render(<SimilarPapersPanel references={REFS} paperTitle="Cites Paper" paperSource="" />)
+    render(<SimilarPapersPanel references={REFS} paperTitle="Refs Paper" paperSource="" />)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Cites & Refs' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Find cites & refs' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'References' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared references' }))
 
     await waitFor(() => expect(findSimilarPapers).toHaveBeenCalled())
     expect(findSimilarPapers).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'cites_refs' }),
+      expect.objectContaining({ mode: 'references' }),
+    )
+  })
+
+  it('sends mode="citations" when the Citations tab is searched', async () => {
+    findSimilarPapers.mockResolvedValue({ data: { candidates: [], source_counts: {} } })
+    render(<SimilarPapersPanel references={REFS} paperTitle="Cites Paper" paperSource="" />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Citations' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared citations' }))
+
+    await waitFor(() => expect(findSimilarPapers).toHaveBeenCalled())
+    expect(findSimilarPapers).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'citations' }),
     )
   })
 })
 
-describe('SimilarPapersPanel mode-aware cache key (#63)', () => {
+describe('SimilarPapersPanel mode-aware cache key', () => {
   it('re-queries the backend when switching modes instead of serving the other mode from cache', async () => {
     findSimilarPapers.mockResolvedValue({ data: { candidates: [], source_counts: {} } })
     // Shared title across both modes — the cache key is `${mode}::${title}`,
     // so each mode must keep its own entry and NOT reuse the other's result.
     render(<SimilarPapersPanel references={REFS} paperTitle="Cache Key Paper" paperSource="" />)
 
-    // Search in the default "Similar" mode -> caches under "similar::…".
-    fireEvent.click(screen.getByRole('button', { name: 'Find similar papers' }))
+    // Search in the default "Both" mode -> caches under "both::…".
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared references + citations' }))
     await waitFor(() => expect(findSimilarPapers).toHaveBeenCalledTimes(1))
     expect(findSimilarPapers).toHaveBeenLastCalledWith(
-      expect.objectContaining({ mode: 'similar' }),
+      expect.objectContaining({ mode: 'both' }),
     )
 
-    // Flip to "Cites & Refs". A mode-aware cache key means there is no cached
+    // Flip to "References". A mode-aware cache key means there is no cached
     // entry for this mode yet, so the search button is shown (not "Refresh").
-    fireEvent.click(screen.getByRole('tab', { name: 'Cites & Refs' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Find cites & refs' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'References' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared references' }))
 
-    // A second backend call fires for the new mode rather than the Similar
+    // A second backend call fires for the new mode rather than the Both
     // result being reused from cache.
     await waitFor(() => expect(findSimilarPapers).toHaveBeenCalledTimes(2))
     expect(findSimilarPapers).toHaveBeenLastCalledWith(
-      expect.objectContaining({ mode: 'cites_refs' }),
+      expect.objectContaining({ mode: 'references' }),
     )
   })
 })
 
-describe('SimilarPapersPanel relation chips (#63)', () => {
-  it('tags cites/refs candidates as Reference or Citation, and shows shared-refs for similar rows', async () => {
+describe('SimilarPapersPanel relation chips', () => {
+  it('tags overlap candidates as Shared refs or Shared cites, and shows shared-refs for similar rows', async () => {
     findSimilarPapers.mockResolvedValue({
       data: {
         candidates: [
@@ -96,25 +108,26 @@ describe('SimilarPapersPanel relation chips (#63)', () => {
             shared_refs_count: 2, shared_refs_pct: 0.5, candidate_ref_count: 4,
             shared_refs_titles: ['Ref A', 'Ref B'],
           },
-          // Cites/refs rows carry a relation and no overlap signal.
-          { openalex_id: 'W2', title: 'A reference', relation: 'reference', sources: ['openalex'], year: 2010 },
-          { openalex_id: 'W3', title: 'A citation', relation: 'citation', sources: ['openalex'], year: 2022 },
+          // OpenAlex overlap rows carry a relation: 'reference' = shares
+          // references, 'citation' = shares citations (co-cited).
+          { openalex_id: 'W2', title: 'A reference', relation: 'reference', sources: ['openalex'], year: 2010, shared_with_source: 3 },
+          { openalex_id: 'W3', title: 'A citation', relation: 'citation', sources: ['openalex'], year: 2022, shared_with_source: 2 },
         ],
         source_counts: { semantic_scholar: 1, reference: 1, citation: 1 },
       },
     })
     render(<SimilarPapersPanel references={REFS} paperTitle="Relation Paper" paperSource="10.9/src" />)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Both' }))
-    // Query by text (not role) for the search trigger: a role scan clones
-    // every button and jsdom mishandles the shared-refs button's `background`
-    // shorthand during accessible-name computation.
-    fireEvent.click(screen.getByText('Find similar + cites & refs'))
+    // "Both" is the default tab; query by text (not role) for the search
+    // trigger: a role scan clones every button and jsdom mishandles the
+    // shared-refs button's `background` shorthand during accessible-name
+    // computation.
+    fireEvent.click(screen.getByText('Find shared references + citations'))
 
     await screen.findByText('Similar work')
-    // Relation chips render for the OpenAlex cites/refs rows.
-    expect(screen.getByText('Reference')).toBeInTheDocument()
-    expect(screen.getByText('Citation')).toBeInTheDocument()
+    // Relation chips render for the OpenAlex overlap rows.
+    expect(screen.getByText('Shared refs')).toBeInTheDocument()
+    expect(screen.getByText('Shared cites')).toBeInTheDocument()
     // The similar-path row keeps its shared-refs overlap chip.
     expect(screen.getByText(/shared refs \(2\)/)).toBeInTheDocument()
   })

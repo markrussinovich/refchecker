@@ -23,6 +23,43 @@ import { useSettingsStore } from '../../stores/useSettingsStore'
 
 const SOURCE_LABEL = { pdf: 'full text', abstract: 'abstract only', none: 'no text' }
 
+// Build an honest, real-data-only context block for a single reference. Used by
+// the per-reference Chat & Summarize mode: since the grounded backend grounds on
+// the HOST paper's document (not each reference's full text), we hand the model
+// the reference's own metadata + abstract/claim that we DO have, and tell the
+// user plainly what it's grounded in. Returns null when nothing real is known.
+function buildReferenceContext(reference) {
+  if (!reference) return null
+  const e = reference.enrichment || {}
+  const title = (reference.title || '').trim()
+  const abstract = (e.abstract || '').trim()
+  const claim = (e.tldr || '').trim()
+  const doi = reference.doi || reference.verified_doi || null
+  const ids = []
+  if (doi) ids.push(`DOI: ${String(doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')}`)
+  if (reference.arxiv_id) ids.push(`arXiv: ${reference.arxiv_id}`)
+  const authors = (typeof reference.authors === 'string'
+    ? reference.authors
+    : Array.isArray(reference.authors)
+      ? reference.authors.map(a => (typeof a === 'string' ? a : (a?.name || ''))).filter(Boolean).join(', ')
+      : '').trim()
+  const year = reference.year ? String(reference.year) : ''
+  const venue = (reference.venue || e.venue || '').trim()
+
+  // The strongest real grounding we have for the reference, in priority order.
+  const grounding = abstract ? 'abstract' : claim ? 'claim' : title ? 'title' : 'none'
+  if (grounding === 'none') return null
+
+  const lines = []
+  if (title) lines.push(`Title: ${title}`)
+  if (authors) lines.push(`Authors: ${authors}`)
+  if (year || venue) lines.push(`Published: ${[venue, year].filter(Boolean).join(', ')}`)
+  if (ids.length) lines.push(ids.join('  '))
+  if (abstract) lines.push(`Abstract: ${abstract}`)
+  else if (claim) lines.push(`Claim (TL;DR): ${claim}`)
+  return { text: lines.join('\n'), grounding, title }
+}
+
 /**
  * Non-blocking empty-state shown when no Chat & Summarize LLM is configured.
  * Honest: explains why nothing can run yet and links to the exact Settings
@@ -74,7 +111,38 @@ function SourceBanner({ source }) {
   )
 }
 
-export default function ArticleAssistant({ checkId }) {
+// Honest banner for per-reference mode. The grounded backend grounds on the HOST
+// paper's document, not on each reference's own full text — which we don't have.
+// So we ground on whatever real metadata we DO hold for the reference (its
+// abstract, else its TL;DR claim, else just its title) and say so plainly, with
+// no fabrication. `grounding` ∈ 'abstract' | 'claim' | 'title'.
+function ReferenceGroundingBanner({ grounding }) {
+  const what = grounding === 'abstract'
+    ? 'this reference’s abstract'
+    : grounding === 'claim'
+      ? 'this reference’s one-line claim (TL;DR)'
+      : 'this reference’s title and metadata only'
+  return (
+    <div className="text-xs mt-2 mb-2 rounded-md px-2.5 py-1.5"
+      style={{ color: 'var(--color-warning)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-warning)' }}>
+      The reference’s full text isn’t available here, so answers are grounded only in {what}.
+      The assistant won’t invent details beyond what’s shown — if something isn’t in the reference’s
+      available text, it will say so.
+    </div>
+  )
+}
+
+/**
+ * @param {object} props
+ * @param {number} props.checkId  The host check to ground the grounded backend on.
+ * @param {object} [props.reference]  When provided, the assistant chats/summarizes
+ *   about THIS reference instead of the host paper. Since the grounded backend
+ *   grounds on the host paper's document (not the reference's own full text,
+ *   which we don't have), reference-mode hands the model the reference's real
+ *   metadata + abstract/claim and labels itself honestly.
+ * @param {string} [props.label]  Optional custom trigger-button label.
+ */
+export default function ArticleAssistant({ checkId, reference = null, label = null }) {
   const getSelectedChatConfig = useConfigStore(s => s.getSelectedChatConfig)
   // Reactively track whether any chat-capable LLM is configured. The resolved
   // chat config falls back to the extraction/default config, so this is null
@@ -83,6 +151,11 @@ export default function ArticleAssistant({ checkId }) {
   const hasChatModel = useConfigStore(s => (s.configs?.length || 0) > 0)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('summarize')
+
+  // Per-reference mode: real, no-fabrication context block built from the
+  // reference's own metadata + abstract/claim (whatever we honestly have).
+  const refContext = reference ? buildReferenceContext(reference) : null
+  const isRefMode = !!reference
 
   // Summarize state
   const [sum, setSum] = useState({ loading: false, data: null, error: null })
@@ -93,15 +166,50 @@ export default function ArticleAssistant({ checkId }) {
   const [chat, setChat] = useState({ loading: false, error: null })
 
   if (!checkId || checkId <= 0) return null
+  // Per-reference mode needs at least one real, citable scrap of the reference's
+  // own text (abstract → claim → title). With nothing real to ground on, omit
+  // the button entirely rather than offer a chat that would have to fabricate.
+  if (isRefMode && !refContext) return null
 
   const configPayload = () => {
     const c = getSelectedChatConfig?.()
     return c ? { llm_config_id: c.id } : {}
   }
 
+  // In reference mode, lead the conversation with the reference's own real
+  // context as a user turn so the grounded assistant has the reference text to
+  // work from (the grounded backend otherwise grounds on the host paper). No
+  // fabrication: only fields we actually hold are included.
+  const groundingPreamble = () => {
+    if (!isRefMode || !refContext) return []
+    return [{
+      role: 'user',
+      content:
+        'Here is the reference I want to ask about. Use ONLY this text; if a ' +
+        'detail is not present here, say it is not stated rather than guessing.\n\n' +
+        refContext.text,
+    }]
+  }
+
   const runSummary = async () => {
     setSum({ loading: true, data: null, error: null })
     try {
+      if (isRefMode) {
+        // Summarize via chat in reference mode: the /summarize endpoint grounds
+        // on the host paper, so for a single reference we ask the grounded chat
+        // to summarize the reference text we supplied — keeping it honest.
+        const msgs = [...groundingPreamble(), {
+          role: 'user',
+          content:
+            'Summarize this reference in 3-5 sentences for a researcher: what it ' +
+            'addresses, its approach, and its key findings. Use ONLY the text above; ' +
+            'omit anything not stated rather than guessing.',
+        }]
+        const res = await postArticleChat(checkId, msgs, configPayload())
+        const d = res.data || {}
+        setSum({ loading: false, data: { summary: d.answer || '', source: refContext.grounding === 'abstract' ? 'abstract' : 'pdf' }, error: null })
+        return
+      }
       const res = await getArticleSummary(checkId, configPayload())
       setSum({ loading: false, data: res.data, error: null })
     } catch (e) {
@@ -117,7 +225,11 @@ export default function ArticleAssistant({ checkId }) {
     setInput('')
     setChat({ loading: true, error: null })
     try {
-      const res = await postArticleChat(checkId, nextMessages, configPayload())
+      // Reference mode prepends the reference's own real context as a leading
+      // turn (not shown in the visible thread) so the grounded assistant has
+      // the reference text to answer from.
+      const wireMessages = isRefMode ? [...groundingPreamble(), ...nextMessages] : nextMessages
+      const res = await postArticleChat(checkId, wireMessages, configPayload())
       const d = res.data || {}
       setChatSource(d.source || null)
       if (d.source === 'none') {
@@ -142,9 +254,11 @@ export default function ArticleAssistant({ checkId }) {
         <button type="button" onClick={() => setOpen(true)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
           style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}
-          title="Summarize this article or ask questions, answered only from the article’s own text">
+          title={isRefMode
+            ? 'Chat about this reference or summarize it, grounded only in the reference’s available text'
+            : 'Summarize this article or ask questions, answered only from the article’s own text'}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-          Chat &amp; Summarize
+          {label || (isRefMode ? 'Chat about this reference' : 'Chat & Summarize')}
         </button>
       ) : (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
@@ -168,12 +282,13 @@ export default function ArticleAssistant({ checkId }) {
 
           {tab === 'summarize' ? (
             <div>
+              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} />}
               {!hasChatModel && <NoModelEmptyState verb="summarize" />}
               {hasChatModel && !summary && (
                 <button type="button" onClick={runSummary} disabled={sum.loading}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
                   style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: sum.loading ? 0.6 : 1 }}>
-                  {sum.loading ? 'Summarizing…' : 'Summarize this article'}
+                  {sum.loading ? 'Summarizing…' : (isRefMode ? 'Summarize this reference' : 'Summarize this article')}
                 </button>
               )}
               {sum.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{sum.error}</div>}
@@ -187,9 +302,9 @@ export default function ArticleAssistant({ checkId }) {
                 <div>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Summary</span>
-                    <SourceBadge source={summary.source} />
+                    {!isRefMode && <SourceBadge source={summary.source} />}
                   </div>
-                  <SourceBanner source={summary.source} />
+                  {!isRefMode && <SourceBanner source={summary.source} />}
                   <div className="text-sm mt-2 whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>
                     {summary.summary}
                   </div>
@@ -198,17 +313,20 @@ export default function ArticleAssistant({ checkId }) {
             </div>
           ) : (
             <div>
-              {chatSource && (
+              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} />}
+              {!isRefMode && chatSource && (
                 <div className="flex items-center gap-2 mb-1.5">
                   <SourceBadge source={chatSource} />
                 </div>
               )}
-              <SourceBanner source={chatSource} />
+              {!isRefMode && <SourceBanner source={chatSource} />}
               {!hasChatModel && <div className="mb-2"><NoModelEmptyState verb="chat" /></div>}
               <div className="space-y-2 mb-2 max-h-72 overflow-y-auto">
                 {hasChatModel && messages.length === 0 && (
                   <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                    Ask a question about this article. Answers come only from the article’s own text — if it isn’t in the article, the assistant will say so.
+                    {isRefMode
+                      ? 'Ask a question about this reference. Answers come only from the reference’s available text shown above — if it isn’t there, the assistant will say so.'
+                      : 'Ask a question about this article. Answers come only from the article’s own text — if it isn’t in the article, the assistant will say so.'}
                   </div>
                 )}
                 {messages.map((m, i) => (
@@ -219,13 +337,15 @@ export default function ArticleAssistant({ checkId }) {
                       border: '1px solid var(--color-border)',
                     }}>
                     <span style={{ fontWeight: 700, color: 'var(--color-text-secondary)' }}>
-                      {m.role === 'user' ? 'You' : 'Article'}:
+                      {m.role === 'user' ? 'You' : (isRefMode ? 'Reference' : 'Article')}:
                     </span>{' '}
                     {m.content}
                   </div>
                 ))}
                 {chat.loading && (
-                  <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Reading the article…</div>
+                  <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    {isRefMode ? 'Reading the reference…' : 'Reading the article…'}
+                  </div>
                 )}
               </div>
               {chat.error && <div className="text-xs mb-1" style={{ color: 'var(--color-error)' }}>{chat.error}</div>}
@@ -234,7 +354,7 @@ export default function ArticleAssistant({ checkId }) {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-                  placeholder={hasChatModel ? 'Ask about the article…' : 'Configure a model in Settings to chat'}
+                  placeholder={hasChatModel ? (isRefMode ? 'Ask about this reference…' : 'Ask about the article…') : 'Configure a model in Settings to chat'}
                   className="flex-1 px-2.5 py-1.5 rounded-md text-sm border"
                   style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}
                   disabled={chat.loading || !hasChatModel}
