@@ -42,6 +42,15 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
+  // Accounts / Teams section needs the full auth picture (single vs multi-user,
+  // configured OAuth providers, and the signed-in user when there is one).
+  const authRequired = useAuthStore(state => state.authRequired)
+  const authProviders = useAuthStore(state => state.providers)
+  const authUser = useAuthStore(state => state.user)
+  const loginWithGoogle = useAuthStore(state => state.loginWithGoogle)
+  const loginWithGithub = useAuthStore(state => state.loginWithGithub)
+  const loginWithMicrosoft = useAuthStore(state => state.loginWithMicrosoft)
+  const authLogout = useAuthStore(state => state.logout)
 
   // AI-generated-text detection (opt-in, client preference + local model mgmt)
   const aiDetection = useAiDetectionStore()
@@ -957,6 +966,147 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     )
   }
 
+  // Accounts & Teams — the single, always-reachable entry point for sign-in
+  // and team management, even in the single-user desktop build. Multi-user mode
+  // (OAuth login + Teams) is enabled server-side via REFCHECKER_MULTIUSER=true
+  // plus OAuth client credentials; the frontend cannot flip that flag, so when
+  // it is off we explain exactly how to turn it on instead of faking a session.
+  const accent = 'var(--color-accent, #3b82f6)'
+
+  const PROVIDER_META = {
+    google: { label: 'Continue with Google', login: loginWithGoogle },
+    github: { label: 'Continue with GitHub', login: loginWithGithub },
+    microsoft: { label: 'Continue with Microsoft', login: loginWithMicrosoft },
+  }
+
+  const renderAccountsSection = () => {
+    // State A — auth enabled AND signed in: show the account + a path to Teams.
+    if (authRequired && authUser) {
+      const initials = (authUser.name || authUser.email || '?')
+        .split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 py-2">
+            {authUser.avatar_url ? (
+              <img src={authUser.avatar_url} alt={authUser.name || 'User avatar'} className="w-12 h-12 rounded-full object-cover" />
+            ) : (
+              <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold text-white" style={{ backgroundColor: accent }}>
+                {initials}
+              </div>
+            )}
+            <div className="min-w-0">
+              {authUser.name && <div className="font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>{authUser.name}</div>}
+              {authUser.email && <div className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>{authUser.email}</div>}
+              {authUser.provider && <div className="text-xs mt-0.5 capitalize" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>Signed in via {authUser.provider}</div>}
+            </div>
+          </div>
+
+          <div className="py-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Teams</div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Create a team and add or remove members from the <strong>Teams</strong> menu in the header
+              (the people icon, top-right). Members share checks and a team activity log.
+            </div>
+          </div>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => { authLogout(); closeSettings() }}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+              style={{ borderColor: 'var(--color-error, #ef4444)', color: 'var(--color-error, #ef4444)' }}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // State B — auth enabled but signed out: surface the OAuth sign-in buttons
+    // right here so the user can reach login without hunting for it.
+    if (authRequired && authProviders.length > 0) {
+      return (
+        <div className="space-y-4">
+          <div>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Sign in</div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Accounts are enabled on this server. Sign in to sync your checks and manage teams.
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 max-w-sm">
+            {authProviders.map((p) => {
+              const meta = PROVIDER_META[p]
+              if (!meta) return null
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => meta.login()}
+                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border"
+                  style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                >
+                  {meta.label}
+                </button>
+              )
+            })}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>
+            After signing in, the <strong>Teams</strong> menu appears in the header for creating teams and managing members.
+          </div>
+        </div>
+      )
+    }
+
+    // State C — single-user desktop default: accounts/teams are off. Be honest
+    // about why, and explain exactly how to enable them (no fake logged-in state).
+    return (
+      <div className="space-y-4">
+        <div
+          className="rounded-lg p-3 text-sm border"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-secondary)' }}
+        >
+          <strong style={{ color: 'var(--color-text-primary)' }}>You're in single-user mode.</strong>{' '}
+          This desktop build runs locally with no account — all your checks stay on this machine.
+          Sign-in (Google / GitHub / Microsoft) and Teams are <strong>opt-in</strong> and require enabling
+          multi-user mode on the server, so they're hidden by default.
+        </div>
+
+        <div>
+          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Enable accounts &amp; Teams</div>
+          <div className="text-sm mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+            Multi-user mode adds OAuth login and team management (create a team, add/remove members,
+            shared checks). To turn it on, run the backend with these set in its environment
+            (e.g. a <code>.env</code> file or <code>docker-compose</code>), then restart:
+          </div>
+          <pre
+            className="text-[11px] rounded p-3 overflow-auto m-0"
+            style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)', whiteSpace: 'pre-wrap' }}
+          >{`REFCHECKER_MULTIUSER=true
+# at least one provider's client id + secret:
+GOOGLE_CLIENT_ID=...        GOOGLE_CLIENT_SECRET=...
+GITHUB_CLIENT_ID=...        GITHUB_CLIENT_SECRET=...
+MICROSOFT_CLIENT_ID=...     MICROSOFT_CLIENT_SECRET=...`}</pre>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>
+            Once the server reports a configured provider, the sign-in screen, the Teams menu, and your
+            account appear automatically — and this panel switches to the sign-in / account view.
+          </div>
+        </div>
+
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => openExternal(`${REPO_URL}#multi-user--teams`)}
+            className="text-xs underline"
+            style={{ color: accent }}
+          >
+            Read the multi-user &amp; Teams setup guide
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   const navItems = [
     { id: 'General', label: 'General', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -978,6 +1128,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     { id: 'AI Detection', label: 'AI Detection', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+      </svg>
+    )},
+    { id: 'Accounts', label: 'Accounts & Teams', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
       </svg>
     )},
   ]
@@ -1826,6 +1981,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 {activeSection === 'LLM' && renderLLMSection()}
                 {activeSection === 'API Keys' && renderAPIKeysSection()}
                 {activeSection === 'AI Detection' && renderAIDetectionSection()}
+                {activeSection === 'Accounts' && renderAccountsSection()}
               </>
             )}
           </div>

@@ -50,23 +50,14 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(screen.queryByText(/^Topics:/)).toBeNull()
   })
 
-  it('shows the Published badge for the real backend human string ("Oct 1, 2021")', () => {
-    // enrichment.py pre-formats publication_date into a human string via
-    // strftime("%b %-d, %Y"); the FE must surface that verbatim, not abstain.
-    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: 'Oct 1, 2021' } }} />)
-    expect(screen.getByText('Published Oct 1, 2021')).toBeInTheDocument()
-  })
-
-  it('shows the Published badge for a bare-year fallback ("2021")', () => {
-    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '2021' } }} />)
-    expect(screen.getByText('Published 2021')).toBeInTheDocument()
-  })
-
-  it('normalizes a raw ISO publication_date without timezone drift', () => {
-    // Defensive path: if any code path passes a raw ISO date, render it as a
-    // no-drift local "Oct 1, 2021" rather than the previous day.
-    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '2021-10-01' } }} />)
-    expect(screen.getByText('Published Oct 1, 2021')).toBeInTheDocument()
+  it('no longer renders a "Published …" pill (it was removed as redundant — the date is shown under the title)', () => {
+    // The publication date is already displayed under the reference title, so
+    // the duplicate, looks-clickable-but-inert "Published" pill was removed.
+    for (const publication_date of ['Oct 1, 2021', '2021', '2021-10-01']) {
+      const { unmount } = render(<AdditionalInfoBar reference={{ enrichment: { publication_date } }} />)
+      expect(screen.queryByText(/^Published /)).toBeNull()
+      unmount()
+    }
   })
 
   it('abstains from the Published badge when publication_date has no real content', () => {

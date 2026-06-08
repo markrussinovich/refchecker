@@ -1735,6 +1735,12 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     titleBits.push('(click to open venue page)')
   }
   const title = titleBits.join('\n')
+  // Only fall back to the native title tooltip when the rich venue popover
+  // (OpenAlex /sources + DOAJ guidelines) is NOT being shown — otherwise two
+  // banners stack on hover. Mirrors the per-author hover, which suppresses the
+  // native title once its rich profile card is available.
+  const richPopoverShown = vpOpen && vp && vp.available
+  const nativeTitle = richPopoverShown ? undefined : title
   const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
   const handle = (ev) => {
     if (!href || !isTauri()) return
@@ -1743,7 +1749,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     openExternal(href)
   }
   return (
-    <div onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} title={title}
+    <div onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} title={nativeTitle}
       style={{ color: 'var(--color-text-secondary)', position: 'relative', display: 'inline-block' }}>
       {href ? (
         <a

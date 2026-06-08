@@ -25,15 +25,42 @@ import io
 import json
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+# Status / band colours are the RefChecker app's REAL design tokens
+# (web-ui/src/index.css). Keeping these identical to the live UI means a shared
+# report is recognisably the same product, not a generic look-alike. The full
+# token rationale lives in docs/design.md, which governs every export theme.
+#   accent (teal-green)  #10a37f   verified / success
+#   warning (amber)      #f59e0b
+#   error (red)          #ef4146
+#   hallucination        #dc6b1d   (the app's real orange, not a stock purple)
+#   muted text           #8e8ea0
 _STATUS_COLOR = {
-    "verified": "#16a34a",
-    "warning": "#d97706",
-    "error": "#dc2626",
-    "unverified": "#6b7280",
-    "hallucinated": "#9333ea",
+    "verified": "#10a37f",
+    "warning": "#f59e0b",
+    "error": "#ef4146",
+    "unverified": "#8e8ea0",
+    "hallucinated": "#dc6b1d",
 }
-_BAND_COLOR = {"high": "#dc2626", "medium": "#d97706", "low": "#16a34a"}
-_SEG = {"AI": "#dc2626", "Mixed": "#d97706", "Human": "#16a34a"}
+_BAND_COLOR = {"high": "#ef4146", "medium": "#f59e0b", "low": "#10a37f"}
+_SEG = {"AI": "#ef4146", "Mixed": "#f59e0b", "Human": "#10a37f"}
+
+# Status glyphs mirror the in-app traffic-light language (green/amber/red plus a
+# distinct hallucination mark). Used in the plain-text formats (Markdown / DOCX)
+# that cannot carry the HTML status chip, so every format speaks the same legend.
+_STATUS_EMOJI = {
+    "verified": "🟢",
+    "warning": "🟡",
+    "error": "🔴",
+    "unverified": "⚪",
+    "hallucinated": "🟠",
+}
+_STATUS_LABEL = {
+    "verified": "Verified",
+    "warning": "Warning",
+    "error": "Error",
+    "unverified": "Unverified",
+    "hallucinated": "Likely hallucinated",
+}
 
 # Sections a caller may include/exclude (the export "checkboxes").
 ALL_SECTIONS: Tuple[str, ...] = ("summary", "ai", "issues", "references")
@@ -234,7 +261,8 @@ def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[s
 # shave up to 5; hallucinations get a steeper penalty.
 def compute_health(total: int, verified: int, refs_err: int, refs_warn: int, halluc: int) -> Dict[str, Any]:
     if total <= 0:
-        return {"score": None, "grade": "n/a", "color": "#6b7280"}
+        # Mirrors the in-app HealthBadge n/a state (--color-text-secondary).
+        return {"score": None, "grade": "n/a", "color": "#676767"}
     verify_ratio = verified / total
     # A ref can be both hallucinated and error-carrying; clamp so clean_ratio
     # never goes negative and double-penalizes the score below 0.
@@ -310,12 +338,14 @@ def _donut_svg(dist: Dict[str, float], score_pct: Optional[int]) -> str:
         )
         offset += ln
     center = str(score_pct) if score_pct is not None else "—"
+    # Use theme variables so the donut reads in both light and dark exports
+    # (the track follows --track, the centre label follows the body --fg).
     return (
-        '<svg width="92" height="92" viewBox="0 0 92 92">'
-        '<circle cx="46" cy="46" r="34" fill="none" stroke="#e5e7eb" stroke-width="9"/>'
+        '<svg width="92" height="92" viewBox="0 0 92 92" style="color:var(--fg)">'
+        '<circle cx="46" cy="46" r="34" fill="none" stroke="var(--track)" stroke-width="9"/>'
         + "".join(arcs)
-        + f'<text x="46" y="44" text-anchor="middle" font-size="17" font-weight="700" fill="#111">{center}</text>'
-        '<text x="46" y="58" text-anchor="middle" font-size="9" fill="#888">score</text>'
+        + f'<text x="46" y="44" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">{center}</text>'
+        '<text x="46" y="58" text-anchor="middle" font-size="9" fill="var(--muted)">score</text>'
         "</svg>"
     )
 
@@ -384,7 +414,7 @@ def _ai_section_html(ai: Dict[str, Any]) -> str:
 
 
 def _ref_row_html(r: Dict[str, Any]) -> str:
-    color = _STATUS_COLOR.get(r["status"], "#6b7280")
+    color = _STATUS_COLOR.get(r["status"], "#8e8ea0")
     issues = ""
     for d in r["errors"]:
         issues += f'<div class="issue err">⛔ {_e(d)}</div>'
@@ -418,8 +448,8 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
                      (s["warning"], "warnings"), (s["error"], "errors"),
                      (s["unverified"], "unverified")]
     )
-    sev_color = _BAND_COLOR.get(m["severity"], "#6b7280")
-    verdict = (f'<div class="verdict" style="border-color:{sev_color}">'
+    sev_color = _BAND_COLOR.get(m["severity"], "#8e8ea0")
+    verdict = (f'<div class="verdict" style="border-left-color:{sev_color}">'
                f'<span class="vdot" style="background:{sev_color}"></span>{_e(m["headline"])}</div>')
     h = m["health"]
     health_html = ""
@@ -429,7 +459,8 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
                        f'<span>Citation health: <b style="color:{h["color"]}">{_e(h["grade"])}</b></span></div>')
     ref_list = "".join(_ref_row_html(r) for r in m["rows"])
 
-    body = [f'<header class="top"><span class="brand">RefChecker</span><span class="muted small">{_e(m["ts"])}</span></header>',
+    body = [f'<header class="top"><span class="brand">{_WORDMARK_SVG}Ref<span class="accent">Checker</span></span>'
+            f'<span class="muted small">{_e(m["ts"])}</span></header>',
             f'<h1>{_e(m["title"])}</h1>', verdict, health_html]
     if "summary" in sec:
         ref_count_txt = f' · {s["total"]} references' if s["total"] else ""
@@ -448,59 +479,117 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
     return _html_doc(m["title"], "".join(body))
 
 
+# RefChecker wordmark — an inline SVG so the export header reads as the same
+# product as the app (accent-tinted check-mark + word). No external asset.
+_WORDMARK_SVG = (
+    '<svg class="logo" width="22" height="22" viewBox="0 0 24 24" fill="none" '
+    'aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" '
+    'fill="var(--accent)" opacity="0.14"/><path d="M7 12.4l3.1 3.1L17 8.6" '
+    'stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" '
+    'stroke-linejoin="round"/></svg>'
+)
+
+
 def _html_doc(title: str, inner: str) -> str:
+    # The export theme is GOVERNED by docs/design.md. Tokens below are the
+    # RefChecker app's real CSS variables (web-ui/src/index.css): light is the
+    # default (best for print / PDF), dark mirrors the app shell (#212121 base,
+    # #2f2f2f surfaces) and engages with the reader's OS setting. Editing colours
+    # here without updating docs/design.md will let the report drift from the app.
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{_e(title)} — RefChecker</title>
 <style>
-  :root {{ --fg:#111827; --muted:#6b7280; --bg:#f8fafc; --card:#fff; --border:#e5e7eb; --accent:#2563eb; }}
+  /* ---- Light (default; also the print/PDF target) ---- */
+  :root {{
+    --fg:#0d0d0d; --fg-2:#676767; --muted:#8e8ea0;
+    --bg:#f7f7f8; --card:#ffffff; --border:#e5e5e5; --track:#ececf1;
+    --accent:#10a37f; --accent-soft:rgba(16,163,127,0.12);
+    --verified:#10a37f; --warning:#f59e0b; --error:#ef4146;
+    --halluc:#dc6b1d; --link:#2563eb;
+    --error-bg:#fef2f2; --warning-bg:#fffbeb; --success-bg:#ecfdf5; --halluc-bg:#fff7ed;
+    --radius-sm:6px; --radius-md:10px; --radius-lg:14px;
+    --shadow:0 1px 2px rgba(0,0,0,0.04), 0 2px 10px rgba(0,0,0,0.06);
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }}
+  /* ---- Dark — mirrors the app shell, engaged via the reader's OS preference ---- */
+  @media (prefers-color-scheme: dark) {{
+    :root {{
+      --fg:#ececec; --fg-2:#b4b4b4; --muted:#8b8b96;
+      --bg:#212121; --card:#2f2f2f; --border:#444444; --track:#424242;
+      --accent:#10a37f; --accent-soft:rgba(16,163,127,0.18);
+      --verified:#10a37f; --warning:#fbbf24; --error:#f87171;
+      --halluc:#fb923c; --link:#60a5fa;
+      --error-bg:#3b1818; --warning-bg:#3b2f05; --success-bg:#052e22; --halluc-bg:#431c07;
+      --shadow:0 1px 2px rgba(0,0,0,0.3), 0 2px 12px rgba(0,0,0,0.4);
+    }}
+  }}
   * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }}
-  .wrap {{ max-width:880px; margin:0 auto; padding:32px 20px 64px; }}
-  header.top {{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; border-bottom:1px solid var(--border); padding-bottom:14px; margin-bottom:20px; }}
-  header.top .brand {{ font-weight:700; color:var(--accent); }}
-  h1 {{ font-size:22px; margin:0 0 10px; }}
-  h2 {{ font-size:15px; margin:0 0 12px; }}
+  html {{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }}
+  body {{ margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 var(--font); }}
+  .wrap {{ max-width:860px; margin:0 auto; padding:36px 22px 72px; }}
+  header.top {{ display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--border); padding-bottom:14px; margin-bottom:22px; }}
+  header.top .brand {{ display:inline-flex; align-items:center; gap:8px; font-weight:650; letter-spacing:-0.01em; color:var(--fg); }}
+  header.top .brand .logo {{ display:block; }}
+  header.top .brand .accent {{ color:var(--accent); }}
+  h1 {{ font-size:23px; line-height:1.25; letter-spacing:-0.015em; margin:0 0 12px; font-weight:650; }}
+  h2 {{ font-size:13px; text-transform:uppercase; letter-spacing:0.05em; color:var(--fg-2); margin:0 0 14px; font-weight:600; }}
+  h3 {{ font-size:14px; margin:18px 0 8px; font-weight:600; }}
   .muted {{ color:var(--muted); }}
   .small {{ font-size:12.5px; }}
-  .verdict {{ display:flex; align-items:center; gap:9px; border:1px solid; border-left-width:4px; border-radius:10px; padding:11px 14px; font-weight:600; margin:6px 0 18px; background:var(--card); }}
-  .vdot {{ width:9px; height:9px; border-radius:9px; flex:none; }}
-  .health {{ display:inline-flex; align-items:center; gap:8px; border:1px solid; border-radius:999px; padding:4px 14px 4px 4px; font-size:13px; margin:0 0 18px; background:var(--card); }}
-  .health .hscore {{ color:#fff; border-radius:999px; min-width:30px; text-align:center; padding:2px 9px; font-weight:700; }}
-  .stats {{ display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 26px; }}
-  .stat {{ flex:1; min-width:96px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center; }}
-  .stat .num {{ font-size:24px; font-weight:700; }}
-  .stat .lbl {{ font-size:12px; color:var(--muted); }}
-  .card {{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:22px; }}
-  .ai-head {{ display:flex; gap:16px; align-items:center; }}
+  .verdict {{ display:flex; align-items:center; gap:10px; border:1px solid var(--border); border-left-width:3px; border-radius:var(--radius-md); padding:12px 15px; font-weight:550; margin:8px 0 16px; background:var(--card); box-shadow:var(--shadow); }}
+  .vdot {{ width:9px; height:9px; border-radius:50%; flex:none; }}
+  .health {{ display:inline-flex; align-items:center; gap:9px; border:1px solid var(--border); border-radius:999px; padding:4px 15px 4px 4px; font-size:13px; margin:0 0 20px; background:var(--card); }}
+  .health .hscore {{ color:#fff; border-radius:999px; min-width:30px; text-align:center; padding:3px 10px; font-weight:700; }}
+  .stats {{ display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 26px; }}
+  .stat {{ flex:1; min-width:96px; background:var(--card); border:1px solid var(--border); border-radius:var(--radius-md); padding:13px 12px; text-align:center; box-shadow:var(--shadow); }}
+  .stat .num {{ font-size:25px; font-weight:700; letter-spacing:-0.02em; }}
+  .stat .lbl {{ font-size:11.5px; color:var(--muted); margin-top:2px; }}
+  .card {{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; margin-bottom:22px; box-shadow:var(--shadow); }}
+  .ai-head {{ display:flex; gap:18px; align-items:center; }}
   .band {{ font-weight:700; }}
-  .pills {{ display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }}
-  .pill {{ display:inline-flex; align-items:center; gap:5px; border:1px solid; border-radius:999px; padding:2px 9px; font-size:12px; color:var(--muted); }}
-  .pill .dot {{ width:7px; height:7px; border-radius:7px; }}
+  .pills {{ display:flex; gap:6px; flex-wrap:wrap; margin-top:9px; }}
+  .pill {{ display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:999px; padding:2px 10px; font-size:12px; color:var(--fg-2); }}
+  .pill .dot {{ width:7px; height:7px; border-radius:50%; }}
   .pages {{ margin-top:14px; display:flex; flex-direction:column; gap:5px; }}
-  .pagebar {{ display:flex; align-items:center; gap:8px; }}
+  .pagebar {{ display:flex; align-items:center; gap:9px; }}
   .pglbl {{ font-size:12px; color:var(--muted); min-width:52px; }}
-  .track {{ flex:1; height:8px; border-radius:8px; background:#eef2f7; overflow:hidden; }}
-  .fill {{ display:block; height:100%; }}
-  .pgval {{ font-size:12px; min-width:28px; text-align:right; }}
-  .spans {{ list-style:none; padding:0; margin:6px 0 0; }}
-  .spans li {{ background:#fafafa; border-left:3px solid #dc2626; border-radius:6px; padding:8px 10px; margin-bottom:7px; }}
-  .spans .sc {{ float:right; font-weight:600; color:#dc2626; }}
-  .disclaimer {{ margin:14px 0 0; font-size:12px; color:var(--muted); border-top:1px dashed var(--border); padding-top:10px; }}
+  .track {{ flex:1; height:8px; border-radius:999px; background:var(--track); overflow:hidden; }}
+  .fill {{ display:block; height:100%; border-radius:999px; }}
+  .pgval {{ font-size:12px; min-width:28px; text-align:right; font-variant-numeric:tabular-nums; }}
+  .spans {{ list-style:none; padding:0; margin:8px 0 0; }}
+  .spans li {{ background:var(--error-bg); border-left:3px solid var(--error); border-radius:var(--radius-sm); padding:9px 11px; margin-bottom:7px; }}
+  .spans .sc {{ float:right; font-weight:650; color:var(--error); font-variant-numeric:tabular-nums; }}
+  .spans .q {{ font-style:italic; }}
+  .disclaimer {{ margin:15px 0 0; font-size:12px; color:var(--muted); border-top:1px dashed var(--border); padding-top:11px; }}
   ul.refs {{ list-style:none; padding:0; margin:0; }}
-  li.ref {{ display:flex; gap:10px; padding:12px 0; border-bottom:1px solid var(--border); }}
-  .chip {{ color:#fff; font-size:11px; border-radius:6px; padding:2px 8px; height:fit-content; white-space:nowrap; }}
+  li.ref {{ display:flex; gap:11px; padding:13px 0; border-bottom:1px solid var(--border); }}
+  li.ref:last-child {{ border-bottom:0; padding-bottom:2px; }}
+  .chip {{ color:#fff; font-size:10.5px; font-weight:600; letter-spacing:0.02em; text-transform:capitalize; border-radius:var(--radius-sm); padding:3px 9px; height:fit-content; white-space:nowrap; }}
   .ref-title {{ font-weight:600; }}
   .cited {{ color:var(--accent); font-weight:600; font-size:12px; }}
-  .issue {{ font-size:12.5px; margin-top:3px; }}
-  .issue.err {{ color:#b91c1c; }}
-  .issue.warn {{ color:#b45309; }}
+  .issue {{ font-size:12.5px; margin-top:4px; }}
+  .issue.err {{ color:var(--error); }}
+  .issue.warn {{ color:var(--warning); }}
   .issue.minor {{ color:var(--muted); }}
-  .issue .tag {{ font-size:10px; border:1px solid var(--border); border-radius:4px; padding:0 4px; color:var(--muted); }}
-  .fix {{ font-size:12.5px; margin-top:4px; color:#047857; background:#ecfdf5; border-radius:6px; padding:5px 8px; }}
-  a {{ color:var(--accent); text-decoration:none; }}
-  footer {{ margin-top:30px; color:var(--muted); font-size:12px; text-align:center; }}
+  .issue .tag {{ font-size:10px; border:1px solid var(--border); border-radius:4px; padding:0 4px; color:var(--muted); margin-left:4px; }}
+  .fix {{ font-size:12.5px; margin-top:5px; color:var(--accent); background:var(--success-bg); border:1px solid var(--accent-soft); border-radius:var(--radius-sm); padding:6px 9px; }}
+  a {{ color:var(--link); text-decoration:none; }}
+  a:hover {{ text-decoration:underline; }}
+  table.batch {{ font-size:13.5px; }}
+  table.batch th {{ color:var(--fg-2); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); padding:6px 8px; }}
+  table.batch td {{ padding:7px 8px; border-bottom:1px solid var(--border); }}
+  footer {{ margin-top:34px; color:var(--muted); font-size:11.5px; text-align:center; border-top:1px solid var(--border); padding-top:16px; }}
+  /* ---- Print / PDF: force the legible light theme, drop shadows, avoid splits ---- */
+  @media print {{
+    body {{ background:#fff; color:#0d0d0d; }}
+    .wrap {{ max-width:none; padding:0; }}
+    .card, .stat, .verdict, .health {{ box-shadow:none; }}
+    .card, li.ref, .spans li {{ break-inside:avoid; }}
+    header.top {{ border-bottom:1px solid #e5e5e5; }}
+    a {{ color:#0d0d0d; }}
+  }}
 </style></head>
 <body><div class="wrap">{inner}</div></body></html>"""
 
@@ -552,20 +641,26 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
             out.append("_No errors or major warnings._")
             out.append("")
         for r in problems:
+            emoji = "🔴" if r["errors"] else "🟡"
             tag = "ERROR" if r["errors"] else "WARNING"
-            out.append(f"- **[{tag}] {r['num']}. {r['title']}**")
+            out.append(f"- {emoji} **[{tag}] {r['num']}. {r['title']}**")
             for d in r["errors"]:
-                out.append(f"  - error: {d}")
+                out.append(f"  - ⛔ error: {d}")
             for d in r["major"]:
-                out.append(f"  - warning: {d}")
+                out.append(f"  - ⚠ warning: {d}")
             if r.get("corrected"):
-                out.append(f"  - suggested correction: {r['corrected']}")
+                out.append(f"  - ✎ suggested correction: {r['corrected']}")
         out.append("")
     if "references" in sec:
         out.append(f"{h}# All references ({s['total']})")
         out.append("")
+        out.append("Legend: " + "  ·  ".join(
+            f"{_STATUS_EMOJI[k]} {_STATUS_LABEL[k]}"
+            for k in ("verified", "warning", "error", "hallucinated", "unverified")))
+        out.append("")
         for r in m["rows"]:
-            line = f"- `{r['status']}` {r['num']}. {r['title']}"
+            emoji = _STATUS_EMOJI.get(r["status"], "⚪")
+            line = f"- {emoji} `{r['status']}` {r['num']}. {r['title']}"
             if r["meta"]:
                 line += f" — {r['meta']}"
             if r["url"]:
@@ -619,58 +714,75 @@ def _ai_markdown(ai: Dict[str, Any], level: int) -> str:
 # PDF (PyMuPDF Story — already bundled)
 # --------------------------------------------------------------------------- #
 
-def _pdf_html_for_model(m: Dict[str, Any]) -> str:
-    """A print-simplified HTML (no flex/grid/svg) that fitz.Story renders well."""
+def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
+    """A print-simplified HTML (no flex/grid/svg) that fitz.Story renders well.
+
+    The palette is the RefChecker light theme (docs/design.md) — the PDF always
+    renders on white paper, so we use the light tokens: accent #10a37f for the
+    wordmark rule, amber/red/orange for status, muted #8e8ea0 for metadata.
+    Section headings carry an accent underline to echo the app's card headers.
+    """
     sec = m["sections"]
     s = m["stats"]
-    sev = _BAND_COLOR.get(m["severity"], "#6b7280")
+    sev = _BAND_COLOR.get(m["severity"], "#8e8ea0")
+    # Accent-tinted, underlined section heading — keeps PDF in the app's voice.
+    _h2 = ('<h2 style="font-size:12pt;margin:14pt 0 4pt;color:#0d0d0d;'
+           'border-bottom:1px solid #e5e5e5;padding-bottom:3pt">')
     rows_html = []
     for r in m["rows"]:
-        color = _STATUS_COLOR.get(r["status"], "#6b7280")
+        color = _STATUS_COLOR.get(r["status"], "#8e8ea0")
+        emoji = _STATUS_EMOJI.get(r["status"], "")
         issues = ""
         for d in r["errors"]:
-            issues += f'<p style="margin:2px 0;color:#b91c1c;font-size:9pt">⛔ {_e(d)}</p>'
+            issues += f'<p style="margin:2px 0;color:#ef4146;font-size:9pt">⛔ {_e(d)}</p>'
         for d in r["major"]:
-            issues += f'<p style="margin:2px 0;color:#b45309;font-size:9pt">⚠ {_e(d)}</p>'
+            issues += f'<p style="margin:2px 0;color:#f59e0b;font-size:9pt">⚠ {_e(d)}</p>'
         for d in r["minor"]:
-            issues += f'<p style="margin:2px 0;color:#6b7280;font-size:8.5pt">· {_e(d)} (minor)</p>'
+            issues += f'<p style="margin:2px 0;color:#8e8ea0;font-size:8.5pt">· {_e(d)} (minor)</p>'
         if r.get("corrected"):
-            issues += f'<p style="margin:2px 0;color:#047857;font-size:9pt">✎ Suggested: {_e(r["corrected"])}</p>'
+            issues += f'<p style="margin:2px 0;color:#10a37f;font-size:9pt">✎ Suggested: {_e(r["corrected"])}</p>'
         rows_html.append(
             f'<tr><td style="padding:6px 8px 6px 0;vertical-align:top">'
-            f'<b><font color="{color}">{_e(r["status"])}</font></b></td>'
-            f'<td style="padding:6px 0"><b>{_e(r["num"])}{". " if r["num"] else ""}{_e(r["title"])}</b>'
-            f'<br/><font color="#6b7280" style="font-size:9pt">{_e(r["meta"])}</font>{issues}</td></tr>'
+            f'<b><font color="{color}">{emoji} {_e(r["status"])}</font></b></td>'
+            f'<td style="padding:6px 0;border-bottom:1px solid #f0f0f0"><b>{_e(r["num"])}{". " if r["num"] else ""}{_e(r["title"])}</b>'
+            f'<br/><font color="#8e8ea0" style="font-size:9pt">{_e(r["meta"])}</font>{issues}</td></tr>'
         )
-    parts = [f'<h1 style="font-size:16pt;margin:0 0 4pt">{_e(m["title"])}</h1>',
-             f'<p style="color:#6b7280;font-size:9pt;margin:0 0 8pt">{_e(m["ts"])}</p>',
-             f'<p style="border-left:4px solid {sev};padding:6pt 10pt;background:#f8fafc;font-weight:bold">{_e(m["headline"])}</p>']
-    _h = m["health"]
-    if _h.get("score") is not None:
-        parts.append(f'<p style="font-size:10pt;margin:2pt 0 6pt"><b><font color="{_h["color"]}">'
-                     f'Citation health: {_h["score"]}/100 — {_e(_h["grade"])}</font></b></p>')
+    parts = []
+    if header:
+        parts.append('<p style="font-size:10pt;margin:0 0 6pt;border-bottom:2px solid #10a37f;padding-bottom:5pt">'
+                     '<b><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
+                     '<font color="#8e8ea0" style="font-size:8pt">  ·  reference verification report</font></p>')
+    parts.append(f'<h1 style="font-size:16pt;margin:6pt 0 4pt;color:#0d0d0d">{_e(m["title"])}</h1>')
+    if m["ts"]:
+        parts.append(f'<p style="color:#8e8ea0;font-size:9pt;margin:0 0 8pt">{_e(m["ts"])}</p>')
+    parts.append(f'<p style="border-left:3px solid {sev};padding:6pt 10pt;background:#f7f7f8;font-weight:bold;color:#0d0d0d">{_e(m["headline"])}</p>')
+    _hh = m["health"]
+    if _hh.get("score") is not None:
+        parts.append(f'<p style="font-size:10pt;margin:2pt 0 6pt"><b><font color="{_hh["color"]}">'
+                     f'Citation health: {_hh["score"]}/100 — {_e(_hh["grade"])}</font></b></p>')
     if "summary" in sec:
         cells = "".join(
-            f'<td style="text-align:center;border:1px solid #e5e7eb;padding:6pt">'
-            f'<b style="font-size:14pt">{s.get(k, 0)}</b><br/><font color="#6b7280" style="font-size:8pt">{l}</font></td>'
+            f'<td style="text-align:center;border:1px solid #e5e5e5;padding:6pt">'
+            f'<b style="font-size:14pt"><font color="{_STATUS_COLOR.get(k, "#0d0d0d")}">{s.get(k, 0)}</font></b>'
+            f'<br/><font color="#8e8ea0" style="font-size:8pt">{l}</font></td>'
             for k, l in [("total", "refs"), ("verified", "verified"), ("warning", "warnings"),
                          ("error", "errors"), ("unverified", "unverified")])
         parts.append(f'<table style="width:100%;border-collapse:collapse;margin:6pt 0"><tr>{cells}</tr></table>')
     if "ai" in sec and m["ai"]:
         ai = m["ai"]
         band = ai.get("band") or "unavailable"
-        bc = _BAND_COLOR.get(band, "#6b7280")
-        parts.append('<h2 style="font-size:12pt;margin:12pt 0 4pt">AI-text detection</h2>')
+        bc = _BAND_COLOR.get(band, "#8e8ea0")
+        parts.append(f'{_h2}AI-text detection</h2>')
         parts.append(f'<p><b><font color="{bc}">AI-likelihood: {_e(band.capitalize())}</font></b><br/>'
-                     f'<font color="#6b7280" style="font-size:9pt">{_e(ai.get("summary"))}</font></p>')
-        parts.append(f'<p style="color:#6b7280;font-size:8pt;margin:4pt 0">⚠ {_e(_ai_disclaimer(ai))}</p>')
+                     f'<font color="#8e8ea0" style="font-size:9pt">{_e(ai.get("summary"))}</font></p>')
+        parts.append(f'<p style="color:#8e8ea0;font-size:8pt;margin:4pt 0">⚠ {_e(_ai_disclaimer(ai))}</p>')
     if "references" in sec:
-        parts.append('<h2 style="font-size:12pt;margin:12pt 0 4pt">References</h2>')
+        parts.append(f'{_h2}References</h2>')
         parts.append(f'<table style="width:100%;border-collapse:collapse">{"".join(rows_html)}</table>')
-    parts.append('<p style="color:#9ca3af;font-size:8pt;margin-top:14pt">Generated by RefChecker · '
-                 'a verification aid, not a determination of misconduct.</p>')
+    parts.append('<p style="color:#9aa0ad;font-size:8pt;margin-top:14pt;border-top:1px solid #e5e5e5;padding-top:6pt">'
+                 'Generated by RefChecker · a verification aid, not a determination of misconduct.</p>')
     body = "".join(parts)
-    return f'<html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#111827">{body}</body></html>'
+    return f'<html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#0d0d0d">{body}</body></html>'
 
 
 def _render_pdf_from_html(html_str: str) -> bytes:
@@ -724,52 +836,64 @@ def _docx_para(text: str, *, size: int = 22, bold: bool = False, color: Optional
 def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
     sec = m["sections"]
     s = m["stats"]
-    blocks = [_docx_para(m["title"], size=36, bold=True)]
+    # Brand line — RefChecker accent (#10a37f) so the Word doc shares the app's
+    # voice. Colours below are the app's real light-theme tokens (docs/design.md).
+    blocks = [_docx_para("RefChecker · reference verification report", size=18, bold=True, color="10A37F", space_after=40)]
+    blocks.append(_docx_para(m["title"], size=36, bold=True))
     if m["ts"]:
-        blocks.append(_docx_para(str(m["ts"]), size=18, color="6B7280", italic=True))
+        blocks.append(_docx_para(str(m["ts"]), size=18, color="8E8EA0", italic=True))
     blocks.append(_docx_para(f"Verdict: {m['headline']}", size=24, bold=True,
-                             color=_BAND_COLOR.get(m["severity"], "#6b7280").lstrip("#").upper()))
+                             color=_BAND_COLOR.get(m["severity"], "#8e8ea0").lstrip("#").upper()))
     if m["health"].get("score") is not None:
         blocks.append(_docx_para(f"Citation health: {m['health']['score']}/100 ({m['health']['grade']})",
                                  size=22, bold=True, color=m["health"]["color"].lstrip("#").upper()))
     if "summary" in sec:
-        blocks.append(_docx_para("Summary", size=28, bold=True))
+        blocks.append(_docx_para("Summary", size=28, bold=True, color="10A37F"))
         for label, key in [("References", "total"), ("Verified", "verified"), ("Warnings", "warning"),
                            ("Errors", "error"), ("Hallucinated", "hallucinated"), ("Unverified", "unverified")]:
-            blocks.append(_docx_para(f"{label}: {s.get(key, 0)}", size=22, space_after=20))
+            tint = _STATUS_COLOR.get(key, "").lstrip("#").upper() or None
+            blocks.append(_docx_para(f"{label}: {s.get(key, 0)}", size=22, space_after=20, color=tint))
     if "ai" in sec and m["ai"]:
         ai = m["ai"]
         band = ai.get("band") or "unavailable"
-        blocks.append(_docx_para("AI-text detection", size=28, bold=True))
+        blocks.append(_docx_para("AI-text detection", size=28, bold=True, color="10A37F"))
         blocks.append(_docx_para(f"AI-likelihood: {band.capitalize()}", size=22, bold=True,
-                                 color=_BAND_COLOR.get(band, "#6b7280").lstrip("#").upper()))
+                                 color=_BAND_COLOR.get(band, "#8e8ea0").lstrip("#").upper()))
         if ai.get("summary"):
-            blocks.append(_docx_para(str(ai["summary"]), size=20, color="6B7280"))
-        blocks.append(_docx_para(f"⚠ {_ai_disclaimer(ai)}", size=18, color="6B7280", italic=True))
+            blocks.append(_docx_para(str(ai["summary"]), size=20, color="8E8EA0"))
+        blocks.append(_docx_para(f"⚠ {_ai_disclaimer(ai)}", size=18, color="8E8EA0", italic=True))
     if "issues" in sec:
         problems = [r for r in m["rows"] if r["errors"] or r["major"]]
-        blocks.append(_docx_para(f"Issues to address ({len(problems)})", size=28, bold=True))
+        blocks.append(_docx_para(f"Issues to address ({len(problems)})", size=28, bold=True, color="10A37F"))
         if not problems:
-            blocks.append(_docx_para("No errors or major warnings.", size=22, color="6B7280", italic=True))
+            blocks.append(_docx_para("No errors or major warnings.", size=22, color="8E8EA0", italic=True))
         for r in problems:
             blocks.append(_docx_para(f"{r['num']}. {r['title']}", size=22, bold=True, space_after=20))
             for d in r["errors"]:
-                blocks.append(_docx_para(f"   ⛔ {d}", size=20, color="B91C1C", space_after=20))
+                blocks.append(_docx_para(f"   ⛔ {d}", size=20, color="EF4146", space_after=20))
             for d in r["major"]:
-                blocks.append(_docx_para(f"   ⚠ {d}", size=20, color="B45309", space_after=20))
+                blocks.append(_docx_para(f"   ⚠ {d}", size=20, color="F59E0B", space_after=20))
             if r.get("corrected"):
-                blocks.append(_docx_para(f"   ✎ Suggested: {r['corrected']}", size=20, color="047857"))
+                blocks.append(_docx_para(f"   ✎ Suggested: {r['corrected']}", size=20, color="10A37F"))
     if "references" in sec:
-        blocks.append(_docx_para(f"All references ({s['total']})", size=28, bold=True))
+        blocks.append(_docx_para(f"All references ({s['total']})", size=28, bold=True, color="10A37F"))
+        # Status legend — same traffic-light language as the HTML chips / Markdown.
+        legend = "  ".join(f"{_STATUS_EMOJI[k]} {_STATUS_LABEL[k]}"
+                           for k in ("verified", "warning", "error", "hallucinated", "unverified"))
+        blocks.append(_docx_para(legend, size=18, color="8E8EA0", space_after=60))
         for r in m["rows"]:
-            blocks.append(_docx_para(f"[{r['status']}] {r['num']}. {r['title']}", size=22, bold=True, space_after=20))
+            emoji = _STATUS_EMOJI.get(r["status"], "")
+            label = _STATUS_LABEL.get(r["status"], r["status"])
+            tint = _STATUS_COLOR.get(r["status"], "#8e8ea0").lstrip("#").upper()
+            blocks.append(_docx_para(f"{emoji} [{label}] {r['num']}. {r['title']}", size=22, bold=True,
+                                     color=tint, space_after=20))
             meta = r["meta"] + (f"  {r['url']}" if r["url"] else "")
             if meta.strip():
-                blocks.append(_docx_para(f"   {meta}", size=18, color="6B7280", space_after=20))
+                blocks.append(_docx_para(f"   {meta}", size=18, color="8E8EA0", space_after=20))
             for d in r["minor"]:
-                blocks.append(_docx_para(f"   · {d} (minor)", size=18, color="9CA3AF", space_after=20))
+                blocks.append(_docx_para(f"   · {d} (minor)", size=18, color="9AA0AD", space_after=20))
     blocks.append(_docx_para("Generated by RefChecker — a verification aid, not a determination of misconduct.",
-                             size=16, color="9CA3AF", italic=True))
+                             size=16, color="9AA0AD", italic=True))
     return blocks
 
 
@@ -829,7 +953,8 @@ def _batch_models(checks: Sequence[Dict[str, Any]], *, corrections: bool,
 def serialize_batch_to_markdown(checks: Sequence[Dict[str, Any]], *, corrections: bool = False,
                                 sections: Optional[Set[str]] = None, label: str = "Batch report") -> str:
     overall, models = _batch_models(checks, corrections=corrections, sections=sections)
-    out = [f"# {label}", "", f"**{overall['papers']} papers · {overall['total']} references**", ""]
+    out = [f"# {label}", "", "_RefChecker batch verification report_", "",
+           f"**{overall['papers']} papers · {overall['total']} references**", ""]
     out.append("| Paper | Refs | Verified | Warnings | Errors | Verdict |")
     out.append("| --- | --- | --- | --- | --- | --- |")
     for m in models:
@@ -849,8 +974,8 @@ def serialize_batch_to_html(checks: Sequence[Dict[str, Any]], *, corrections: bo
     overall, models = _batch_models(checks, corrections=corrections, sections=sections)
     rows = "".join(
         f'<tr><td>{_e(m["title"])}</td><td>{m["stats"]["total"]}</td>'
-        f'<td>{m["stats"]["verified"]}</td><td>{m["stats"]["warning"]}</td>'
-        f'<td style="color:#dc2626">{m["stats"]["error"]}</td><td class="muted small">{_e(m["headline"])}</td></tr>'
+        f'<td style="color:var(--verified)">{m["stats"]["verified"]}</td><td style="color:var(--warning)">{m["stats"]["warning"]}</td>'
+        f'<td style="color:var(--error)">{m["stats"]["error"]}</td><td class="muted small">{_e(m["headline"])}</td></tr>'
         for m in models
     )
     overview = (f'<h1>{_e(label)}</h1>'
@@ -866,8 +991,10 @@ def serialize_batch_to_html(checks: Sequence[Dict[str, Any]], *, corrections: bo
             f'<div class="stat"><div class="num">{v}</div><div class="lbl">{l}</div></div>'
             for v, l in [(s["total"], "references"), (s["verified"], "verified"),
                          (s["warning"], "warnings"), (s["error"], "errors")])
-        body = [f'<h2 style="font-size:18px;border-top:2px solid var(--border);padding-top:18px">{_e(m["title"])}</h2>',
-                f'<div class="verdict" style="border-color:{_BAND_COLOR.get(m["severity"], "#6b7280")}">{_e(m["headline"])}</div>']
+        _sev = _BAND_COLOR.get(m["severity"], "#8e8ea0")
+        body = [f'<h2 style="font-size:17px;text-transform:none;letter-spacing:-0.01em;color:var(--fg);border-top:1px solid var(--border);padding-top:22px;margin-top:8px">{_e(m["title"])}</h2>',
+                f'<div class="verdict" style="border-left-color:{_sev}">'
+                f'<span class="vdot" style="background:{_sev}"></span>{_e(m["headline"])}</div>']
         if "summary" in m["sections"]:
             body.append(f'<div class="stats">{cards}</div>')
         if "ai" in m["sections"] and m["ai"]:
@@ -875,7 +1002,8 @@ def serialize_batch_to_html(checks: Sequence[Dict[str, Any]], *, corrections: bo
         if "references" in m["sections"]:
             body.append(f'<section class="card"><ul class="refs">{"".join(_ref_row_html(r) for r in m["rows"])}</ul></section>')
         per_paper.append("".join(body))
-    inner = (f'<header class="top"><span class="brand">RefChecker</span></header>{overview}'
+    inner = (f'<header class="top"><span class="brand">{_WORDMARK_SVG}Ref<span class="accent">Checker</span></span>'
+             f'<span class="muted small">Batch verification report</span></header>{overview}'
              + "".join(per_paper)
              + '<footer>Generated by RefChecker · a verification aid, not a determination of misconduct.</footer>')
     return _html_doc(label, inner)
@@ -885,28 +1013,35 @@ def render_batch_to_pdf(checks: Sequence[Dict[str, Any]], *, corrections: bool =
                         sections: Optional[Set[str]] = None, label: str = "Batch report") -> bytes:
     overall, models = _batch_models(checks, corrections=corrections, sections=sections)
     rows = "".join(
-        f'<tr><td style="padding:3pt 6pt;border-bottom:1px solid #e5e7eb">{_e(m["title"][:70])}</td>'
-        f'<td style="padding:3pt 6pt;border-bottom:1px solid #e5e7eb;text-align:center">{m["stats"]["total"]}</td>'
-        f'<td style="padding:3pt 6pt;border-bottom:1px solid #e5e7eb;text-align:center;color:#dc2626">{m["stats"]["error"]}</td></tr>'
+        f'<tr><td style="padding:3pt 6pt;border-bottom:1px solid #e5e5e5">{_e(m["title"][:70])}</td>'
+        f'<td style="padding:3pt 6pt;border-bottom:1px solid #e5e5e5;text-align:center">{m["stats"]["total"]}</td>'
+        f'<td style="padding:3pt 6pt;border-bottom:1px solid #e5e5e5;text-align:center;color:#10a37f">{m["stats"]["verified"]}</td>'
+        f'<td style="padding:3pt 6pt;border-bottom:1px solid #e5e5e5;text-align:center;color:#ef4146">{m["stats"]["error"]}</td></tr>'
         for m in models
     )
-    overview = (f'<h1 style="font-size:16pt">{_e(label)}</h1>'
-                f'<p style="color:#6b7280;font-size:9pt">{overall["papers"]} papers · {overall["total"]} references</p>'
-                '<table style="width:100%;border-collapse:collapse;font-size:9pt">'
-                '<tr style="text-align:left"><th>Paper</th><th>Refs</th><th>Errors</th></tr>'
+    overview = ('<p style="font-size:10pt;margin:0 0 6pt;border-bottom:2px solid #10a37f;padding-bottom:5pt">'
+                '<b><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
+                '<font color="#8e8ea0" style="font-size:8pt">  ·  batch verification report</font></p>'
+                f'<h1 style="font-size:16pt;color:#0d0d0d;margin:6pt 0 4pt">{_e(label)}</h1>'
+                f'<p style="color:#8e8ea0;font-size:9pt">{overall["papers"]} papers · {overall["total"]} references</p>'
+                '<table style="width:100%;border-collapse:collapse;font-size:9pt;margin-top:6pt">'
+                '<tr style="text-align:left"><th style="border-bottom:1px solid #e5e5e5;padding:3pt 6pt;color:#676767">Paper</th>'
+                '<th style="border-bottom:1px solid #e5e5e5;padding:3pt 6pt;color:#676767">Refs</th>'
+                '<th style="border-bottom:1px solid #e5e5e5;padding:3pt 6pt;color:#676767">Verified</th>'
+                '<th style="border-bottom:1px solid #e5e5e5;padding:3pt 6pt;color:#676767">Errors</th></tr>'
                 f'{rows}</table>')
-    pages = [f'<html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#111827">{overview}</body></html>']
     parts = [overview]
     for m in models:
         parts.append('<div style="page-break-before:always"></div>')
         parts.append(_pdf_html_inner(m))
-    full = f'<html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#111827">{"".join(parts)}</body></html>'
+    full = f'<html><head><meta charset="utf-8"/></head><body style="font-family:sans-serif;color:#0d0d0d">{"".join(parts)}</body></html>'
     return _render_pdf_from_html(full)
 
 
 def _pdf_html_inner(m: Dict[str, Any]) -> str:
     # Reuse the single-check print HTML but strip the outer <html> wrapper.
-    full = _pdf_html_for_model(m)
+    # Per-paper pages drop the wordmark header (it already led the overview page).
+    full = _pdf_html_for_model(m, header=False)
     start = full.find("<body")
     start = full.find(">", start) + 1
     end = full.rfind("</body>")

@@ -10,6 +10,7 @@ import TeamMenu from './components/Auth/TeamMenu'
 import SupportMenu from './components/common/SupportMenu'
 import { logger } from './utils/logger'
 import { useAuthStore } from './stores/useAuthStore'
+import { useSettingsStore } from './stores/useSettingsStore'
 import { isTauri, openExternal } from './utils/tauriBridge'
 import { useStyleStore } from './stores/useStyleStore'
 
@@ -25,6 +26,9 @@ function App() {
   // Auth state
   const { user, authRequired, isLoading: authLoading, init: initAuth } = useAuthStore()
   const loadStylePreferences = useStyleStore(s => s.loadPreferences)
+  // Lets the header open Settings straight to the Accounts & Teams pane — the
+  // canonical entry point for sign-in/teams, reachable even in single-user mode.
+  const openSettings = useSettingsStore(s => s.openSettings)
 
   // Initialise auth once on mount
   useEffect(() => {
@@ -186,9 +190,30 @@ function App() {
             </a>
             {/* Help & support: GitHub issue + email the maintainers */}
             <SupportMenu />
-            {/* Teams switcher/menu (only visible when auth is enabled) */}
+            {/* Teams switcher/menu (only visible when auth is enabled + signed in) */}
             <TeamMenu />
-            {/* User menu (only visible when auth is enabled) */}
+            {/* Accounts & Teams entry point — always reachable. When auth is
+                enabled but signed out, it's an explicit "Sign in" button; in
+                single-user desktop mode it opens the pane explaining how to
+                enable accounts + teams. Hidden once a user is signed in
+                (UserMenu takes over below). */}
+            {!(authRequired && user) && (
+              <button
+                type="button"
+                onClick={() => openSettings('Accounts')}
+                className="text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1.5"
+                aria-label={authRequired ? 'Sign in' : 'Accounts and teams'}
+                title={authRequired ? 'Sign in' : 'Accounts & Teams'}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {authRequired && (
+                  <span className="hidden sm:inline text-sm font-medium">Sign in</span>
+                )}
+              </button>
+            )}
+            {/* User menu (only visible when auth is enabled + signed in) */}
             <UserMenu />
           </div>
         </header>
