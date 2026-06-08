@@ -4131,6 +4131,11 @@ class ProgressRefChecker:
                         except asyncio.CancelledError:
                             for t in ha_pending:
                                 t.cancel()
+                            # Don't leave the not-yet-finished refs spinning on
+                            # "Checking for hallucination with LLM…" forever.
+                            for _c_idx, _t in ha_tasks:
+                                if results.get(_c_idx) and results[_c_idx].get('hallucination_check_pending'):
+                                    results[_c_idx]['hallucination_check_pending'] = False
                             raise
 
                         ha_done, ha_pending = await asyncio.wait(
@@ -4234,7 +4239,14 @@ class ProgressRefChecker:
         for idx in range(total_refs):
             if results.get(idx):
                 results[idx].pop('_raw_errors', None)
-        
+                # Never persist a reference stuck on "Checking for hallucination
+                # with LLM…": by the time we build the final list the check is
+                # over, so any lingering pending flag (e.g. the hallucination
+                # phase was interrupted/skipped) must be cleared so the card
+                # doesn't show a spinner forever on reload.
+                if results[idx].get('hallucination_check_pending'):
+                    results[idx]['hallucination_check_pending'] = False
+
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
 

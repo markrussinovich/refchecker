@@ -453,11 +453,13 @@ test.describe('RefChecker Web UI', () => {
     // Wait for summary to be visible
     await expect(page.getByText('Summary')).toBeVisible();
     
-    // Verify the issue chips show correct counts (the rounded pill buttons with "X Errors", "X Warnings", etc.)
-    // These are the chips on the right side of the StatsSection
-    // Use getByRole with exact name to target the correct buttons
+    // Verify the issue chips show correct counts. These chips count REFERENCES
+    // per issue type (matching the References status row), NOT raw issue items —
+    // so Ref 3 (which has an error AND a warning) is an error reference, leaving
+    // exactly 1 warning-only reference (Ref 2). 1 error ref, 1 warning-only ref,
+    // 1 suggestion-only ref.
     await expect(page.getByRole('button', { name: '1 Errors', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '2 Warnings', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Warnings', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '1 Suggestions', exact: true })).toBeVisible();
     
     // Verify suggestion is displayed as "Suggestion:" not "Error:"

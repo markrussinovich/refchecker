@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { getCheckGaps } from '../../utils/api'
+import { getCheckGaps, addReferenceToCheck } from '../../utils/api'
+import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 
 /**
@@ -21,6 +22,27 @@ export default function GapFinder({ checkId, references }) {
       setState({ loading: false, data: res.data, error: null })
     } catch (e) {
       setState({ loading: false, data: null, error: e?.response?.data?.detail || e?.message || 'Gap analysis failed' })
+    }
+  }
+
+  // Per-suggestion "add to references" state: key -> 'adding'|'done'|'error'.
+  const [added, setAdded] = useState({})
+  const keyOf = (s, i) => s.openalex_id || s.doi || `i${i}`
+  const addToRefs = async (s, i) => {
+    const k = keyOf(s, i)
+    setAdded((a) => ({ ...a, [k]: 'adding' }))
+    try {
+      await addReferenceToCheck(checkId, {
+        title: s.title,
+        year: s.year,
+        doi: s.doi || undefined,
+        cited_url: s.doi ? `https://doi.org/${s.doi}` : undefined,
+      })
+      // Refresh the check so the new reference appears in the list.
+      await useHistoryStore.getState().selectCheck?.(checkId, { force: true })
+      setAdded((a) => ({ ...a, [k]: 'done' }))
+    } catch (e) {
+      setAdded((a) => ({ ...a, [k]: 'error' }))
     }
   }
 
@@ -57,6 +79,18 @@ export default function GapFinder({ checkId, references }) {
                   <a href={doiLink(s.doi)} onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(doiLink(s.doi)) } }}
                     target="_blank" rel="noopener noreferrer" className="ml-1.5 underline text-xs" style={{ color: 'var(--color-accent)' }}>DOI ↗</a>
                 )}
+                {(() => {
+                  const st = added[keyOf(s, i)]
+                  if (st === 'done') return <span className="ml-1.5 text-xs font-medium" style={{ color: 'var(--color-success)' }}>✓ Added</span>
+                  if (st === 'error') return <span className="ml-1.5 text-xs" style={{ color: 'var(--color-error)' }}>add failed</span>
+                  return (
+                    <button type="button" onClick={() => addToRefs(s, i)} disabled={st === 'adding'}
+                      className="ml-1.5 text-xs underline" style={{ color: 'var(--color-accent)', opacity: st === 'adding' ? 0.6 : 1 }}
+                      title="Add this work to the reference list and re-verify">
+                      {st === 'adding' ? 'Adding…' : '+ Add to references'}
+                    </button>
+                  )
+                })()}
               </li>
             ))}
           </ul>
