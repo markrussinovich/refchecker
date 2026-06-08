@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getPaperText } from '../../utils/api'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
 import { ZoomControls, FindBar } from '../common/ViewerControls'
+import NativePdfViewer from './NativePdfViewer'
 
 /**
  * In-document highlighter. Fetches the extracted body text of a check's source
@@ -85,7 +86,11 @@ function mergeRanges(ranges) {
   return out
 }
 
-export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose }) {
+export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose, onJumpToReference }) {
+  // Native PDF first; fall back to the extracted-text view when there's no
+  // source PDF (pasted text / .bib / .tex) or pdf.js can't render it.
+  const [mode, setMode] = useState('pdf') // 'pdf' | 'text'
+  const [pdfLocated, setPdfLocated] = useState(0)
   const [state, setState] = useState({ loading: true, text: '', error: null, available: true, truncated: false })
   const [zoom, setZoom] = useState(1)
   const [findOpen, setFindOpen] = useState(false)
@@ -99,6 +104,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
 
   useEffect(() => {
+    if (mode !== 'text') return        // only fetch text once we fall back to it
     let alive = true
     setState((s) => ({ ...s, loading: true, error: null }))
     getPaperText(checkId)
@@ -117,7 +123,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
           error: e?.response?.data?.detail || e?.message || 'Could not load the document text.' })
       })
     return () => { alive = false }
-  }, [checkId])
+  }, [checkId, mode])
 
   const { nodes, located, missing, spanToMark, findCount } = useMemo(() => {
     const text = state.text || ''
@@ -267,17 +273,18 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                       background: 'var(--color-bg-secondary)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 14 }}>Flagged passages in document</strong>
-            {!state.loading && state.available && (
+            {((mode === 'pdf') || (!state.loading && state.available)) && spans.length > 0 && (
               <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                 <mark style={{ backgroundColor: 'var(--color-mark-bg, rgba(239,68,68,0.22))', padding: '0 4px', borderRadius: 3 }}>highlighted</mark>
-                {' '}{located} of {spans.length} located
-                {missing > 0 ? ` · ${missing} not found` : ''}
-                {state.truncated ? ' · truncated' : ''}
+                {' '}{mode === 'pdf' ? pdfLocated : located} of {spans.length} located
+                {mode === 'text' && missing > 0 ? ` · ${missing} not found` : ''}
+                {mode === 'text' && state.truncated ? ' · truncated' : ''}
+                {mode === 'pdf' ? ' · native PDF' : ''}
               </span>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {!state.loading && state.available && (
+            {mode === 'text' && !state.loading && state.available && (
               findOpen ? (
                 <FindBar
                   value={findQuery}
@@ -294,10 +301,10 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                   style={btn} title="Find in document (⌘F)">⌕ Find</button>
               )
             )}
-            {!state.loading && state.available && (
+            {((mode === 'pdf') || (!state.loading && state.available)) && (
               <ZoomControls zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={() => setZoom(1)} min={ZOOM_MIN} max={ZOOM_MAX} />
             )}
-            {!state.loading && state.available && located > 1 && (
+            {mode === 'text' && !state.loading && state.available && located > 1 && (
               <>
                 <button type="button" onClick={() => gotoMark(-1)} style={btn} title="Previous passage">↑</button>
                 <button type="button" onClick={() => gotoMark(1)} style={btn} title="Next passage">↓</button>
@@ -309,6 +316,14 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
 
         <div ref={scrollRef} style={{ overflow: 'auto', padding: '20px 18px',
                                       background: 'var(--color-bg-secondary)' }}>
+          {mode === 'pdf' && (
+            <NativePdfViewer
+              checkId={checkId} spans={spans} focusSpanIndex={focusSpanIndex} zoom={zoom}
+              onJumpToReference={onJumpToReference}
+              onUnavailable={() => setMode('text')} onLocated={setPdfLocated}
+            />
+          )}
+          {mode === 'text' && (<>
           {state.loading && (<div style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>Extracting document text…</div>)}
           {!state.loading && state.error && (<div style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>{state.error}</div>)}
           {!state.loading && !state.error && !state.available && (
@@ -346,6 +361,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
               </div>
             </>
           )}
+          </>)}
         </div>
       </div>
     </div>

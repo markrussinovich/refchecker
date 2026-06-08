@@ -3408,6 +3408,44 @@ def _write_cached_paper_text(path: str, text: str) -> None:
         pass
 
 
+@app.get("/api/paper-pdf/{check_id}")
+async def get_paper_pdf(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Serve the original source PDF for a check (uploaded file or the PDF cached
+    during the check), so the frontend can render it natively with PDF.js.
+
+    Returns 404 when the source isn't a PDF (pasted text, .bib/.tex) or the cached
+    file was cleared — the viewer then falls back to the extracted-text view.
+    Real-data only: never synthesises a PDF.
+    """
+    check = await _get_owned_check_or_404(check_id, current_user)
+    source_type = check.get('source_type', '') or ''
+    paper_source = check.get('paper_source', '') or ''
+
+    pdf_path = None
+    # 1) Uploaded local PDF.
+    if (source_type == 'file' and paper_source
+            and paper_source.lower().endswith('.pdf') and os.path.exists(paper_source)):
+        pdf_path = paper_source
+    # 2) URL / DOI input — reuse the PDF cached during the check (same artifacts
+    #    the text extractor reads, so availability matches the text view).
+    if not pdf_path and paper_source:
+        try:
+            from refchecker.utils.cache_utils import get_cached_artifact_path
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                for artifact in ("ai_body.pdf", "paper.pdf"):
+                    p = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                    if p and os.path.exists(p) and os.path.getsize(p) > 0:
+                        pdf_path = p
+                        break
+        except Exception as _e:  # noqa: BLE001
+            logger.debug("paper-pdf cache lookup failed: %s", _e)
+
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No source PDF available for this check")
+    return FileResponse(pdf_path, media_type="application/pdf", headers=_private_artifact_headers())
+
+
 @app.get("/api/paper-text/{check_id}")
 async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """Return the extracted body text of a check's source document.

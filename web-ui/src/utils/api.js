@@ -260,6 +260,12 @@ export const getLLMUsage = (checkId) =>
 export const getPaperText = (checkId) =>
   api.get(`/paper-text/${checkId}`, { timeout: 60000 })
 
+// Fetch the original source PDF bytes (for native PDF.js rendering). Goes
+// through axios (cookies/auth) and returns an ArrayBuffer; 404 when the source
+// isn't a PDF (the viewer then falls back to the extracted-text view).
+export const getPaperPdf = (checkId) =>
+  api.get(`/paper-pdf/${checkId}`, { responseType: 'arraybuffer', timeout: 60000 })
+
 // Resolve a DOI to title/authors/year/venue via CrossRef
 export const resolveDoi = (doi) =>
   api.get('/doi/resolve', { params: { doi } })
