@@ -36,7 +36,7 @@ if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
 
 import aiosqlite
 from .database import db, get_data_dir, get_logs_dir
-from .websocket_manager import manager
+from .websocket_manager import manager, presence
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
@@ -1495,6 +1495,45 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id)
         logger.info(f"WebSocket disconnected: {session_id}")
+
+
+@app.websocket("/api/ws/presence/{room_id}")
+async def presence_endpoint(websocket: WebSocket, room_id: str):
+    """Realtime presence for a shared room (batch/check id) — issue #67.
+
+    Authenticated users who open the same ``room_id`` see each other via
+    presence_join / presence_leave / presence_state messages. Presence requires
+    a real identity, so it only works when OAuth is configured (multi-user mode);
+    in single-user mode there is no "team" to show, so we close the socket.
+    """
+    if not get_available_providers():
+        await websocket.close(code=4003, reason="Presence requires multi-user mode")
+        return
+
+    token = websocket.cookies.get("rc_auth")
+    if not token:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    token_data = decode_access_token(token)
+    if not token_data:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    user = {
+        "user_id": token_data.user_id,
+        "name": token_data.name,
+        "email": token_data.email,
+    }
+    await websocket.accept()
+    await presence.join(websocket, room_id, user)
+    try:
+        # Keep the connection open; presence is driven by connect/disconnect.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await presence.leave(websocket, room_id)
 
 
 @app.post("/api/check")

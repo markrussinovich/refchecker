@@ -4,6 +4,7 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { openExternal } from '../../utils/tauriBridge'
 import ShareModal from '../Modals/ShareModal'
+import PresenceAvatars from '../Presence/PresenceAvatars'
 
 /**
  * Batch summary view (v0.7.45) — the dedicated MainPanel page that
@@ -260,6 +261,8 @@ export default function BatchSummaryView() {
               {agg.cancelled > 0 && <span style={{ color: STATUS_COLOR.cancelled }}> · {agg.cancelled} cancelled</span>}
             </div>
           </div>
+          {/* Realtime presence — team members viewing this same batch (#67) */}
+          {batchId && <PresenceAvatars roomId={`batch-${batchId}`} />}
           {agg.completed > 0 && (
             <button
               onClick={() => setShowShare(true)}

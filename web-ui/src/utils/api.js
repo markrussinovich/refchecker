@@ -283,6 +283,28 @@ export const backfillSeenReferences = () =>
 export const fetchUsageTotals = () => api.get('/usage/totals')
 export const resetUsageTotals = () => api.delete('/usage/totals')
 
+// Presence WebSocket factory (issue #67) — connects to a shared room
+// (batch/check id) so team members viewing the same batch see each other.
+// Cookie auth is sent automatically by the browser for same-origin WS.
+export const createPresenceWebSocket = (roomId, handlers) => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  const wsUrl = `${protocol}//${host}/api/ws/presence/${encodeURIComponent(roomId)}`
+
+  const ws = new WebSocket(wsUrl)
+  ws.onopen = () => handlers.onOpen?.()
+  ws.onmessage = (event) => {
+    try {
+      handlers.onMessage?.(JSON.parse(event.data))
+    } catch (e) {
+      logger.error('Presence', 'Failed to parse message', e)
+    }
+  }
+  ws.onerror = (error) => handlers.onError?.(error)
+  ws.onclose = (event) => handlers.onClose?.(event)
+  return ws
+}
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
