@@ -11,6 +11,7 @@ import SeenReferencesView from './SeenReferencesView'
 import BatchSummaryView from './BatchSummaryView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
+import ExploreGraphView from './ExploreGraphView'
 import AIDetectionPanel from './AIDetectionPanel'
 import HealthBadge from './HealthBadge'
 import RetractionCheck from './RetractionCheck'
@@ -37,6 +38,7 @@ export default function MainPanel() {
   const [buttonLeft, setButtonLeft] = useState(null)
   const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
   const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
+  const [showExplore, setShowExplore] = useState(false) // ResearchRabbit-style fullscreen Explore graph overlay (#68)
 
   // When a citation highlight in the document links back to its reference,
   // make sure the References tab is showing so the target card can flash.
@@ -485,6 +487,24 @@ export default function MainPanel() {
               <GraphView references={displayRefs} paperTitle={displayPaperTitle} />
             </div>
             <div style={{ display: resultsTab === 'similar' ? 'block' : 'none' }}>
+              {/* ResearchRabbit-style Explore graph entry (#68): opens a
+                  fullscreen overlay graphing the similar / cites&refs
+                  neighbourhood of this check's references, by year. */}
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExplore(true)}
+                  className="text-xs px-2.5 py-1 rounded inline-flex items-center gap-1"
+                  style={{
+                    color: 'var(--color-accent, #3b82f6)',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                  title="Open a fullscreen graph of similar / cited papers, positioned by year"
+                >
+                  Explore graph →
+                </button>
+              </div>
               <SimilarPapersPanel
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
@@ -505,6 +525,18 @@ export default function MainPanel() {
         </>
         )}
       </div>
+
+      {/* ResearchRabbit-style Explore graph overlay (#68) — graphs the
+          similar / cites&refs neighbourhood of the current check's
+          references, positioned + coloured by year. Real data only. */}
+      {showExplore && (
+        <ExploreGraphView
+          references={displayRefs}
+          paperTitle={displayPaperTitle}
+          paperSource={displayPaperSource}
+          onClose={() => setShowExplore(false)}
+        />
+      )}
 
       {/* Scroll to top button - fixed position to the right of content column */}
       {showScrollTop && buttonLeft && (
