@@ -3441,9 +3441,37 @@ async def get_paper_pdf(check_id: int, current_user: UserInfo = Depends(require_
         except Exception as _e:  # noqa: BLE001
             logger.debug("paper-pdf cache lookup failed: %s", _e)
 
-    if not pdf_path:
-        raise HTTPException(status_code=404, detail="No source PDF available for this check")
-    return FileResponse(pdf_path, media_type="application/pdf", headers=_private_artifact_headers())
+    if pdf_path:
+        return FileResponse(pdf_path, media_type="application/pdf", headers=_private_artifact_headers())
+
+    # 3) No original PDF (pasted text / .tex / .bib / .txt / .md) — render the
+    #    extracted body text into a clean, self-contained PDF so the SAME native
+    #    pdf.js viewer (with highlights + back-links) is used for every source.
+    #    Cached as {check_id}.gen.pdf. Real-data only: the PDF is exactly the
+    #    extracted text. Any failure falls through to 404 → the text view.
+    try:
+        cache_dir = await _get_configured_cache_dir()
+        if cache_dir:
+            text_dir = os.path.join(str(cache_dir), "paper_text")
+            gen_path = os.path.join(text_dir, f"{check_id}.gen.pdf")
+            if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+            # Prefer the already-cached extracted text; else extract on demand.
+            text = ""
+            txt_path = os.path.join(text_dir, f"{check_id}.txt")
+            if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
+                text = await asyncio.to_thread(_read_cached_paper_text, txt_path)
+            if not (text or "").strip():
+                text = await _extract_paper_text_for_check(check_id, check)
+            if (text or "").strip():
+                from backend.pdf_convert import text_to_pdf
+                title = check.get('title') or check.get('paper_title') or None
+                await asyncio.to_thread(text_to_pdf, text, gen_path, title)
+                return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+    except Exception as _e:  # noqa: BLE001
+        logger.debug("paper-pdf text→PDF conversion failed: %s", _e)
+
+    raise HTTPException(status_code=404, detail="No source PDF available for this check")
 
 
 @app.get("/api/paper-text/{check_id}")
