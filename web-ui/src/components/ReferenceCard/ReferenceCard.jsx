@@ -1529,10 +1529,14 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
             <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
           </span>
         )
+        const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
         const profileLinks = [
           orcidUrl && { label: 'ORCID', url: orcidUrl },
           openalexUrl && { label: 'OpenAlex', url: openalexUrl },
           s2Url && { label: 'Semantic Scholar', url: s2Url },
+          // Google Scholar has no author API — this is an honest name SEARCH
+          // (not a claimed profile), always available.
+          { label: 'Google Scholar', url: scholarUrl },
         ].filter(Boolean)
         return (
         <div
@@ -1541,12 +1545,15 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           style={{
             position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 60,
             minWidth: 300, maxWidth: 380,
+            maxHeight: '70vh', overflowY: 'auto',
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
             boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
             whiteSpace: 'normal',
           }}
+          onMouseEnter={onEnter}
+          onMouseLeave={onLeave}
         >
           {/* Header: avatar + name + affiliation */}
           <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
