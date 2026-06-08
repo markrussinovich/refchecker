@@ -941,9 +941,31 @@ class BatchLabelUpdate(BaseModel):
 
 
 class BatchUrlsRequest(BaseModel):
-    """Request model for batch URL submission"""
+    """Request model for batch URL submission.
+
+    Carries the same per-check configuration as the single-check endpoint —
+    the /api/check/batch handler reads all of these off the request, so they
+    must be declared here (previously only urls/batch_label were, which made
+    the handler raise AttributeError -> HTTP 500 on the first config read)."""
     urls: list[str]
     batch_label: Optional[str] = None
+    llm_config_id: Optional[LLMConfigId] = None
+    llm_provider: str = "anthropic"
+    llm_model: Optional[str] = None
+    hallucination_config_id: Optional[LLMConfigId] = None
+    hallucination_provider: Optional[str] = None
+    hallucination_model: Optional[str] = None
+    use_llm: bool = True
+    api_key: Optional[str] = None
+    hallucination_api_key: Optional[str] = None
+    semantic_scholar_api_key: Optional[str] = None
+    paperclip_api_key: Optional[str] = None
+    ai_detection_enabled: bool = False
+    ai_detection_backend: str = "local"
+    ai_detection_api_key: Optional[str] = None
+    ai_detection_consent: bool = False
+    ai_detection_service: str = "pangram"
+    detection_mode: str = "both"
 
 
 class TeamCreate(BaseModel):
