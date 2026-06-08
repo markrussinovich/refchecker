@@ -56,6 +56,10 @@ export const getAuthProviders = () => api.get('/auth/providers')
 export const getAuthMe = () => api.get('/auth/me', { timeout: 8000 })
 export const authLogout = () => api.post('/auth/logout')
 
+// User-scoped UI preferences
+export const getUserPreferences = () => api.get('/user/preferences')
+export const updateUserPreferences = (preferences) => api.put('/user/preferences', preferences)
+
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
 export const createLLMConfig = (config) => api.post('/llm-configs', config)

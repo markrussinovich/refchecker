@@ -463,7 +463,6 @@ export default function MainPanel() {
               <CorrectionsView
                 references={displayRefs}
                 isCheckComplete={isComplete}
-                paperSource={displayPaperSource}
               />
             </div>
             <div style={{ display: resultsTab === 'graph' ? 'block' : 'none' }}>

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   CITATION_STYLES,
   CITATION_STYLE_DEFAULTS,
   exportReferenceAsStyle,
-  exportResultsAsStyle,
   downloadAsFile,
   filterIssuesForStyle,
   formatIssueLine,
@@ -132,118 +131,15 @@ const STYLE_FONT = {
   plaintext: "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
 }
 
-/**
- * Pick a sensible default citation style based on the paper source. A
- * .bib input wants BibTeX back; a .tex input wants \bibitem; otherwise
- * BibTeX is a fine universal default. The user can still override via
- * the dropdown.
- */
-function detectDefaultStyle(paperSource) {
-  if (!paperSource) return 'bibtex'
-  const lower = String(paperSource).toLowerCase()
-  if (lower.endsWith('.bib') || lower.endsWith('.bbl')) return 'bibtex'
-  if (lower.endsWith('.tex')) return 'bibitem'
-  if (lower.endsWith('.txt')) return 'plaintext'
-  return 'bibtex'
-}
-
-/**
- * Best-effort inference of which citation style the user's bibliography
- * was written in, by sampling the cited_text of the first few refs.
- * Falls back to the source-extension default so existing behaviour is
- * preserved when references aren't extracted yet. Coarse heuristics —
- * the dropdown remains a free override.
- */
-function inferStyleFromReferences(references) {
-  if (!Array.isArray(references) || references.length === 0) return null
-  const samples = references
-    .map(r => (r?.cited_text || r?.raw_text || '').trim())
-    .filter(s => s.length > 20)
-    .slice(0, 8)
-  if (samples.length === 0) return null
-  let ieee = 0, vancouver = 0, mla = 0, apa = 0, chicago = 0
-  for (const s of samples) {
-    if (/^\s*\[\d+\]/.test(s)) ieee += 2
-    // Vancouver: "Surname AB" — initials with no periods stuck to surname.
-    if (/^[A-Z][a-zA-Z'-]+\s+[A-Z]{1,3}(,|\.|\s)/.test(s)) vancouver += 1
-    // APA: "Lastname, A. B. (yyyy)." — surname, comma, initials with
-    // periods, year in parens.
-    if (/^[A-Z][a-zA-Z'-]+,\s+[A-Z]\.\s*[A-Z]?\.?.*\(\d{4}[a-z]?\)/.test(s)) apa += 2
-    // MLA: "Lastname, First Last." — surname, comma, full given names,
-    // not initials, year usually mid-string not in parens.
-    if (/^[A-Z][a-zA-Z'-]+,\s+[A-Z][a-z]+\s+[A-Z][a-z]+/.test(s)) mla += 1
-    // Chicago author-date is close to APA but uses "lastname, firstname"
-    // with full given names + (year). Hard to disambiguate from MLA
-    // without more context, so leave Chicago weakly weighted.
-    if (/\(\d{4}[a-z]?\)/.test(s) && /[A-Z][a-z]+ [A-Z][a-z]+/.test(s)) chicago += 0.5
-  }
-  const tally = [
-    ['ieee', ieee], ['vancouver', vancouver],
-    ['apa', apa], ['mla', mla], ['chicago', chicago],
-  ].sort((a, b) => b[1] - a[1])
-  const [winner, score] = tally[0]
-  if (score >= 2) return winner
-  return null
-}
-
-export default function CorrectionsView({ references, isCheckComplete = false, paperSource = null }) {
-  const [format, setFormat] = useState(() => detectDefaultStyle(paperSource))
-  const [autoDetected, setAutoDetected] = useState(null)
-  const lastSourceRef = useRef(paperSource)
-  const userOverroteStyle = useRef(false)
-  useEffect(() => {
-    // Re-pick the default when navigating to a different check / new input
-    // so a .bib file doesn't keep showing as APA after a previous APA check.
-    if (lastSourceRef.current !== paperSource) {
-      lastSourceRef.current = paperSource
-      setFormat(detectDefaultStyle(paperSource))
-      setAutoDetected(null)
-      userOverroteStyle.current = false
-    }
-  }, [paperSource])
-
-  // Try to infer the style from the references themselves once they
-  // land. Only auto-promote it if the user hasn't already touched the
-  // dropdown — otherwise we'd fight their explicit choice (#24).
-  //
-  // Re-infer whenever any cited_text changes (not just the list length),
-  // so Re-verify / Apply Fix that swap text in place still trigger a
-  // fresh detection if the user hasn't overridden yet.
-  const refsTextSig = useMemo(() => {
-    if (!Array.isArray(references)) return 0
-    let sig = 0
-    for (let i = 0; i < references.length; i += 1) {
-      const t = references[i]?.cited_text || references[i]?.raw_text || ''
-      sig += t.length
-    }
-    return `${references.length}:${sig}`
-  }, [references])
-  useEffect(() => {
-    if (userOverroteStyle.current) return
-    const guess = inferStyleFromReferences(references)
-    if (guess && guess !== format) {
-      setAutoDetected(guess)
-      setFormat(guess)
-    } else if (guess) {
-      setAutoDetected(guess)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refsTextSig])
+export default function CorrectionsView({ references, isCheckComplete = false }) {
+  const format = useStyleStore(s => s.format)
+  const setFormat = useStyleStore(s => s.setFormat)
+  const styleOptions = useStyleStore(s => s.styleOptions)
+  const setStyleOptions = useStyleStore(s => s.setStyleOptions)
   const [copiedKey, setCopiedKey] = useState(null)
   const [showDiff, setShowDiff] = useState(true)
 
   // Citation-style overrides + custom-style builder.
-  const [styleOptions, setStyleOptions] = useState({})  // { max_authors, et_al_threshold, include_url }
-
-  // Mirror format + styleOptions into the shared store so other views
-  // (Suggest-alternative, References-tab actions, etc.) can render in
-  // the same style without each maintaining its own picker.
-  useEffect(() => {
-    useStyleStore.getState().setFormat(format)
-  }, [format])
-  useEffect(() => {
-    useStyleStore.getState().setStyleOptions(styleOptions)
-  }, [styleOptions])
   const [showStyleCustomize, setShowStyleCustomize] = useState(false)
   const [customStyles, setCustomStyles] = useState(() => listCustomCitationStyles())
   const [newCustomStyle, setNewCustomStyle] = useState({ id: '', label: '', template: '{authors} ({year}). {title}. {venue}. {url}' })
@@ -432,6 +328,10 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         // the displayed source of truth; the authoritative state loads on the
         // next natural navigation.
         await verifyReferenceInCheck(selectedCheckId, refIdStr, { apply_correction: true })
+        // NOTE (merge with upstream "Persist citation style preferences"):
+        // upstream added selectCheck({force:true}) here, but that wipes the
+        // _pre_correction optimistic snapshots and breaks Reset/Restore — kept
+        // our optimistic-update-as-source-of-truth behaviour instead.
       } catch (e) {
         /* re-verify is best-effort; the optimistic update stands */
       }
@@ -469,6 +369,8 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       // Persist the revert server-side; no force-reload (it would wipe the
       // optimistic snapshots — see applyAndReverify).
       await verifyReferenceInCheck(selectedCheckId, refIdStr, { overrides: snap })
+      // (see applyAndReverify) keep our no-force-reload behaviour so the
+      // optimistic Reset/Restore snapshots survive.
     } catch (e) {
       /* best-effort — the local decision flip already happened */
     }
@@ -533,7 +435,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       const worker = async () => {
         while (queue.length) {
           const { ref, i } = queue.shift()
-          try { await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true }) } catch {}
+          try { await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true }) } catch (_e) { /* best-effort */ }
         }
       }
       await Promise.all([worker(), worker(), worker(), worker()])
@@ -634,22 +536,9 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
               <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
               Highlight diff
             </label>
-            {autoDetected && autoDetected === format && (
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded"
-                style={{
-                  backgroundColor: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-muted)',
-                  border: '1px solid var(--color-border)',
-                }}
-                title="Auto-detected from the cited references"
-              >
-                auto
-              </span>
-            )}
             <select
               value={format}
-              onChange={(e) => { userOverroteStyle.current = true; setFormat(e.target.value) }}
+              onChange={(e) => setFormat(e.target.value, { userSelected: true })}
               className="px-2 py-1 rounded border text-xs"
               style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
               title="Citation style"
@@ -687,7 +576,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     type="number" min="1" max="50"
                     value={effectiveOptions.max_authors ?? ''}
                     placeholder={String(styleDefaults.max_authors ?? '')}
-                    onChange={(e) => setStyleOptions({ ...styleOptions, max_authors: e.target.value ? parseInt(e.target.value, 10) : null })}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, max_authors: e.target.value ? parseInt(e.target.value, 10) : null }, { userSelected: true })}
                     className="px-1.5 py-0.5 rounded border w-16"
                     style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
                   />
@@ -698,7 +587,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     type="number" min="2" max="50"
                     value={effectiveOptions.et_al_threshold ?? ''}
                     placeholder={String(styleDefaults.et_al_threshold ?? '')}
-                    onChange={(e) => setStyleOptions({ ...styleOptions, et_al_threshold: e.target.value ? parseInt(e.target.value, 10) : null })}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, et_al_threshold: e.target.value ? parseInt(e.target.value, 10) : null }, { userSelected: true })}
                     className="px-1.5 py-0.5 rounded border w-16"
                     style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
                   />
@@ -708,12 +597,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                   <input
                     type="checkbox"
                     checked={effectiveOptions.include_url !== false}
-                    onChange={(e) => setStyleOptions({ ...styleOptions, include_url: e.target.checked })}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, include_url: e.target.checked }, { userSelected: true })}
                   />
                   Include URL
                 </label>
                 <button
-                  onClick={() => setStyleOptions({})}
+                  onClick={() => setStyleOptions({}, { userSelected: true })}
                   className="ml-auto underline"
                   style={{ color: 'var(--color-text-muted)' }}
                 >Reset to style defaults</button>

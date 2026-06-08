@@ -1,4 +1,8 @@
 import { create } from 'zustand'
+import { logger } from '../utils/logger'
+import { getUserPreferences, updateUserPreferences } from '../utils/api'
+
+export const DEFAULT_CITATION_FORMAT = 'plaintext'
 
 /**
  * Shared citation style + style-options state.
@@ -14,14 +18,16 @@ const _KEY = 'refchecker:style'
 function loadInitial() {
   try {
     const raw = localStorage.getItem(_KEY)
-    if (!raw) return { format: 'plaintext', styleOptions: {} }
+    if (!raw) return { format: DEFAULT_CITATION_FORMAT, styleOptions: {}, hasUserPreference: false }
     const parsed = JSON.parse(raw)
+    const hasUserPreference = parsed.hasUserPreference === true
     return {
-      format: parsed.format || 'plaintext',
-      styleOptions: parsed.styleOptions || {},
+      format: hasUserPreference ? (parsed.format || DEFAULT_CITATION_FORMAT) : DEFAULT_CITATION_FORMAT,
+      styleOptions: hasUserPreference ? (parsed.styleOptions || {}) : {},
+      hasUserPreference,
     }
   } catch {
-    return { format: 'plaintext', styleOptions: {} }
+    return { format: DEFAULT_CITATION_FORMAT, styleOptions: {}, hasUserPreference: false }
   }
 }
 
@@ -30,18 +36,53 @@ function persist(state) {
     localStorage.setItem(_KEY, JSON.stringify({
       format: state.format,
       styleOptions: state.styleOptions,
+      hasUserPreference: state.hasUserPreference,
     }))
   } catch { /* quota / disabled */ }
 }
 
+function persistRemote(state) {
+  updateUserPreferences({
+    citation_format: state.format,
+    citation_style_options: state.styleOptions,
+  }).catch((e) => {
+    logger.warn('StyleStore', 'Failed to persist user style preference', e)
+  })
+}
+
 export const useStyleStore = create((set, get) => ({
   ...loadInitial(),
-  setFormat: (format) => {
-    set({ format })
-    persist(get())
+  isRemoteLoaded: false,
+  loadPreferences: async (options = {}) => {
+    try {
+      const response = await getUserPreferences()
+      const preferences = response.data || {}
+      if (!preferences.has_citation_format && options.seedFromLocal && get().hasUserPreference) {
+        persistRemote(get())
+        set({ isRemoteLoaded: true })
+        return
+      }
+      const next = {
+        format: preferences.citation_format || DEFAULT_CITATION_FORMAT,
+        styleOptions: preferences.citation_style_options || {},
+        hasUserPreference: Boolean(preferences.has_citation_format),
+        isRemoteLoaded: true,
+      }
+      set(next)
+      persist(get())
+    } catch (e) {
+      logger.warn('StyleStore', 'Failed to load user style preference', e)
+      set({ isRemoteLoaded: true })
+    }
   },
-  setStyleOptions: (styleOptions) => {
-    set({ styleOptions })
+  setFormat: (format, options = {}) => {
+    set({ format, hasUserPreference: options.userSelected ?? true })
     persist(get())
+    if (options.persistRemote !== false) persistRemote(get())
+  },
+  setStyleOptions: (styleOptions, options = {}) => {
+    set({ styleOptions, hasUserPreference: options.userSelected ?? get().hasUserPreference })
+    persist(get())
+    if (options.persistRemote !== false) persistRemote(get())
   },
 }))

@@ -427,6 +427,16 @@ class Database:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id INTEGER NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, key)
+                )
+            """)
+
             # Verification cache table - stores results keyed by reference content hash
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS verification_cache (
@@ -1750,6 +1760,30 @@ class Database:
                     value_encrypted = excluded.value_encrypted,
                     updated_at = CURRENT_TIMESTAMP
             """, (key, encrypt_secret(value)))
+            await db.commit()
+            return True
+
+    async def get_user_preference(self, user_id: int, key: str) -> Optional[str]:
+        """Get a per-user preference value."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT value FROM user_preferences WHERE user_id = ? AND key = ?",
+                (user_id, key),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row["value"] if row else None
+
+    async def set_user_preference(self, user_id: int, key: str, value: str) -> bool:
+        """Set a per-user preference value."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO user_preferences (user_id, key, value, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (user_id, key, value))
             await db.commit()
             return True
 

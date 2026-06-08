@@ -395,7 +395,7 @@ function SuggestionStylePicker() {
   return (
     <select
       value={format}
-      onChange={(e) => setFormat(e.target.value)}
+      onChange={(e) => setFormat(e.target.value, { userSelected: true })}
       className="text-xs px-2 py-1 rounded border"
       style={{
         background: 'var(--color-bg-tertiary)',
