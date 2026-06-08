@@ -20,7 +20,20 @@ class FakeWebSocket:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run a coroutine on a fresh, isolated event loop.
+
+    Other async suites in the same process may call ``asyncio.run`` (which
+    closes its loop and resets the thread's current loop to ``None``), so we
+    cannot rely on ``asyncio.get_event_loop`` returning a usable loop here.
+    Create/set/close a dedicated loop per call to avoid cross-suite pollution.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def test_join_sends_state_to_newcomer_and_broadcasts_join():
