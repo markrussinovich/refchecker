@@ -15,7 +15,7 @@ import {
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
-import { fetchAuthorProfile } from '../../utils/api'
+import { fetchAuthorProfile, getVenueProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
 import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import {
@@ -1657,6 +1657,30 @@ function ProfileRow({ label, value, href }) {
  * Click opens the OpenAlex venue page in the system browser.
  */
 function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
+  // Lazy journal/venue profile popover (OpenAlex /sources + DOAJ guidelines).
+  const [vpOpen, setVpOpen] = useState(false)
+  const [vp, setVp] = useState(null)
+  const vpEnter = useRef(null)
+  const vpLeave = useRef(null)
+  const loadVenue = () => {
+    if (vp) return
+    getVenueProfile({ venue_id: venueOpenalexId || null, venue_name: venue || null })
+      .then((res) => setVp(res?.data || { available: false }))
+      .catch(() => setVp({ available: false }))
+  }
+  const vpOnEnter = () => {
+    if (vpLeave.current) { clearTimeout(vpLeave.current); vpLeave.current = null }
+    vpEnter.current = setTimeout(() => { setVpOpen(true); loadVenue() }, 280)
+  }
+  const vpOnLeave = () => {
+    if (vpEnter.current) { clearTimeout(vpEnter.current); vpEnter.current = null }
+    vpLeave.current = setTimeout(() => setVpOpen(false), 150)
+  }
+  useEffect(() => () => {
+    if (vpEnter.current) clearTimeout(vpEnter.current)
+    if (vpLeave.current) clearTimeout(vpLeave.current)
+  }, [])
+
   // Resolve the (full, acronym) pair so we can display both forms.
   // Priority for the FULL name: the OpenAlex-resolved string > the
   // reverse-lookup from the cited string (when only an acronym was
@@ -1710,7 +1734,8 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     openExternal(href)
   }
   return (
-    <div style={{ color: 'var(--color-text-secondary)' }} title={title}>
+    <div onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} title={title}
+      style={{ color: 'var(--color-text-secondary)', position: 'relative', display: 'inline-block' }}>
       {href ? (
         <a
           href={href}
@@ -1734,6 +1759,44 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
           ({supplemental})
         </span>
+      )}
+      {vpOpen && vp && vp.available && (
+        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} className="rounded-xl text-xs"
+          style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, minWidth: 260, maxWidth: 360, maxHeight: '60vh', overflowY: 'auto', background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', boxShadow: '0 12px 40px rgba(0,0,0,0.28)', padding: '10px 12px', whiteSpace: 'normal' }}>
+          <div style={{ fontWeight: 700, marginBottom: 3 }}>{vp.display_name}</div>
+          {vp.publisher && <div style={{ color: 'var(--color-text-muted)' }}>Publisher: {vp.publisher}</div>}
+          {(vp.issn_l || (vp.issn || []).length > 0) && <div style={{ color: 'var(--color-text-muted)' }}>ISSN: {vp.issn_l || (vp.issn || []).join(', ')}</div>}
+          {(vp.is_in_doaj || vp.is_oa || typeof vp.apc_usd === 'number') && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {vp.is_in_doaj && <span style={{ padding: '1px 7px', borderRadius: 9999, background: 'rgba(16,163,127,0.14)', color: 'var(--color-success)' }}>DOAJ</span>}
+              {vp.is_oa && <span style={{ padding: '1px 7px', borderRadius: 9999, background: 'rgba(16,163,127,0.14)', color: 'var(--color-success)' }}>Open access</span>}
+              {typeof vp.apc_usd === 'number' && <span style={{ color: 'var(--color-text-muted)' }}>APC ${vp.apc_usd.toLocaleString()}</span>}
+            </div>
+          )}
+          <div className="mt-1.5 flex flex-wrap gap-3">
+            {vp.author_guidelines_url && (
+              <a href={vp.author_guidelines_url} target="_blank" rel="noopener noreferrer"
+                onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(vp.author_guidelines_url) } }}
+                style={{ color: 'var(--color-accent)' }}>Author guidelines ↗</a>
+            )}
+            {vp.homepage_url && (
+              <a href={vp.homepage_url} target="_blank" rel="noopener noreferrer"
+                onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(vp.homepage_url) } }}
+                style={{ color: 'var(--color-accent)' }}>Journal homepage ↗</a>
+            )}
+          </div>
+          {!vp.author_guidelines_url && (
+            <div className="mt-1" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+              No author-guidelines link on record — use the homepage / publisher site.
+            </div>
+          )}
+        </div>
+      )}
+      {vpOpen && vp && vp.available === false && (
+        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave}
+          style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, maxWidth: 280, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: '8px 10px', borderRadius: 10, fontSize: 11 }}>
+          No additional journal metadata found for this venue.
+        </div>
       )}
     </div>
   )

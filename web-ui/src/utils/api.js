@@ -149,6 +149,10 @@ export const listSeenReferences = (limit = 200, offset = 0, q = null) =>
 // global Seen-References cache. Idempotent; returns {added, times_seen}.
 export const addSeenReference = (reference, checkId = null, paperTitle = null) =>
   api.post('/references/seen', { reference, check_id: checkId, paper_title: paperTitle })
+// Journal/venue metadata for the venue-name hover (OpenAlex /sources + DOAJ
+// guidelines). Soft-fails to { available: false }; never fabricates.
+export const getVenueProfile = ({ venue_id = null, issn = null, venue_name = null } = {}) =>
+  api.post('/venues/profile', { venue_id, issn, venue_name }, { timeout: 12000 })
 
 // Similar-papers recommendations + co-citation tally — Semantic Scholar's
 // /recommendations endpoint is slow, so this can legitimately take longer

@@ -7312,6 +7312,99 @@ async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     return {"removed": removed}
 
 
+class _VenueProfileRequest(BaseModel):
+    venue_id: Optional[str] = None    # OpenAlex source id (S…)
+    issn: Optional[str] = None
+    venue_name: Optional[str] = None
+
+
+_VENUE_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+@app.post("/api/venues/profile")
+async def get_venue_profile(req: _VenueProfileRequest,
+                            current_user: UserInfo = Depends(require_user)):
+    """Resolve a journal/venue to REAL metadata for the venue-name hover:
+    publisher, ISSN, open-access/DOAJ status, homepage, and (when DOAJ lists it)
+    an author-guidelines link. Source: OpenAlex /sources + DOAJ. Soft-fails to
+    {available: false}; never fabricates metadata or guidelines."""
+    cache_key = (req.venue_id or req.issn or req.venue_name or "").strip().lower()
+    if cache_key and cache_key in _VENUE_PROFILE_CACHE:
+        return _VENUE_PROFILE_CACHE[cache_key]
+    import httpx
+    try:
+        src = None
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if req.venue_id:
+                vid = req.venue_id if req.venue_id.startswith("S") else str(req.venue_id).rsplit("/", 1)[-1]
+                r = await client.get(f"https://api.openalex.org/sources/{vid}")
+                if r.status_code == 200:
+                    src = r.json()
+            if not src and req.issn:
+                r = await client.get("https://api.openalex.org/sources",
+                                     params={"filter": f"issn:{req.issn}", "per_page": 1})
+                if r.status_code == 200:
+                    res = (r.json() or {}).get("results") or []
+                    src = res[0] if res else None
+            if not src and req.venue_name:
+                r = await client.get("https://api.openalex.org/sources",
+                                     params={"search": req.venue_name, "per_page": 1})
+                if r.status_code == 200:
+                    res = (r.json() or {}).get("results") or []
+                    src = res[0] if res else None
+            if not isinstance(src, dict) or not src.get("display_name"):
+                out = {"available": False}
+                if cache_key:
+                    _VENUE_PROFILE_CACHE[cache_key] = out
+                return out
+
+            issns = src.get("issn") or []
+            if isinstance(issns, str):
+                issns = [issns]
+            out: Dict[str, Any] = {
+                "available": True,
+                "display_name": src.get("display_name"),
+                "publisher": src.get("host_organization_name"),
+                "issn_l": src.get("issn_l"),
+                "issn": issns,
+                "is_oa": src.get("is_oa"),
+                "is_in_doaj": src.get("is_in_doaj"),
+                "homepage_url": src.get("homepage_url"),
+                "works_count": src.get("works_count"),
+                "cited_by_count": src.get("cited_by_count"),
+            }
+            if isinstance(src.get("id"), str):
+                out["openalex_id"] = str(src["id"]).rsplit("/", 1)[-1]
+            if isinstance(src.get("apc_usd"), int):
+                out["apc_usd"] = src["apc_usd"]
+
+            # DOAJ author guidelines — only when an ISSN is known AND DOAJ lists it.
+            issn_for_doaj = out.get("issn_l") or (issns[0] if issns else None)
+            if issn_for_doaj:
+                try:
+                    dr = await client.get(f"https://doaj.org/api/search/journals/issn:{issn_for_doaj}")
+                    if dr.status_code == 200:
+                        results = (dr.json() or {}).get("results") or []
+                        if results:
+                            bj = (results[0] or {}).get("bibjson") or {}
+                            ref = bj.get("ref") or {}
+                            gl = ref.get("author_instructions")
+                            if isinstance(gl, str) and gl.startswith("http"):
+                                out["author_guidelines_url"] = gl
+                            lic = bj.get("license")
+                            if isinstance(lic, list) and lic and isinstance(lic[0], dict):
+                                out["license"] = lic[0].get("type")
+                except Exception as _de:
+                    logger.debug("DOAJ lookup failed: %s", _de)
+
+            if cache_key:
+                _VENUE_PROFILE_CACHE[cache_key] = out
+            return out
+    except Exception as e:
+        logger.debug("venue profile failed: %s", e)
+        return {"available": False}
+
+
 @app.get("/api/references/library/graph")
 async def references_library_graph(
     limit: int = 400,
