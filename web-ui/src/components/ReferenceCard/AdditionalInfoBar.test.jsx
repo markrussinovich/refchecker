@@ -41,9 +41,11 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(link).toHaveAttribute('href', 'https://ex.com/p.pdf')
   })
 
-  it('renders the Add-to-Library pill when the reference is cacheable (has a title)', () => {
+  it('renders the In-Library pill when the reference is cacheable (has a title)', () => {
     render(<AdditionalInfoBar reference={{ title: 'A real paper' }} />)
-    expect(screen.getByRole('button', { name: '+ Add to Library' })).toBeInTheDocument()
+    // Checked refs are auto-saved, so the resting label is the honest "✓ In Library"
+    // (the old misleading "+ Add to Library" was removed).
+    expect(screen.getByRole('button', { name: '✓ In Library' })).toBeInTheDocument()
     // No enrichment -> none of the info pills appear.
     expect(screen.queryByRole('button', { name: 'Abstract' })).toBeNull()
     expect(screen.queryByText(/^Published /)).toBeNull()

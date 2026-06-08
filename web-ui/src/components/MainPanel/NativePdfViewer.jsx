@@ -54,6 +54,11 @@ function locate(pageText, rawQuote) {
 // very narrow modal doesn't render an unreadably tiny page and a very wide
 // one doesn't blow the page up past native-ish resolution.
 const FIT_MIN = 0.5, FIT_MAX = 3
+// Until the real scroll-container width is measured, render small rather than
+// at a fixed (often-too-wide) default — a single A4/Letter page is ~595–612pt
+// wide, and the modal is min(900px,…), so ~0.85 fits without over-zooming on
+// first open. The ResizeObserver/measure effect replaces this immediately.
+const FIT_FALLBACK = 0.85
 
 export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = null, zoom = 1, onJumpToReference, onUnavailable, onLocated }) {
   const [pages, setPages] = useState([])      // [{ pageNumber, width, height, highlights }]
@@ -63,11 +68,15 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   const renderedRef = useRef(new Set())       // pages already painted at current scale
   const containerRef = useRef(null)
   // Base scale that makes a page fit the modal width at zoom=1. Measured from
-  // the scroll container once mounted; falls back to 1 until then. Multiplied
-  // by the `zoom` prop so the header zoom controls (and pinch) scale on top of
-  // a fit-width default instead of a fixed, often-too-wide 1.5×.
-  const [fitScale, setFitScale] = useState(1)
+  // the scroll container once mounted; falls back to a SMALL scale until then
+  // (never 1.5×, which over-zooms on open). Multiplied by the `zoom` prop so the
+  // header zoom controls (and pinch) scale on top of a fit-width default.
+  const [fitScale, setFitScale] = useState(FIT_FALLBACK)
   const SCALE = fitScale * zoom
+  // Hover tooltip for a highlight: { x, y, span } positioned relative to the
+  // page wrapper. Null when nothing is hovered. Rendered as a solid opaque card
+  // (not the browser's native, easy-to-miss title tooltip).
+  const [hover, setHover] = useState(null)
 
   // Measure the available width (the scroll container that wraps us) and derive
   // a fit-width base scale from the PDF's intrinsic page width. Re-measures on
@@ -261,7 +270,8 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
                 key={h.key}
                 data-span={h.spanIndex}
                 onClick={clickable ? (e) => { e.stopPropagation(); jumpToReference(h.span) } : undefined}
-                title={clickable ? `Go to reference${h.span.label ? `: ${h.span.label}` : ''}` : (h.span.label || undefined)}
+                onMouseEnter={() => setHover({ pageNumber: p.pageNumber, x: h.x, y: h.y, h: h.h, span: h.span, stroke: h.stroke, clickable })}
+                onMouseLeave={() => setHover((cur) => (cur && cur.span === h.span && cur.x === h.x ? null : cur))}
                 style={{
                   position: 'absolute', left: h.x, top: h.y, width: h.w, height: h.h,
                   background: h.fill, border: `1px solid ${h.stroke}`, borderRadius: 2,
@@ -271,6 +281,46 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
               />
             )
           })}
+          {/* Solid, opaque hover card describing the cited/flagged passage.
+              Positioned above the hovered highlight; uses themed surface +
+              readable text + a subtle shadow, and sits above the page (z-index).
+              Replaces the easy-to-miss native title tooltip. */}
+          {hover && hover.pageNumber === p.pageNumber && (
+            <div
+              role="tooltip"
+              style={{
+                position: 'absolute', zIndex: 30, pointerEvents: 'none',
+                left: Math.max(4, Math.min(hover.x, p.width - 304)),
+                top: hover.y > 76 ? hover.y - 8 : hover.y + hover.h + 8,
+                transform: hover.y > 76 ? 'translateY(-100%)' : 'none',
+                maxWidth: 300, padding: '8px 11px', borderRadius: 8,
+                background: 'var(--color-bg-secondary, #1f2430)',
+                color: 'var(--color-text-primary, #f3f4f6)',
+                border: `1px solid ${hover.stroke}`,
+                boxShadow: '0 6px 20px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25)',
+                fontSize: 12, lineHeight: 1.45, opacity: 1,
+              }}
+            >
+              {hover.span.label && (
+                <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-text-primary, #f3f4f6)' }}>
+                  {hover.span.label}
+                </div>
+              )}
+              {hover.span.quote && (
+                <div style={{
+                  color: 'var(--color-text-primary, #f3f4f6)',
+                  display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>
+                  “{norm(hover.span.quote).slice(0, 240)}{norm(hover.span.quote).length > 240 ? '…' : ''}”
+                </div>
+              )}
+              {hover.clickable && (
+                <div style={{ marginTop: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-accent, #10a37f)' }}>
+                  Click to view this reference →
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </div>

@@ -1471,6 +1471,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const wrapperRef = useRef(null)
   const enterTimer = useRef(null)
   const leaveTimer = useRef(null)
+  // Popover placement so it always fits + scrolls even when the author sits low
+  // on the page. Measured from the anchor's viewport rect: open UPWARD when
+  // there's more room above, and cap maxHeight to the ACTUAL available space so
+  // the lower part is never clipped below the viewport. Recomputed whenever the
+  // popover opens, on scroll, and on resize (real geometry — no guessing).
+  const [placement, setPlacement] = useState({ dir: 'down', maxHeight: '70vh' })
 
   // Lazily pull the richer Semantic Scholar profile the first time the card
   // opens for an author that has an S2 id. Soft-fails to the basic card.
@@ -1503,6 +1509,39 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
     if (enterTimer.current) clearTimeout(enterTimer.current)
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
   }, [])
+
+  // Decide whether to open the popover up or down, and how tall it may be, from
+  // the real available space around the anchor. Caps maxHeight to min(70vh,
+  // space − margin) so the popover's own overflowY:'auto' actually scrolls the
+  // overflow instead of it falling off-screen unreachable.
+  useEffect(() => {
+    if (!open) return
+    const GAP = 8       // matches marginTop/marginBottom on the popover
+    const MARGIN = 12   // viewport breathing room so it never touches the edge
+    const MIN_H = 160   // never collapse so small the card is unusable
+    const compute = () => {
+      const el = wrapperRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0
+      const spaceBelow = vh - rect.bottom - GAP - MARGIN
+      const spaceAbove = rect.top - GAP - MARGIN
+      const cap70 = Math.round(vh * 0.7)
+      // Open upward only when there's clearly more room above AND below is
+      // genuinely cramped — otherwise prefer the default downward placement.
+      const openUp = spaceBelow < MIN_H && spaceAbove > spaceBelow
+      const avail = openUp ? spaceAbove : spaceBelow
+      const maxH = Math.max(MIN_H, Math.min(cap70, avail))
+      setPlacement({ dir: openUp ? 'up' : 'down', maxHeight: `${maxH}px` })
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [open])
 
   const orcidUrl = e?.orcid ? `https://orcid.org/${e.orcid}` : null
   const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
@@ -1566,11 +1605,18 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           role="tooltip"
           className="rounded-xl text-xs"
           style={{
-            position: 'absolute', top: '100%', left: 0, marginTop: 8, zIndex: 60,
+            position: 'absolute', left: 0, zIndex: 60,
+            // Flip up/down based on real available space (see the placement
+            // effect) so the card never opens into a clipped region when the
+            // author sits low on the page.
+            ...(placement.dir === 'up'
+              ? { bottom: '100%', marginBottom: 8 }
+              : { top: '100%', marginTop: 8 }),
             minWidth: 300, maxWidth: 380,
-            // Scroll the popover body when the author has lots of recent papers
-            // (the `overflow-hidden` class used to clip it instead of scrolling).
-            maxHeight: '70vh', overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
+            // Cap height to the ACTUAL space available (min(70vh, space−margin))
+            // and scroll the overflow — the body used to clip below the viewport
+            // when the author had lots of recent papers.
+            maxHeight: placement.maxHeight, overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',

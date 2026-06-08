@@ -478,21 +478,35 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if enriched_authors:
         enrichment['authors'] = enriched_authors
 
-    # Funders / grants — OpenAlex returns `grants[]` with funder name.
-    grants = verified_data.get('grants')
-    if isinstance(grants, list) and grants:
-        funders = []
-        seen = set()
-        for g in grants:
-            if not isinstance(g, dict):
-                continue
-            name = g.get('funder_display_name') or g.get('funder') or g.get('award_id')
-            if name and name not in seen:
+    # Funders / grants — OpenAlex returns `grants[]` with funder name;
+    # Crossref/S2-shaped payloads may carry a `funders[]`/`funder[]` list of
+    # {name|funder_display_name|funder}. Walk every variant present and pool the
+    # distinct real funder names. Real-data only: if nothing names a funder, the
+    # has_funding/funders keys are omitted (absence != "no funding").
+    funders: List[str] = []
+    seen: set = set()
+    for source_key in ('grants', 'funders', 'funder'):
+        entries = verified_data.get(source_key)
+        if not isinstance(entries, list):
+            continue
+        for g in entries:
+            if isinstance(g, dict):
+                name = (
+                    g.get('funder_display_name')
+                    or g.get('name')
+                    or g.get('funder')
+                    or g.get('award_id')
+                )
+            elif isinstance(g, str):
+                name = g
+            else:
+                name = None
+            if name and str(name) not in seen:
                 funders.append(str(name))
-                seen.add(name)
-        if funders:
-            enrichment['has_funding'] = True
-            enrichment['funders'] = funders[:5]
+                seen.add(str(name))
+    if funders:
+        enrichment['has_funding'] = True
+        enrichment['funders'] = funders[:5]
 
     # Affiliation badge — at least one author institution present.
     if any(a.get('institutions') for a in (enrichment.get('authors') or [])):
@@ -504,9 +518,17 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if abstract:
         enrichment['abstract'] = abstract
 
-    # TL;DR / "claim" — ONLY Semantic Scholar's machine-generated tldr.text.
-    # Never synthesized from the abstract/title.
-    tldr = _safe_get(verified_data, 'tldr', 'text')
+    # TL;DR / "claim" — ONLY Semantic Scholar's machine-generated tldr.
+    # Never synthesized from the abstract/title. S2's API returns it nested as
+    # {model, text}; some flattened shapes (local DB rows, re-serialised
+    # payloads) carry it as a plain string. Accept either real form; absent
+    # stays absent.
+    tldr_raw = verified_data.get('tldr')
+    tldr = None
+    if isinstance(tldr_raw, dict):
+        tldr = tldr_raw.get('text')
+    elif isinstance(tldr_raw, str):
+        tldr = tldr_raw
     if isinstance(tldr, str) and tldr.strip():
         enrichment['tldr'] = tldr.strip()
 

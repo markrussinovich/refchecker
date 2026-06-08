@@ -40,6 +40,7 @@ _STATUS_COLOR = {
     "error": "#ef4146",
     "unverified": "#8e8ea0",
     "hallucinated": "#dc6b1d",
+    "suggestion": "#8b5cf6",
 }
 _BAND_COLOR = {"high": "#ef4146", "medium": "#f59e0b", "low": "#10a37f"}
 _SEG = {"AI": "#ef4146", "Mixed": "#f59e0b", "Human": "#10a37f"}
@@ -53,6 +54,7 @@ _STATUS_EMOJI = {
     "error": "🔴",
     "unverified": "⚪",
     "hallucinated": "🟠",
+    "suggestion": "🟣",
 }
 _STATUS_LABEL = {
     "verified": "Verified",
@@ -60,6 +62,20 @@ _STATUS_LABEL = {
     "error": "Error",
     "unverified": "Unverified",
     "hallucinated": "Likely hallucinated",
+    "suggestion": "Suggestion",
+}
+# Geometric status markers that render CLEANLY in the PyMuPDF (fitz.Story) PDF
+# pipeline — the colour-emoji glyphs above are mapped to garbled fallback
+# glyphs by fitz's base fonts (the "disrupted logo / broken markers" report).
+# Coloured via <font color=…> at the call site; the shape alone carries no
+# colour. ● filled circle, ▲ triangle (warning), ○ open circle (unverified).
+_STATUS_MARK = {
+    "verified": "●",
+    "warning": "▲",
+    "error": "●",
+    "unverified": "○",
+    "hallucinated": "◆",
+    "suggestion": "●",
 }
 
 # Sections a caller may include/exclude (the export "checkboxes").
@@ -186,15 +202,121 @@ def _corrected_str(ref: Dict[str, Any]) -> Optional[str]:
     return s or None
 
 
-def _eff_status(ref: Dict[str, Any], errors: List[str], major: List[str]) -> str:
-    status = (ref.get("status") or "").lower()
-    if status in _STATUS_COLOR:
-        return status
-    if errors:
+def _norm_meta(value: Any) -> str:
+    """Lowercase + collapse to alnum-words — mirrors the web-ui's
+    normalizeForMetadataComparison (web-ui/src/utils/referenceStatus.js)."""
+    import re
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _authors_list(authors: Any) -> List[str]:
+    """The cited-author names as a flat list of strings (dicts -> name)."""
+    if not authors:
+        return []
+    if isinstance(authors, str):
+        return [authors]
+    out = []
+    for a in authors:
+        if isinstance(a, dict):
+            out.append(str(a.get("name") or ""))
+        else:
+            out.append(str(a or ""))
+    return [o for o in out if o]
+
+
+def _author_matches(cited: str, found: str) -> bool:
+    ct = _norm_meta(cited).split()
+    ft = _norm_meta(found).split()
+    if not ct or not ft:
+        return False
+    if ct[-1] != ft[-1]:
+        return False
+    cj, fj = " ".join(ct), " ".join(ft)
+    if cj == fj or cj in fj or fj in cj:
+        return True
+    fg = {t for t in ft[:-1] if len(t) > 1}
+    return any(t in fg for t in ct[:-1] if len(t) > 1)
+
+
+def _authors_substantially_match(cited_authors: Any, found_text: Any) -> bool:
+    cited = _authors_list(cited_authors)
+    text = str(found_text or "").strip()
+    if not cited or not text or text.upper() == "NONE":
+        return False
+    found = ([p.strip() for p in text.split(";")] if ";" in text
+             else [p.strip() for p in text.split(",")])
+    found = [f for f in found if f]
+    if not found:
+        return False
+    matched = sum(1 for c in cited if any(_author_matches(c, f) for f in found))
+    required = (len(cited) - 1) if len(cited) >= 3 else len(cited)
+    return matched >= required
+
+
+def _llm_found_matches_citation(ref: Dict[str, Any]) -> bool:
+    """Mirror of llmFoundMetadataMatchesCitation (web-ui): the cheap LLM
+    hallucination pre-screen flagged this ref LIKELY, but the LLM-found record
+    actually matches the citation — a FALSE positive we must treat as verified,
+    exactly as the live Summary does."""
+    a = ref.get("hallucination_assessment")
+    if not isinstance(a, dict):
+        return False
+    if a.get("verdict") != "LIKELY" or not a.get("link"):
+        return False
+    if _norm_meta(a.get("found_title")) != _norm_meta(ref.get("title")):
+        return False
+    if not _authors_substantially_match(ref.get("authors"), a.get("found_authors")):
+        return False
+    yr = ref.get("year")
+    return (not yr) or (str(yr) in str(a.get("found_year") or ""))
+
+
+def _effective_status(ref: Dict[str, Any]) -> str:
+    """Authoritative per-reference status — the SAME precedence the in-app
+    Summary bar uses (web-ui/src/utils/referenceStatus.js getEffectiveReferenceStatus):
+    hallucination > error > warning > suggestion > verified, with the
+    false-hallucination LLM-match override and suggestion-only handling. Reports
+    are export snapshots of completed checks, so transient pending/checking
+    states collapse to their finalized value. Returns one of
+    verified | error | warning | suggestion | unverified | hallucinated.
+    """
+    base = (ref.get("status") or "").strip().lower()
+    llm_match = _llm_found_matches_citation(ref)
+
+    # False-hallucination override: clearly-matching LLM metadata wins.
+    if base == "hallucination" and llm_match:
+        return "verified"
+    if base == "hallucination":
+        return "hallucinated"
+
+    has_suggestions = bool(ref.get("suggestions"))
+    if llm_match:
+        return "suggestion" if has_suggestions else "verified"
+
+    # Real (non-"unverified") error entries elevate the ref to error.
+    has_errors = any(
+        isinstance(e, dict) and (e.get("error_type") or "").lower() != "unverified"
+        for e in (ref.get("errors") or [])
+    )
+    has_warnings = bool(ref.get("warnings"))
+
+    if has_errors:
         return "error"
-    if major:
+    if has_warnings:
         return "warning"
-    return "unverified"
+    if has_suggestions:
+        return "suggestion"
+
+    if base in ("error", "warning", "suggestion"):
+        # Backend labelled it but no concrete issues survive -> verified.
+        return "verified"
+    if base == "unverified":
+        return "unverified"
+    if base in _STATUS_COLOR:  # verified / hallucinated / unverified
+        return base
+    # pending / checking / queued / unknown on a completed report -> verified
+    # (the check is done; an item with no surviving issue is clean).
+    return "verified"
 
 
 # --------------------------------------------------------------------------- #
@@ -208,20 +330,31 @@ def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[s
     ai = _as_dict(check.get("ai_detection"))
     ts = check.get("timestamp") or ""
 
-    counts = {"verified": 0, "warning": 0, "error": 0, "unverified": 0, "hallucinated": 0}
+    # Per-reference status buckets — counted with the SAME authoritative
+    # precedence as the in-app Summary bar (web-ui/src/utils/referenceStatus.js).
+    # `suggestion`-only refs fold into `verified` in the headline counts (exactly
+    # as the live "Verified" chip does), while the row keeps its suggestion
+    # status for display. This is what makes the exported references/warnings/
+    # errors numbers identical to what the user saw in the app.
+    counts = {"verified": 0, "warning": 0, "error": 0, "unverified": 0,
+              "hallucinated": 0, "suggestion": 0}
     warning_major = 0  # refs whose warnings include a non-trivial (non-year) type
     refs_err = 0       # refs carrying any error (for the health score)
     refs_warn = 0      # refs carrying any warning (major or minor)
     rows: List[Dict[str, Any]] = []
     for ref in refs:
         errors, major, minor = _issues_for(ref)
-        status = _eff_status(ref, errors, major)
+        status = _effective_status(ref)
         counts[status] = counts.get(status, 0) + 1
         if status == "warning" and major:
             warning_major += 1
-        if errors:
+        # Health inputs follow the app: a ref only counts as error-carrying /
+        # warning-carrying when that is its EFFECTIVE status (so a false
+        # hallucination resolved to verified, or an error ref, isn't double
+        # counted as a warning, etc.).
+        if status == "error":
             refs_err += 1
-        if major or minor:
+        if status == "warning":
             refs_warn += 1
         rows.append({
             "num": _ref_num(ref),
@@ -243,10 +376,13 @@ def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[s
     # the body was never scanned for markers.
     any_inline = any(r["inline"] for r in rows)
     orphans = [r["num"] or r["title"][:60] for r in rows if not r["inline"]] if any_inline else []
+    # Fold suggestion-only refs into the headline "verified" count so the
+    # summary cards match the app's "Verified" chip (which includes suggestions).
+    verified_display = counts["verified"] + counts["suggestion"]
     stats = {"total": len(refs), "warning_major": warning_major,
-             "orphans": len(orphans), **counts}
+             "orphans": len(orphans), **counts, "verified": verified_display}
     headline, severity = _verdict(stats, ai)
-    health = compute_health(len(refs), counts["verified"], refs_err, refs_warn, counts["hallucinated"])
+    health = compute_health(len(refs), verified_display, refs_err, refs_warn, counts["hallucinated"])
     return {
         "title": title, "ts": ts, "ai": ai, "rows": rows, "stats": stats,
         "sections": sections, "corrections": corrections,
@@ -481,12 +617,20 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
 
 # RefChecker wordmark — an inline SVG so the export header reads as the same
 # product as the app (accent-tinted check-mark + word). No external asset.
+#
+# The mark drives its colour through `currentColor` with `color:var(--accent)`
+# on the root <svg>. A bare `fill="var(--accent)"` presentation attribute does
+# NOT resolve in browsers (CSS custom properties only apply inside `style`/
+# stylesheets, not raw SVG attributes) — that left the logo blank/broken in the
+# HTML export. currentColor is the portable fix and also tints the rounded tile
+# via fill-opacity so it reads as the app's soft-accent badge.
 _WORDMARK_SVG = (
-    '<svg class="logo" width="22" height="22" viewBox="0 0 24 24" fill="none" '
-    'aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" '
-    'fill="var(--accent)" opacity="0.14"/><path d="M7 12.4l3.1 3.1L17 8.6" '
-    'stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" '
-    'stroke-linejoin="round"/></svg>'
+    '<svg class="logo" width="22" height="22" viewBox="0 0 24 24" '
+    'style="color:var(--accent)" aria-hidden="true">'
+    '<rect x="2" y="2" width="20" height="20" rx="6" '
+    'fill="currentColor" fill-opacity="0.14"/>'
+    '<path d="M7 12.4l3.1 3.1L17 8.6" fill="none" stroke="currentColor" '
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 )
 
 
@@ -731,26 +875,31 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
     rows_html = []
     for r in m["rows"]:
         color = _STATUS_COLOR.get(r["status"], "#8e8ea0")
-        emoji = _STATUS_EMOJI.get(r["status"], "")
+        mark = _STATUS_MARK.get(r["status"], "●")
+        label = _STATUS_LABEL.get(r["status"], r["status"].capitalize())
         issues = ""
+        # Markers below are geometric glyphs (✗ ! · ✓) that fitz renders cleanly,
+        # NOT colour-emoji (which fitz garbles). Colour carries the meaning.
         for d in r["errors"]:
-            issues += f'<p style="margin:2px 0;color:#ef4146;font-size:9pt">⛔ {_e(d)}</p>'
+            issues += f'<p style="margin:2px 0;color:#ef4146;font-size:9pt">✗ {_e(d)}</p>'
         for d in r["major"]:
-            issues += f'<p style="margin:2px 0;color:#f59e0b;font-size:9pt">⚠ {_e(d)}</p>'
+            issues += f'<p style="margin:2px 0;color:#f59e0b;font-size:9pt">! {_e(d)}</p>'
         for d in r["minor"]:
             issues += f'<p style="margin:2px 0;color:#8e8ea0;font-size:8.5pt">· {_e(d)} (minor)</p>'
         if r.get("corrected"):
-            issues += f'<p style="margin:2px 0;color:#10a37f;font-size:9pt">✎ Suggested: {_e(r["corrected"])}</p>'
+            issues += f'<p style="margin:2px 0;color:#10a37f;font-size:9pt">✓ Suggested: {_e(r["corrected"])}</p>'
         rows_html.append(
-            f'<tr><td style="padding:6px 8px 6px 0;vertical-align:top">'
-            f'<b><font color="{color}">{emoji} {_e(r["status"])}</font></b></td>'
+            f'<tr><td style="padding:6px 8px 6px 0;vertical-align:top;white-space:nowrap;color:{color}">'
+            f'<b>{mark} {_e(label)}</b></td>'
             f'<td style="padding:6px 0;border-bottom:1px solid #f0f0f0"><b>{_e(r["num"])}{". " if r["num"] else ""}{_e(r["title"])}</b>'
             f'<br/><font color="#8e8ea0" style="font-size:9pt">{_e(r["meta"])}</font>{issues}</td></tr>'
         )
     parts = []
     if header:
+        # Wordmark: a clean accent check-mark logo (✓ renders crisply in fitz)
+        # followed by Ref+Checker in the brand split. No emoji, no SVG.
         parts.append('<p style="font-size:10pt;margin:0 0 6pt;border-bottom:2px solid #10a37f;padding-bottom:5pt">'
-                     '<b><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
+                     '<b><font color="#10a37f">✓ </font><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
                      '<font color="#8e8ea0" style="font-size:8pt">  ·  reference verification report</font></p>')
     parts.append(f'<h1 style="font-size:16pt;margin:6pt 0 4pt;color:#0d0d0d">{_e(m["title"])}</h1>')
     if m["ts"]:
@@ -775,7 +924,7 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
         parts.append(f'{_h2}AI-text detection</h2>')
         parts.append(f'<p><b><font color="{bc}">AI-likelihood: {_e(band.capitalize())}</font></b><br/>'
                      f'<font color="#8e8ea0" style="font-size:9pt">{_e(ai.get("summary"))}</font></p>')
-        parts.append(f'<p style="color:#8e8ea0;font-size:8pt;margin:4pt 0">⚠ {_e(_ai_disclaimer(ai))}</p>')
+        parts.append(f'<p style="color:#8e8ea0;font-size:8pt;margin:4pt 0">! {_e(_ai_disclaimer(ai))}</p>')
     if "references" in sec:
         parts.append(f'{_h2}References</h2>')
         parts.append(f'<table style="width:100%;border-collapse:collapse">{"".join(rows_html)}</table>')
@@ -861,7 +1010,7 @@ def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
                                  color=_BAND_COLOR.get(band, "#8e8ea0").lstrip("#").upper()))
         if ai.get("summary"):
             blocks.append(_docx_para(str(ai["summary"]), size=20, color="8E8EA0"))
-        blocks.append(_docx_para(f"⚠ {_ai_disclaimer(ai)}", size=18, color="8E8EA0", italic=True))
+        blocks.append(_docx_para(f"Note: {_ai_disclaimer(ai)}", size=18, color="8E8EA0", italic=True))
     if "issues" in sec:
         problems = [r for r in m["rows"] if r["errors"] or r["major"]]
         blocks.append(_docx_para(f"Issues to address ({len(problems)})", size=28, bold=True, color="10A37F"))
@@ -869,23 +1018,26 @@ def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
             blocks.append(_docx_para("No errors or major warnings.", size=22, color="8E8EA0", italic=True))
         for r in problems:
             blocks.append(_docx_para(f"{r['num']}. {r['title']}", size=22, bold=True, space_after=20))
+            # Markers are plain ASCII (x / ! / ->) coloured by the run — Word
+            # renders these reliably, unlike colour-emoji which show as tofu.
             for d in r["errors"]:
-                blocks.append(_docx_para(f"   ⛔ {d}", size=20, color="EF4146", space_after=20))
+                blocks.append(_docx_para(f"   x  {d}", size=20, color="EF4146", space_after=20))
             for d in r["major"]:
-                blocks.append(_docx_para(f"   ⚠ {d}", size=20, color="F59E0B", space_after=20))
+                blocks.append(_docx_para(f"   !  {d}", size=20, color="F59E0B", space_after=20))
             if r.get("corrected"):
-                blocks.append(_docx_para(f"   ✎ Suggested: {r['corrected']}", size=20, color="10A37F"))
+                blocks.append(_docx_para(f"   -> Suggested: {r['corrected']}", size=20, color="10A37F"))
     if "references" in sec:
         blocks.append(_docx_para(f"All references ({s['total']})", size=28, bold=True, color="10A37F"))
-        # Status legend — same traffic-light language as the HTML chips / Markdown.
-        legend = "  ".join(f"{_STATUS_EMOJI[k]} {_STATUS_LABEL[k]}"
-                           for k in ("verified", "warning", "error", "hallucinated", "unverified"))
+        # Status legend — same traffic-light language as the HTML chips / Markdown,
+        # but with clean geometric markers (the colour-emoji garble in Word).
+        legend = "   ".join(f"{_STATUS_MARK[k]} {_STATUS_LABEL[k]}"
+                            for k in ("verified", "warning", "error", "hallucinated", "unverified"))
         blocks.append(_docx_para(legend, size=18, color="8E8EA0", space_after=60))
         for r in m["rows"]:
-            emoji = _STATUS_EMOJI.get(r["status"], "")
+            mark = _STATUS_MARK.get(r["status"], "●")
             label = _STATUS_LABEL.get(r["status"], r["status"])
             tint = _STATUS_COLOR.get(r["status"], "#8e8ea0").lstrip("#").upper()
-            blocks.append(_docx_para(f"{emoji} [{label}] {r['num']}. {r['title']}", size=22, bold=True,
+            blocks.append(_docx_para(f"{mark} [{label}] {r['num']}. {r['title']}", size=22, bold=True,
                                      color=tint, space_after=20))
             meta = r["meta"] + (f"  {r['url']}" if r["url"] else "")
             if meta.strip():
@@ -1020,7 +1172,7 @@ def render_batch_to_pdf(checks: Sequence[Dict[str, Any]], *, corrections: bool =
         for m in models
     )
     overview = ('<p style="font-size:10pt;margin:0 0 6pt;border-bottom:2px solid #10a37f;padding-bottom:5pt">'
-                '<b><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
+                '<b><font color="#10a37f">✓ </font><font color="#0d0d0d">Ref</font><font color="#10a37f">Checker</font></b>'
                 '<font color="#8e8ea0" style="font-size:8pt">  ·  batch verification report</font></p>'
                 f'<h1 style="font-size:16pt;color:#0d0d0d;margin:6pt 0 4pt">{_e(label)}</h1>'
                 f'<p style="color:#8e8ea0;font-size:9pt">{overall["papers"]} papers · {overall["total"]} references</p>'

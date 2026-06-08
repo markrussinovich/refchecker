@@ -89,3 +89,73 @@ def test_build_enrichment_funders_from_grants():
     e = build_enrichment({"grants": [{"funder_display_name": "NIH"}, {"funder_display_name": "NSF"}]})
     assert e["has_funding"] is True
     assert e["funders"] == ["NIH", "NSF"]
+
+
+def test_build_enrichment_funders_from_crossref_s2_funders_list():
+    # Crossref/S2-shaped `funder[]`/`funders[]` (name key, or plain strings).
+    e = build_enrichment({"funder": [{"name": "Wellcome Trust"}, {"name": "ERC"}]})
+    assert e["has_funding"] is True
+    assert e["funders"] == ["Wellcome Trust", "ERC"]
+    e2 = build_enrichment({"funders": ["DFG", "ANR"]})
+    assert e2["funders"] == ["DFG", "ANR"]
+    # No funder named anywhere -> keys absent (absence != "no funding").
+    assert "has_funding" not in build_enrichment({"title": "x"})
+
+
+# --------------------------------------------------------------------------- #
+# Regression: a full Semantic-Scholar-shaped verified_data (exactly what the    #
+# S2 checker now returns once a matched-but-sparse paper is topped up from the  #
+# /paper/{paperId} record) yields abstract / tldr / cited_by_count /            #
+# reference_count on the reference card. This is the bug the fix targets:       #
+# previously only externalIds survived into verified_data, so the card showed   #
+# the link chips (PMID/LibKey/WorldCat) but no Abstract / Claim / counts.       #
+# --------------------------------------------------------------------------- #
+
+def test_build_enrichment_full_s2_shaped_payload_yields_rich_fields():
+    s2_verified_data = {
+        "paperId": "abc123def456",
+        "title": "Attention Is All You Need",
+        "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.",
+        "tldr": {"model": "tldr@v2.0.0", "text": "Introduces the Transformer, a model based solely on attention."},
+        "citationCount": 95000,
+        "referenceCount": 38,
+        "year": 2017,
+        "venue": "NeurIPS",
+        "publicationTypes": ["JournalArticle", "Conference"],
+        "publicationDate": "2017-06-12",
+        "fieldsOfStudy": ["Computer Science"],
+        "externalIds": {
+            "DOI": "10.5555/3295222.3295349",
+            "ArXiv": "1706.03762",
+            "PubMed": "12345678",
+            "MAG": "2963403868",
+        },
+        "openAccessPdf": {"url": "https://arxiv.org/pdf/1706.03762.pdf"},
+        "isOpenAccess": True,
+        "_matched_database": "Semantic Scholar",
+    }
+    e = build_enrichment(s2_verified_data)
+
+    # The fields that were silently dropped before the fix.
+    assert e["abstract"].startswith("The dominant sequence transduction models")
+    assert e["tldr"] == "Introduces the Transformer, a model based solely on attention."
+    assert e["cited_by_count"] == 95000
+    assert e["reference_count"] == 38
+
+    # And the link IDs that always worked still do (regression guard).
+    assert e["pubmed_id"] == "12345678"
+    assert e["mag_id"] == "2963403868"
+    assert e["links"]["doi"] == "10.5555/3295222.3295349"
+    assert e["source_label"] == "Semantic Scholar"
+    # Field-of-study + OA PDF surface from the S2 shape too.
+    assert e["fields_of_study"] == ["Computer Science"]
+    assert e["oa_pdf_url"] == "https://arxiv.org/pdf/1706.03762.pdf"
+
+
+def test_build_enrichment_tldr_accepts_plain_string():
+    # Flattened S2 tldr (plain string) is accepted, same as the nested dict.
+    assert build_enrichment({"tldr": "A flat claim string."})["tldr"] == "A flat claim string."
+    # Nested form still works.
+    assert build_enrichment({"tldr": {"text": "Nested claim."}})["tldr"] == "Nested claim."
+    # Empty/blank string -> key absent.
+    assert "tldr" not in build_enrichment({"tldr": "   "})

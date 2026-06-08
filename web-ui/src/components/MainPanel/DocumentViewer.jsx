@@ -147,17 +147,27 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   }, [])
 
   // Back-link from a clicked PDF highlight to its reference card. NativePdfViewer
-  // calls this with the span it drew; we re-broadcast the focus event the
-  // reference list listens for and close the viewer so the flashing card is
-  // visible. Falls back to whatever the parent passed if it supplied a handler.
+  // calls this with the span it drew. We dispatch the `refchecker:focus-reference`
+  // event the reference list (and MainPanel) listens for FIRST — that switches to
+  // the References tab and flashes the target card — then close the viewer on a
+  // short beat so the tab switch lands before the modal disappears, keeping the
+  // user oriented instead of yanking them into a different tab abruptly. Falls
+  // back to whatever the parent passed if it supplied a handler.
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose }, [onClose])
   const jumpToReference = (span) => {
-    if (onJumpToReference) { onJumpToReference(span); onClose?.(); return }
     const refId = span?.refId != null ? span.refId : span?.refIndex
-    if (refId == null) return
-    try {
-      window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId } }))
-    } catch { /* no-op */ }
-    onClose?.()
+    if (onJumpToReference) {
+      onJumpToReference(span)
+    } else if (refId != null) {
+      try {
+        window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId } }))
+      } catch { /* no-op */ }
+    } else {
+      return // nothing to focus — leave the viewer open and oriented
+    }
+    // Let the tab switch + card-flash commit before tearing down the modal.
+    setTimeout(() => closeRef.current?.(), 220)
   }
 
   useEffect(() => {
@@ -297,7 +307,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [findOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [findOpen])
 
   const markEls = () => Array.from(scrollRef.current?.querySelectorAll('mark') || [])
   const gotoMark = (dir) => {
@@ -311,9 +321,12 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     els[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
+  // Control-bar buttons. Primary surface on the (slightly darker) tertiary
+  // header bar so they read with clear contrast over the white PDF / the bar.
   const btn = {
-    border: '1px solid var(--color-border)', borderRadius: 6, padding: '2px 10px',
-    background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', cursor: 'pointer', fontSize: 13,
+    border: '1px solid var(--color-border)', borderRadius: 6, padding: '4px 11px',
+    background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)',
+    cursor: 'pointer', fontSize: 13, fontWeight: 500, lineHeight: 1.4,
   }
 
   return (
@@ -325,9 +338,15 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                  background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)',
                  border: '1px solid var(--color-border)', borderRadius: 10, overflow: 'hidden',
                  boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        {/* Solid, themed control bar. Sticky + above the scrolling pages so the
+            zoom / find / close controls never disappear over a white PDF page.
+            Uses the tertiary surface (a touch darker than the secondary "desk"
+            below) so the secondary-bg control buttons read with real contrast
+            instead of rendering near-white-on-white. */}
+        <div style={{ position: 'sticky', top: 0, zIndex: 5, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       padding: '10px 14px', borderBottom: '1px solid var(--color-border)',
-                      background: 'var(--color-bg-secondary)' }}>
+                      background: 'var(--color-bg-tertiary)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 14 }}>Flagged passages in document</strong>
             {((mode === 'pdf') || (!state.loading && state.available)) && spans.length > 0 && (

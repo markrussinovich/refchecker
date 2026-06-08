@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import DocumentViewer from './DocumentViewer'
 import AIDetectionVisuals from './AIDetectionVisuals'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
@@ -12,6 +12,60 @@ function deriveModelCitation(detection) {
   const repo = m[1]
   if (!repo.includes('/')) return null
   return { repo, url: `https://huggingface.co/${repo}` }
+}
+
+// Whitespace/case-fold a sentence so the same passage surfaced in two different
+// lists (per-page vs. top-AI) collapses to one viewer span, and so containment
+// checks against a span's window-level quote tolerate spacing differences.
+const normSentence = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+// Build the spans array handed to DocumentViewer plus a lookup from any flagged
+// sentence's text to its index in that array.
+//
+// DocumentViewer locates a passage purely by its `quote` TEXT, so to focus an
+// arbitrary flagged sentence we make that sentence its own locatable span. The
+// corroborated detection.spans keep indices 0..n-1 (the existing flagged-passage
+// buttons already reference those), and each unique sentence is appended after.
+// A sentence already contained in a corroborated span reuses that span's index
+// instead of duplicating a highlight.
+function buildViewerSpans(detection) {
+  const baseSpans = Array.isArray(detection?.spans) ? detection.spans : []
+  const viewerSpans = [...baseSpans]
+  const indexByText = new Map()
+
+  // A sentence drawn from a window may be a substring of a corroborated span's
+  // (longer, window-level) quote — reuse that existing span when so.
+  const normalizedBase = baseSpans.map((sp) => normSentence(sp?.quote))
+  const findInBase = (norm) => {
+    if (norm.length < 8) return -1
+    return normalizedBase.findIndex((q) => q && (q.includes(norm) || norm.includes(q)))
+  }
+
+  const addSentence = (sentence) => {
+    const text = sentence?.text
+    const norm = normSentence(text)
+    if (norm.length < 8) return
+    if (indexByText.has(norm)) return
+    const reuse = findInBase(norm)
+    if (reuse >= 0) { indexByText.set(norm, reuse); return }
+    indexByText.set(norm, viewerSpans.length)
+    // Carry the sentence's real per-sentence model score so the located passage
+    // keeps its own number (no fabricated value when the score is absent).
+    const span = { quote: text, confidence: 'medium' }
+    if (typeof sentence?.score === 'number') span.model_score = sentence.score
+    viewerSpans.push(span)
+  }
+
+  const pages = Array.isArray(detection?.per_page_scores) ? detection.per_page_scores : []
+  pages.forEach((p) => {
+    (Array.isArray(p?.sentences) ? p.sentences : []).forEach(addSentence)
+  })
+  ;(Array.isArray(detection?.top_ai_sentences) ? detection.top_ai_sentences : [])
+    .forEach(addSentence)
+  ;(Array.isArray(detection?.top_human_sentences) ? detection.top_human_sentences : [])
+    .forEach(addSentence)
+
+  return { viewerSpans, indexByText }
 }
 
 /**
@@ -59,6 +113,12 @@ export default function AIDetectionPanel({ detection, checkId }) {
   const [collapsed, setCollapsed] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [focusIdx, setFocusIdx] = useState(null)
+  // Combined spans for the viewer: corroborated spans (indices preserved for the
+  // flagged-passage buttons) + every flagged sentence made independently
+  // locatable, so a "View in document" on any sentence focuses that sentence.
+  // Computed before the early return so hooks run in a stable order;
+  // buildViewerSpans tolerates a null detection.
+  const { viewerSpans, indexByText } = useMemo(() => buildViewerSpans(detection), [detection])
   if (!detection) return null
 
   const band = detection.band || 'unavailable'
@@ -70,6 +130,19 @@ export default function AIDetectionPanel({ detection, checkId }) {
     ? Math.round(detection.overall_score * 100)
     : null
   const modelCitation = deriveModelCitation(detection)
+
+  // Open the native document viewer focused on a specific flagged sentence.
+  // Resolves the sentence text to its index in viewerSpans (built above) so the
+  // viewer scrolls to + flashes exactly that passage. No-op without a checkId
+  // (the viewer needs one to fetch the document text) or an unlocatable
+  // sentence — so only real, focusable flagged sentences get a working button.
+  const canViewSentence = (text) => checkId != null && indexByText.has(normSentence(text))
+  const openSentence = (text) => {
+    const idx = indexByText.get(normSentence(text))
+    if (checkId == null || idx == null) return
+    setFocusIdx(idx)
+    setViewerOpen(true)
+  }
 
   return (
     <div
@@ -144,7 +217,7 @@ export default function AIDetectionPanel({ detection, checkId }) {
       {viewerOpen && (
         <DocumentViewer
           checkId={checkId}
-          spans={spans}
+          spans={viewerSpans}
           focusSpanIndex={focusIdx}
           onClose={() => { setViewerOpen(false); setFocusIdx(null) }}
         />
@@ -165,7 +238,13 @@ export default function AIDetectionPanel({ detection, checkId }) {
         )}
       </div>
 
-      {!isAbstain && <AIDetectionVisuals detection={detection} />}
+      {!isAbstain && (
+        <AIDetectionVisuals
+          detection={detection}
+          onViewSentence={openSentence}
+          canViewSentence={canViewSentence}
+        />
+      )}
 
       {open && spans.length > 0 && (
         <div id="ai-detection-spans" className="px-3 pb-2 space-y-2">

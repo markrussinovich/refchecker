@@ -3,9 +3,20 @@ import { findSimilarPapers } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 import { logger } from '../../utils/logger'
 
-// 2D force graph carries the d3-force engine; lazy-load so it never touches
-// the initial bundle — only paid when the user opens the Explore graph.
-const ForceGraph2D = lazy(() => import('react-force-graph-2d'))
+// Obsidian-style 3D force graph (three.js engine); lazy-load so three never
+// touches the initial bundle — only paid when the user opens the Explore graph.
+// Same dependency GraphLibraryView already uses for the Seen-References graph.
+const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
+
+// Edge colour by RELATION so the user can read the neighbourhood at a glance:
+//   reference → violet (this paper shares references with that work)
+//   citation  → amber  (co-cited alongside this paper)
+//   default   → neutral grey (similar-path link, no relation tag)
+const RELATION_LINK_COLOR = {
+  reference: 'rgba(167,139,250,0.55)',
+  citation: 'rgba(234,179,8,0.6)',
+}
+const DEFAULT_LINK_COLOR = 'rgba(140,144,170,0.4)'
 
 // Discovery modes mirror SimilarPapersPanel: three real-OpenAlex
 // bibliography-overlap modes.
@@ -32,9 +43,14 @@ function normalizeMode(mode) {
 }
 
 // Literal value of the app's --color-accent green. Used for anything painted
-// onto the <canvas> (the source node, its halo, the selected highlight), which
+// into the 3D scene (the distinct source node, the selected highlight), which
 // cannot resolve CSS custom properties. HTML chrome still uses the CSS var.
 const SOURCE_GREEN = '#22c55e'
+
+// react-force-graph mutates link endpoints from id strings into node objects
+// once the simulation runs. Resolve either shape back to the node id so the
+// selected-node edge highlight works before and after that hydration.
+const _linkEndId = (v) => (v && typeof v === 'object' ? v.id : v)
 
 // Pick the same source-id derivation SimilarPapersPanel uses so 'cites_refs'
 // mode can resolve the SOURCE paper on OpenAlex.
@@ -106,11 +122,14 @@ function buildGraph(candidates, paperTitle, width, height) {
     // Literal green — a <canvas> can't resolve CSS vars, so the source dot must
     // be a concrete colour or it renders invisible (part of the "empty" bug).
     color: SOURCE_GREEN,
-    // Hard-pin the source to the centre so it stays the visual anchor.
+    // Hard-pin the source to the centre so it stays the visual anchor (3D: pin
+    // all three axes so the camera always orbits a fixed centre).
     fx: 0,
     fy: 0,
+    fz: 0,
     x: 0,
     y: 0,
+    z: 0,
   }
   const nodes = [sourceNode]
   const links = []
@@ -127,6 +146,10 @@ function buildGraph(candidates, paperTitle, width, height) {
     // same-year nodes don't begin on top of each other.
     const seedX = (yearX !== null ? yearX : Math.cos(angle) * ring)
     const seedY = Math.sin(angle) * ring + ((idx % 2 === 0 ? 1 : -1) * ((idx % 9) + 1) * 8)
+    // Depth seed (3D): fan candidates around a second angle so they start
+    // spread through Z rather than all stacked on the z=0 plane. Deterministic
+    // (no randomness) so the layout is reproducible for the same response.
+    const seedZ = Math.sin(angle * 1.7 + idx) * ring * 0.6
     const node = {
       id,
       label: c.title || '(untitled)',
@@ -144,6 +167,7 @@ function buildGraph(candidates, paperTitle, width, height) {
       color: yearColor(c.year, minYear, maxYear),
       x: seedX,
       y: seedY,
+      z: seedZ,
     }
     // Pin x to the year axis (timeline). y stays free so charge + the vertical
     // spread force fan papers of the same year apart instead of overlapping
@@ -156,12 +180,18 @@ function buildGraph(candidates, paperTitle, width, height) {
 }
 
 /**
- * ResearchRabbit-style EXPLORE graph (#68). Opens as a fullscreen overlay from
- * the results panel and graphs the bibliography-overlap neighbourhood of the
+ * ResearchRabbit-style EXPLORE graph (#68), rendered as an Obsidian-style 3D
+ * force graph (react-force-graph-3d / three.js, the same engine the Seen-
+ * References GraphLibraryView uses). Opens as a fullscreen overlay from the
+ * results panel and graphs the bibliography-overlap neighbourhood of the
  * current check's references — reusing the exact /api/papers/similar pipeline
  * (References / Citations / Both modes) the Similar Papers tab already drives.
- * Nodes are coloured by publication year, laid out as a year-axis force
- * cluster, and are individually selectable.
+ *
+ * Nodes are coloured by publication year and pinned along an x = year timeline
+ * the camera can orbit; the centre "this paper" node is a distinct green; edges
+ * are coloured by relation (shares references / co-cited). Nodes are DRAGGABLE
+ * and pin where the user drops them (onNodeDragEnd), and hover tooltips show the
+ * full title, year and real overlap count. Real data only — no fabricated nodes.
  */
 export default function ExploreGraphView({ references, paperTitle, paperSource, onClose }) {
   const containerRef = useRef(null)
@@ -238,13 +268,11 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
   )
   const meta = graphData.meta
 
-  // Configure the d3 force engine once the graph mounts AND whenever the data
-  // changes. THIS IS THE HEART OF THE LAYOUT FIX. Previously the only forces
-  // were the default charge + the radial link to the fixed centre, so candidates
-  // (with x pinned to their year) collapsed onto a single horizontal line. We
-  // now add:
+  // Configure the 3D d3 force engine once the graph mounts AND whenever the
+  // data changes. The year x-pin (fx) still applies in 3D, giving a horizontal
+  // timeline the camera can orbit; we add:
   //   - stronger charge repulsion so nodes don't pile up,
-  //   - a vertical-spread force that fans same-x (same-year) nodes apart on Y,
+  //   - a vertical-spread force that fans same-year nodes apart on Y,
   //   - a gentle pull toward the vertical centre so the cluster stays framed.
   useEffect(() => {
     const fg = fgRef.current
@@ -256,7 +284,9 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
     // Vertical spread: candidates have x pinned to their year, so without this
     // they stack on one horizontal line. This force pushes overlapping nodes
     // apart along Y while pulling the cluster gently back to centre so it stays
-    // in frame. The source is hard-pinned (fx/fy) and is skipped automatically.
+    // in frame. The source is hard-pinned (fx/fy/fz) and is skipped
+    // automatically (it checks fy != null). User-pinned nodes (drag-end sets
+    // fy) are likewise left where the user dropped them.
     fg.d3Force('spreadY', verticalSpreadForce(64, 0.05))
     // Re-energise the layout so the new forces actually take effect (without a
     // manual recreate).
@@ -264,9 +294,20 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
   }, [graphData])
 
   // Frame the whole graph once it settles so the user never lands on an empty /
-  // off-screen canvas.
+  // off-screen scene.
   const handleEngineStop = useCallback(() => {
-    fgRef.current?.zoomToFit?.(400, 60)
+    fgRef.current?.zoomToFit?.(500, 80)
+  }, [])
+
+  // PIN ON DRAG END (Obsidian behaviour). While dragging, react-force-graph
+  // already fixes the node; on release we PERSIST that position by writing
+  // fx/fy/fz so the node stays exactly where the user parked it instead of
+  // springing back. The source node is permanently pinned and left untouched.
+  const handleNodeDragEnd = useCallback((node) => {
+    if (!node || node.isSource) return
+    node.fx = node.x
+    node.fy = node.y
+    node.fz = node.z
   }, [])
 
   return (
@@ -277,7 +318,7 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
         style={{ background: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}
       >
         <div className="flex items-center gap-3">
-          <strong style={{ color: 'var(--color-text-primary)' }}>Explore graph</strong>
+          <strong style={{ color: 'var(--color-text-primary)' }}>Explore graph — 3D</strong>
           <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
             {MODES.map((m) => (
               <button
@@ -342,47 +383,61 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
           </div>
         )}
         {refsForRequest.length > 0 && !loading && !error && graphData.nodes.length > 1 && (
-          <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading graph engine…</div>}>
-            <ForceGraph2D
+          <Suspense fallback={<div className="w-full h-full flex items-center justify-center text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading 3D engine…</div>}>
+            <ForceGraph3D
               ref={fgRef}
               width={dims.w}
               height={dims.h - 44}
               graphData={graphData}
               backgroundColor="rgba(0,0,0,0)"
               nodeId="id"
-              nodeLabel={(node) => `${node.label}${node.year ? ` (${node.year})` : ''}`}
-              nodeColor={(node) => (selected && selected.id === node.id) ? SOURCE_GREEN : node.color}
-              nodeVal={(node) => (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || node.shared_with_source || 0))}
-              nodeRelSize={4}
-              // Custom paint: draw the dot, the distinct green ring on the
-              // source, and an always-on short label so the graph is readable
-              // at a glance (tooltips still show the full title on hover).
-              nodeCanvasObjectMode={() => 'after'}
-              nodeCanvasObject={(node, ctx, globalScale) => {
-                const r = (node.isSource ? 8 : 3 + Math.min(6, node.shared_refs_count || node.shared_with_source || 0))
-                if (node.isSource) {
-                  // Distinct green halo around the centre node.
-                  ctx.beginPath()
-                  ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI)
-                  ctx.strokeStyle = SOURCE_GREEN
-                  ctx.lineWidth = 2 / globalScale
-                  ctx.stroke()
-                }
-                // Truncated label beneath each node, scaled with zoom.
-                const fontSize = Math.max(2.5, 11 / globalScale)
-                if (globalScale > 0.55 || node.isSource) {
-                  const raw = node.label || ''
-                  const text = raw.length > 28 ? `${raw.slice(0, 27)}…` : raw
-                  ctx.font = `${fontSize}px sans-serif`
-                  ctx.textAlign = 'center'
-                  ctx.textBaseline = 'top'
-                  ctx.fillStyle = node.isSource ? SOURCE_GREEN : 'rgba(170,174,196,0.85)'
-                  ctx.fillText(text, node.x, node.y + r + 2)
-                }
+              // Hover tooltip: full title + year, the relation, and the real
+              // overlap count (shared references / co-citation). Real data only.
+              nodeLabel={(node) => {
+                if (node.isSource) return `${node.label} — this paper`
+                const rel = node.relation === 'reference'
+                  ? 'shares references'
+                  : node.relation === 'citation'
+                    ? 'co-cited'
+                    : null
+                const overlap = node.shared_with_source
+                  ? (node.relation === 'citation'
+                    ? `co-cited ×${node.shared_with_source}`
+                    : `shares ${node.shared_with_source} ref${node.shared_with_source === 1 ? '' : 's'}`)
+                  : (node.shared_refs_count
+                    ? `shares ${node.shared_refs_count} ref${node.shared_refs_count === 1 ? '' : 's'}`
+                    : null)
+                return [
+                  `${node.label}${node.year ? ` (${node.year})` : ''}`,
+                  rel, overlap,
+                ].filter(Boolean).join(' · ')
               }}
-              linkColor={() => 'rgba(140,144,170,0.4)'}
-              linkWidth={1}
+              // Centre "this paper" node is distinct: always the app green; the
+              // selected node also highlights green. Every other node keeps its
+              // year colour.
+              nodeColor={(node) => node.isSource
+                ? SOURCE_GREEN
+                : (selected && selected.id === node.id) ? SOURCE_GREEN : node.color}
+              nodeVal={(node) => (node.isSource ? 9 : 3 + Math.min(6, node.shared_refs_count || node.shared_with_source || 0))}
+              nodeOpacity={0.95}
+              nodeResolution={16}
+              // Edges coloured BY RELATION (violet = shared refs, amber =
+              // co-cited, grey = untagged similar link); the selected node's
+              // own edges brighten.
+              linkColor={(l) => {
+                const tgt = (l.target && typeof l.target === 'object') ? l.target : null
+                const rel = l.relation || tgt?.relation || null
+                if (selected && (_linkEndId(l.source) === selected.id || _linkEndId(l.target) === selected.id)) {
+                  return SOURCE_GREEN
+                }
+                return RELATION_LINK_COLOR[rel] || DEFAULT_LINK_COLOR
+              }}
+              linkWidth={(l) => (selected && (_linkEndId(l.source) === selected.id || _linkEndId(l.target) === selected.id)) ? 1.6 : 0.6}
+              linkOpacity={0.7}
+              // Draggable nodes (Obsidian-style): drag to reposition, and the
+              // drop is PINNED via onNodeDragEnd so the node stays put.
               enableNodeDrag
+              onNodeDragEnd={handleNodeDragEnd}
               cooldownTicks={120}
               warmupTicks={20}
               onEngineStop={handleEngineStop}
@@ -444,6 +499,18 @@ export default function ExploreGraphView({ references, paperTitle, paperSource, 
             <div className="flex items-center gap-1.5">
               <span style={{ width: 36, height: 8, borderRadius: 4, background: 'linear-gradient(90deg, rgb(59,130,246), rgb(245,158,11))', display: 'inline-block' }} />
               <span>{meta.hasYearAxis ? 'older → newer (x = year)' : 'colour = year'}</span>
+            </div>
+            {/* Edge legend — links are coloured by relation. */}
+            <div className="flex items-center gap-1.5">
+              <span style={{ width: 16, height: 0, borderTop: '2px solid rgba(167,139,250,0.85)', display: 'inline-block' }} />
+              <span>shares references</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span style={{ width: 16, height: 0, borderTop: '2px solid rgba(234,179,8,0.9)', display: 'inline-block' }} />
+              <span>co-cited</span>
+            </div>
+            <div className="mt-1" style={{ borderTop: '1px solid var(--color-border)', paddingTop: 3 }}>
+              drag a node to pin it · scroll/drag to orbit
             </div>
           </div>
         )}

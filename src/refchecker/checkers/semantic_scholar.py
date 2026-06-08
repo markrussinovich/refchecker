@@ -43,6 +43,34 @@ logger = logging.getLogger(__name__)
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 
+# Single source of truth for the Semantic Scholar `fields` selector. Every
+# endpoint (search, match, DOI, ArXiv, CorpusID, full-record refetch) asks for
+# the SAME rich set so the matched paper that becomes `verified_data` always
+# carries the display signals (abstract, tldr, citationCount, referenceCount,
+# publicationDate, …). build_enrichment() reads exactly these keys; if an
+# endpoint omits them the UI silently loses Abstract / Claim / citation &
+# reference counts even though we asked for them.
+S2_PAPER_FIELDS = (
+    "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,"
+    "venue,publicationVenue,journal,tldr,citationCount,referenceCount,"
+    "fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate"
+)
+
+# Cache-key salt. The on-disk API cache keys on (service, method, query) only —
+# NOT on the requested `fields`. When the field set grows (as it did when
+# tldr/citationCount/referenceCount were added), old cached responses built with
+# the smaller selector are still served, so the rich fields never appear even
+# on a "fresh" run. Bumping this token whenever S2_PAPER_FIELDS changes salts
+# the cache `method`, invalidating those stale, field-poor entries while
+# preserving the deterministic, query-addressed cache for everything current.
+S2_FIELDS_CACHE_VERSION = "f2"
+
+# Rich display keys we expect a complete S2 paper record to carry. Used to
+# decide whether a matched-but-sparse result (search/match endpoints, or a
+# stale cache entry) should be topped up from the authoritative
+# /paper/{paperId} record before it becomes verified_data.
+_S2_RICH_KEYS = ("abstract", "tldr", "citationCount", "referenceCount")
+
 class NonArxivReferenceChecker:
     """
     A class to verify non-arXiv references using the Semantic Scholar API
@@ -94,11 +122,12 @@ class NonArxivReferenceChecker:
         """
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         cache_q = f"{query}|{year}"
-        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'search_paper', cache_q)
+        method = f"search_paper_{S2_FIELDS_CACHE_VERSION}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, cache_q)
         if hit is not None:
             return hit
         result = self._search_paper_uncached(query, year)
-        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'search_paper', cache_q, result)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, cache_q, result)
         return result
 
     def _search_paper_uncached(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -110,7 +139,7 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate",
+            "fields": S2_PAPER_FIELDS,
             "sort": "relevance"  # Ensure consistent ordering
         }
         
@@ -149,18 +178,19 @@ class NonArxivReferenceChecker:
     
     def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
-        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_doi', doi)
+        method = f"get_by_doi_{S2_FIELDS_CACHE_VERSION}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, doi)
         if hit is not None:
             return hit
         result = self._get_paper_by_doi_uncached(doi)
-        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_doi', doi, result)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, doi, result)
         return result
 
     def _get_paper_by_doi_uncached(self, doi: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
-        
+
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
+            "fields": S2_PAPER_FIELDS
         }
         
         # Make the request with retries and backoff
@@ -200,17 +230,18 @@ class NonArxivReferenceChecker:
     def get_paper_by_arxiv_id(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         clean_id = re.sub(r'v\d+$', '', arxiv_id.strip().rstrip('.'))
-        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_arxiv', clean_id)
+        method = f"get_by_arxiv_{S2_FIELDS_CACHE_VERSION}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, clean_id)
         if hit is not None:
             return hit
         result = self._get_paper_by_arxiv_id_uncached(clean_id)
-        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_arxiv', clean_id, result)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, clean_id, result)
         return result
 
     def _get_paper_by_arxiv_id_uncached(self, clean_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/ARXIV:{clean_id}"
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
+            "fields": S2_PAPER_FIELDS
         }
 
         for attempt in range(2):  # Only 2 attempts for fast-path
@@ -234,18 +265,19 @@ class NonArxivReferenceChecker:
 
     def match_paper_by_title(self, title: str) -> Optional[Dict[str, Any]]:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
-        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'match_title', title)
+        method = f"match_title_{S2_FIELDS_CACHE_VERSION}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, title)
         if hit is not None:
             return hit
         result = self._match_paper_by_title_uncached(title)
-        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'match_title', title, result)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, title, result)
         return result
 
     def _match_paper_by_title_uncached(self, title: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/search/match"
         params = {
             "query": title,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"
+            "fields": S2_PAPER_FIELDS
         }
 
         for attempt in range(2):  # Only 2 attempts for fast-path
@@ -269,6 +301,91 @@ class NonArxivReferenceChecker:
                     continue
                 return None
         return None
+
+    def get_paper_by_id(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch the full S2 record for a paperId via the authoritative
+        /paper/{paperId} endpoint.
+
+        The search and match endpoints frequently return a SPARSE paper object
+        that omits tldr/citationCount/referenceCount even when the `fields`
+        selector requests them. The single-paper endpoint reliably honours the
+        full selector, so we use it to top up a matched-but-incomplete result.
+        Cached (salted with the field-set version) so repeat runs are free."""
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        pid = str(paper_id).strip()
+        if not pid:
+            return None
+        method = f"get_by_id_{S2_FIELDS_CACHE_VERSION}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, pid)
+        if hit is not None:
+            return hit
+        result = self._get_paper_by_id_uncached(pid)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', method, pid, result)
+        return result
+
+    def _get_paper_by_id_uncached(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        endpoint = f"{self.base_url}/paper/{paper_id}"
+        params = {"fields": S2_PAPER_FIELDS}
+        for attempt in range(2):  # fast-path: this is a display nicety, don't stall
+            try:
+                response = self._session.get(endpoint, params=params, timeout=15)
+                if response.status_code == 200:
+                    return response.json()
+                if response.status_code in (404, 400):
+                    return None
+                if response.status_code == 429:
+                    time.sleep(self.request_delay * (self.backoff_factor ** attempt))
+                    continue
+                return None
+            except requests.exceptions.RequestException:
+                if attempt == 0:
+                    time.sleep(0.5)
+                    continue
+                return None
+        return None
+
+    def _enrich_matched_paper(self, paper_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Top up a matched paper with the rich display fields (abstract, tldr,
+        citationCount, referenceCount, …) when the endpoint/cache that produced
+        it returned a sparse object.
+
+        Why this exists: the matched `paper_data` becomes `verified_data`, which
+        build_enrichment() reads to populate Abstract / Claim (tldr) / citation &
+        reference counts on the reference card. Search and match responses (and
+        stale cache entries) often DROP those keys despite the field request, so
+        the card showed nothing but the externalIds-derived link chips. When any
+        expected rich key is missing AND we have a paperId, refetch the full
+        record and merge in ONLY the missing real values — never overwrite an
+        existing value, never fabricate. Returns the same dict (possibly
+        mutated) so callers can keep using it in place."""
+        if not isinstance(paper_data, dict):
+            return paper_data
+
+        # Already complete? Nothing to do.
+        if all(paper_data.get(k) not in (None, "", [], {}) for k in _S2_RICH_KEYS):
+            return paper_data
+
+        paper_id = paper_data.get('paperId')
+        if not paper_id:
+            return paper_data
+
+        try:
+            full = self.get_paper_by_id(paper_id)
+        except Exception as exc:  # display nicety — never break verification
+            logger.debug(f"S2 full-record enrichment failed for {paper_id}: {exc}")
+            return paper_data
+        if not isinstance(full, dict):
+            return paper_data
+
+        # Merge ONLY keys the matched record is genuinely missing, with a real
+        # (non-empty) value in the full record. Real-data only — absent stays
+        # absent so build_enrichment can still distinguish "no signal".
+        for key, value in full.items():
+            if value in (None, "", [], {}):
+                continue
+            if paper_data.get(key) in (None, "", [], {}):
+                paper_data[key] = value
+        return paper_data
 
     def get_venue_from_paper_data(self, paper_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -690,7 +807,7 @@ class NonArxivReferenceChecker:
                 corpus_id = corpus_match.group(1)
                 # Try to get the paper directly by CorpusID
                 endpoint = f"{self.base_url}/paper/CorpusId:{corpus_id}"
-                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal,tldr,citationCount,referenceCount,publicationTypes,publicationDate"}
+                params = {"fields": S2_PAPER_FIELDS}
                 
                 for attempt in range(self.max_retries):
                     try:
@@ -1184,7 +1301,14 @@ class NonArxivReferenceChecker:
         if not paper_url:
             logger.debug(f"No URL found in paper data - available fields: {list(paper_data.keys())}")
             logger.debug(f"Paper data sample: {str(paper_data)[:200]}...")
-        
+
+        # Top up the matched record with the rich display fields (abstract,
+        # tldr, citationCount, referenceCount) when the endpoint that found it
+        # returned a sparse object. This is what becomes `verified_data`, so the
+        # reference card's Abstract / Claim / citation & reference counts depend
+        # on it carrying those fields. No-op when already complete or no paperId.
+        paper_data = self._enrich_matched_paper(paper_data)
+
         return paper_data, errors, paper_url
     
     def _get_paper_from_arxiv_api(self, arxiv_id: str) -> Optional[Dict[str, Any]]:

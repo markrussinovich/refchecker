@@ -3,6 +3,7 @@ import { exportCheckFile, exportBatchFile, publishCheck } from '../../utils/api'
 import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
@@ -43,19 +44,32 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
   const [copied, setCopied] = useState(false)
 
   // Best-effort summary for the included-scans state + the build animation.
+  // The animation's reference / warning / error counts MUST equal the numbers
+  // the app's Summary bar shows, so they are derived from the very same source
+  // of truth (buildReferenceSummary → getEffectiveReferenceStatus), not a
+  // separate, looser recompute. `errors` groups errors + hallucinations so the
+  // gauge/chips line up with the "problem" references the user sees — identical
+  // to the in-app walkthrough (StatsSection).
   const summary = useMemo(() => {
     const refs = selectedCheck?.references || checkStore.references || []
     const ai = selectedCheck?.ai_detection || checkStore.aiDetection || null
-    const status = (r) => (r.status || '').toLowerCase()
+    // The share dialog only opens on a finished check, so treat it as complete
+    // (respect an explicit status if one is present on the selected check).
+    const rawStatus = (selectedCheck?.status || '').toLowerCase()
+    const isComplete = rawStatus ? !['in_progress', 'pending', 'checking', 'queued', 'processing', 'started'].includes(rawStatus) : true
+    // Pull whatever aggregate stats the surface already has so progress totals
+    // are honoured; reference buckets are recomputed from the refs themselves.
+    const aggregate = selectedCheck || checkStore.stats || {}
+    const s = buildReferenceSummary({ stats: aggregate, references: refs, isComplete })
     const stats = {
-      total: refs.length,
-      verified: refs.filter((r) => status(r) === 'verified').length,
-      warnings: refs.filter((r) => status(r) === 'warning').length,
-      errors: refs.filter((r) => status(r) === 'error' || (r.errors?.length)).length,
+      total: s.processedRefs || refs.length,
+      verified: s.references.verified,
+      warnings: s.references.warnings,
+      errors: s.references.errors + s.references.hallucinated,
     }
     const aiOn = isBatch || (!!ai && ai.band !== 'unavailable' && ai.band !== 'inconclusive')
     return { refs, ai, stats, aiOn }
-  }, [selectedCheck, checkStore.references, checkStore.aiDetection, isBatch])
+  }, [selectedCheck, checkStore.references, checkStore.aiDetection, checkStore.stats, isBatch])
 
   // Section include/exclude checkboxes (the export "what to include" controls).
   const [sections, setSections] = useState({ summary: true, ai: true, issues: true, references: true })

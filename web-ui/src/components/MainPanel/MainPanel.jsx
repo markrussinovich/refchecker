@@ -513,9 +513,11 @@ export default function MainPanel() {
         />
       )}
 
-      {/* Scroll to top button — pinned to the viewport's bottom-right corner so
-          it never overlaps full-width content (e.g. the "Find similar papers"
-          button). Higher z so it floats above panels. */}
+      {/* Scroll to top button — pinned to the viewport's bottom-right corner,
+          but STACKED ABOVE the round debug "</>" toggle (DebugPanel.jsx, which
+          sits at bottom-4 right-4 ≈ 40px tall). We share that button's right
+          edge and push our bottom up past its height + a gap so the two never
+          overlap. Higher z so it floats above panels. */}
       {showScrollTop && (
         <button
           onClick={scrollToTop}
@@ -524,8 +526,11 @@ export default function MainPanel() {
             backgroundColor: 'var(--color-bg-tertiary)',
             color: 'var(--color-text-secondary)',
             border: '1px solid var(--color-border)',
-            right: '1.5rem',
-            bottom: '2rem',
+            // Align with the debug button's right edge (right-4 = 1rem) and
+            // stack above it: debug bottom (1rem) + its height (~2.5rem) +
+            // a 0.75rem gap ≈ 4.25rem, rounded to 4.5rem for clearance.
+            right: '1rem',
+            bottom: '4.5rem',
           }}
           title="Scroll to top"
           aria-label="Scroll to top"

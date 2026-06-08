@@ -4,8 +4,10 @@ import { addSeenReference } from '../../utils/api'
 
 /**
  * "Additional Info" row under a reference: surfaces the NEW article-intelligence
- * signals (abstract, claim/TL;DR, preprint flag, open-access full text) and the
- * "Add to Library" action. Every pill is real-data-gated — it renders only when
+ * signals (abstract, claim/TL;DR, preprint flag, open-access full text) and an
+ * honest "✓ In Library" state (checked refs are auto-saved to the
+ * Seen-References library — no redundant "Add" button). Every pill is
+ * real-data-gated — it renders only when
  * its backing enrichment field is actually present, and the component renders
  * nothing when there's no real signal. Citation/reference counts are shown by
  * ReferenceEnrichmentStrip, so they are intentionally NOT duplicated here.
@@ -69,14 +71,28 @@ export default function AdditionalInfoBar({ reference, checkId }) {
       ? { label: 'Pending', title: 'Waiting in the verification queue', color: 'var(--color-text-muted)' }
       : null
 
+  // Checked references are ALREADY auto-added to the Seen-References library:
+  // when a check completes the backend upserts every reference into the global
+  // identity index (the "Seen-Refs backstop" — see upsert_verified_reference).
+  // So a "+ Add to Library" action is redundant + misleading. Instead we surface
+  // the HONEST saved state and let the user CONFIRM it on demand. The only
+  // read-the-real-state path the FE has is the idempotent POST itself (it
+  // returns {added, times_seen} for the existing row without creating a
+  // duplicate), so "confirm" re-reads the live count rather than fabricating it.
+  // NOTE: there is no per-reference remove endpoint on the backend (only a
+  // wipe-everything DELETE /references/seen). We therefore do NOT render a
+  // per-reference "Remove" control — a non-functional / whole-library-clearing
+  // button here would be misleading. Removal stays on the Seen References tab.
   const canCache = !!(reference?.doi || reference?.verified_doi || reference?.arxiv_id || reference?.title)
-  const addToLibrary = async () => {
+  const confirmInLibrary = async () => {
     if (lib === 'adding') return
     setLib('adding')
     try {
       const res = await addSeenReference(reference, checkId || null, null)
       setLibN(res?.data?.times_seen || 1)
-      setLib(res?.data?.added ? 'done' : 'error')
+      // Idempotent upsert: if it returns a row (added OR already present), it's
+      // confirmed in the library. added=false with no row => no identity key.
+      setLib(res?.data ? 'done' : 'error')
     } catch {
       setLib('error')
     }
@@ -97,11 +113,29 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   // we never render two pills pointing at the same destination.
   if (fullLink && fullLink !== oaUrl) actions.push(<Pill key="fl" href={fullLink} title={`Open the reference link: ${fullLink}`} color="var(--color-accent)">Full link ↗</Pill>)
   if (canCache) {
+    // Honest in-library state. Checked refs are auto-saved on check, so the
+    // resting label is "✓ In Library" (not a misleading "+ Add"). Clicking
+    // re-confirms the live times_seen count via the idempotent upsert (no
+    // duplicate row, no fabricated number). Removal isn't offered here because
+    // the backend has no per-reference remove endpoint (only a full cache wipe
+    // on the Seen References tab) — see the note above confirmInLibrary().
+    const libLabel = lib === 'adding'
+      ? 'Confirming…'
+      : lib === 'error'
+        ? 'Not in library'
+        : lib === 'done'
+          ? `✓ In Library${libN > 1 ? ` · ${libN}×` : ''}`
+          : '✓ In Library'
+    const libTitle = lib === 'error'
+      ? 'This reference has no stable identity key (DOI / arXiv / title), so it could not be saved to the library.'
+      : lib === 'done'
+        ? `Saved in your Seen-References library${libN > 1 ? ` · seen ${libN}×` : ''}. Manage or remove it from the Seen References tab. Click to re-confirm the live count.`
+        : 'Auto-saved to your Seen-References library when this reference was checked. Click to confirm the live count. Remove it from the Seen References tab.'
     actions.push(
-      <Pill key="lib" onClick={addToLibrary}
-        title="Add this reference (with its fetched data) to your library cache"
-        color={lib === 'done' ? 'var(--color-success)' : lib === 'error' ? 'var(--color-error)' : undefined}>
-        {lib === 'done' ? `✓ In Library${libN > 1 ? ` · ${libN}×` : ''}` : lib === 'adding' ? 'Adding…' : lib === 'error' ? 'add failed' : '+ Add to Library'}
+      <Pill key="lib" onClick={confirmInLibrary}
+        title={libTitle}
+        color={lib === 'error' ? 'var(--color-error)' : 'var(--color-success)'}>
+        {libLabel}
       </Pill>
     )
   }
