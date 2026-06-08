@@ -82,6 +82,14 @@ _STATUS_MARK = {
 ALL_SECTIONS: Tuple[str, ...] = ("summary", "ai", "issues", "references")
 DEFAULT_SECTIONS: Set[str] = set(ALL_SECTIONS)
 
+
+class PdfEngineUnavailableError(RuntimeError):
+    """Raised when the bundled PDF engine (PyMuPDF / fitz) is missing or too old
+    to render a report. The HTTP layer (backend/main.py) maps this to a clear
+    422/501 "PDF engine unavailable — choose HTML/MD" instead of a raw 500, so a
+    desktop bundle that shipped without PyMuPDF degrades gracefully rather than
+    failing every share/export with an opaque server error."""
+
 # Warning types treated as low-stakes noise (mostly Semantic-Scholar year drift).
 _MINOR_WARNING_TYPES = {"year", "year_unverified", "authors_unverified", "venue"}
 
@@ -935,7 +943,22 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
 
 
 def _render_pdf_from_html(html_str: str) -> bytes:
-    import fitz  # PyMuPDF, already a backend dependency
+    # PyMuPDF (fitz) ships in the backend / signed PyInstaller sidecar, but a
+    # desktop bundle could be built without it (or with a pre-Story version).
+    # Surface that as a typed PdfEngineUnavailableError so the HTTP layer can
+    # return a clean 422/501 ("choose HTML/MD") rather than leaking a raw 500.
+    try:
+        import fitz  # PyMuPDF, already a backend dependency
+    except Exception as e:  # ImportError or a broken/partial install
+        raise PdfEngineUnavailableError(
+            "PDF engine (PyMuPDF) is unavailable — choose HTML or Markdown."
+        ) from e
+    # fitz.Story / DocumentWriter landed in PyMuPDF 1.21; an older wheel slipped
+    # into the bundle would lack them. Treat that as "engine unavailable" too.
+    if not hasattr(fitz, "Story") or not hasattr(fitz, "DocumentWriter"):
+        raise PdfEngineUnavailableError(
+            "PDF engine (PyMuPDF) is too old to render reports — choose HTML or Markdown."
+        )
     mediabox = fitz.paper_rect("a4")
     where = mediabox + (40, 40, -40, -50)
     buf = io.BytesIO()

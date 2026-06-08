@@ -2417,7 +2417,7 @@ async def export_check_html(check_id: int, download: bool = True,
         raise
     except Exception as e:
         logger.error(f"Error exporting check html: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not export this check as HTML.")
 
 
 class _PublishRequest(BaseModel):
@@ -2764,8 +2764,11 @@ async def export_check_file(check_id: int, fmt: str = "html", corrections: bool 
         if not check:
             raise HTTPException(status_code=404, detail="Check not found")
         from backend import export as _export
-        content, media_type, ext = _export.render_export(
-            check, fmt, corrections=corrections, include=include)
+        try:
+            content, media_type, ext = _export.render_export(
+                check, fmt, corrections=corrections, include=include)
+        except _export.PdfEngineUnavailableError as e:
+            raise HTTPException(status_code=501, detail=str(e))
         title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
         headers = {}
         if download:
@@ -2774,8 +2777,10 @@ async def export_check_file(check_id: int, fmt: str = "html", corrections: bool 
     except HTTPException:
         raise
     except Exception as e:
+        # Don't leak the raw exception string to the client — log it server-side
+        # and return a stable, generic detail with the format that failed.
         logger.error(f"Error exporting check {check_id} as {fmt}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Could not export this check as {fmt}.")
 
 
 @app.get("/api/export/batch/{batch_id}/file")
@@ -2798,8 +2803,11 @@ async def export_batch_file(batch_id: str, fmt: str = "html", corrections: bool 
             raise HTTPException(status_code=404, detail="No completed checks in this batch")
         label = summary.get("batch_label") or f"Batch {batch_id[:8]}"
         from backend import export as _export
-        content, media_type, ext = _export.render_batch_export(
-            checks, fmt, corrections=corrections, include=include, label=label)
+        try:
+            content, media_type, ext = _export.render_batch_export(
+                checks, fmt, corrections=corrections, include=include, label=label)
+        except _export.PdfEngineUnavailableError as e:
+            raise HTTPException(status_code=501, detail=str(e))
         headers = {}
         if download:
             safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label)[:80].strip("-") or "batch-report"
@@ -2809,7 +2817,7 @@ async def export_batch_file(batch_id: str, fmt: str = "html", corrections: bool 
         raise
     except Exception as e:
         logger.error(f"Error exporting batch {batch_id} as {fmt}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not export this batch report.")
 
 
 @app.post("/api/export/{check_id}/publish")
@@ -2822,7 +2830,17 @@ async def publish_check(check_id: int, req: _PublishRequest,
     standalone HTML. No credentials are persisted server-side here — the token
     is used for this single request only.
     """
-    title, html_str = await _render_check_html(check_id, current_user)
+    # Guard the render: serialize_check_to_html (or resolving the check) can
+    # raise on a drifted/odd-shaped row, and this call used to sit OUTSIDE the
+    # per-adapter try/except — so any failure surfaced as a raw, detail-leaking
+    # 500 for EVERY share type. Wrap it into a stable, generic 500.
+    try:
+        title, html_str = await _render_check_html(check_id, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"publish_check render failed for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not render this check for sharing.")
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
     import httpx
 
@@ -2837,7 +2855,12 @@ async def publish_check(check_id: int, req: _PublishRequest,
             if not check:
                 raise HTTPException(status_code=404, detail="Check not found")
             from backend import export as _export
-            pdf_bytes = await asyncio.to_thread(_export.render_check_to_pdf, check)
+            try:
+                pdf_bytes = await asyncio.to_thread(_export.render_check_to_pdf, check)
+            except _export.PdfEngineUnavailableError as e:
+                # No PDF engine in this bundle: quick-link needs a PDF, so tell
+                # the user to use Publish-to-web or download HTML/MD instead.
+                raise HTTPException(status_code=501, detail=str(e))
             files = {"file": (f"{safe}.pdf", pdf_bytes, "application/pdf")}
             async with httpx.AsyncClient() as client:
                 r = await client.post("https://tmpfiles.org/api/v1/upload", files=files, timeout=45.0)
@@ -2853,7 +2876,7 @@ async def publish_check(check_id: int, req: _PublishRequest,
             raise
         except Exception as e:
             logger.error(f"quick_link publish failed: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail=f"Quick-link failed: {e}")
+            raise HTTPException(status_code=502, detail="Quick-link failed. Try 'Publish to web', or download the report.")
 
     if req.adapter != "github_gist":
         raise HTTPException(status_code=400, detail=f"Unknown publish adapter: {req.adapter}")
@@ -2884,7 +2907,7 @@ async def publish_check(check_id: int, req: _PublishRequest,
         raise
     except Exception as e:
         logger.error(f"publish_check failed: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Publish to web failed. Check your GitHub token, or download the report.")
 
 
 @app.get("/api/thumbnail/{check_id}")
