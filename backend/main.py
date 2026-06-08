@@ -7181,7 +7181,8 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
 
 
 class _AuthorProfileRequest(BaseModel):
-    author_id: str  # Semantic Scholar author id
+    author_id: Optional[str] = None      # Semantic Scholar author id
+    openalex_id: Optional[str] = None    # OpenAlex author id (A…) — fallback for non-S2 authors
 
 
 # Module-level TTL cache for S2 author profiles — the hover tooltip can fire
@@ -7200,47 +7201,70 @@ async def author_profile(req: _AuthorProfileRequest, current_user: UserInfo = De
     """
     import time as _time
     author_id = (req.author_id or "").strip()
-    if not author_id:
+    oa_id = (req.openalex_id or "").strip()
+    cache_key = author_id or (f"oa:{oa_id}" if oa_id else "")
+    if not cache_key:
         return {"available": False}
     # Serve from cache when fresh.
-    cached = _AUTHOR_PROFILE_CACHE.get(author_id)
+    cached = _AUTHOR_PROFILE_CACHE.get(cache_key)
     if cached and (_time.monotonic() - cached[0]) < _AUTHOR_PROFILE_TTL:
         return cached[1]
 
     import httpx
-    api_key = await _resolve_semantic_scholar_api_key(None)
-    headers = {"x-api-key": api_key} if api_key else {}
-    fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
-    url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
+    payload = {"available": False}
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
-        if r.status_code != 200:
-            payload = {"available": False}
-        else:
-            d = r.json() or {}
-            papers = [
-                {"title": p.get("title"), "year": p.get("year")}
-                for p in (d.get("papers") or [])
-                if p.get("title")
-            ]
-            # Most-recent first, cap to 5 so the tooltip stays compact.
-            papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
-            payload = {
-                "available": True,
-                "name": d.get("name"),
-                "affiliations": d.get("affiliations") or [],
-                "paperCount": d.get("paperCount"),
-                "citationCount": d.get("citationCount"),
-                "hIndex": d.get("hIndex"),
-                "homepage": d.get("homepage"),
-                "papers": papers[:5],
-            }
+        if author_id:
+            # Semantic Scholar author API (richest: + recent papers).
+            api_key = await _resolve_semantic_scholar_api_key(None)
+            headers = {"x-api-key": api_key} if api_key else {}
+            fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
+            url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
+            if r.status_code == 200:
+                d = r.json() or {}
+                papers = [{"title": p.get("title"), "year": p.get("year")}
+                          for p in (d.get("papers") or []) if p.get("title")]
+                papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
+                payload = {
+                    "available": True, "name": d.get("name"),
+                    "affiliations": d.get("affiliations") or [],
+                    "paperCount": d.get("paperCount"), "citationCount": d.get("citationCount"),
+                    "hIndex": d.get("hIndex"), "homepage": d.get("homepage"),
+                    "papers": papers[:5], "source": "semantic_scholar",
+                }
+        elif oa_id:
+            # OpenAlex /authors fallback for authors with no S2 id — supplies
+            # h-index / citations / works-count / ORCID for the hover.
+            vid = oa_id if oa_id.startswith("A") else str(oa_id).rsplit("/", 1)[-1]
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"https://api.openalex.org/authors/{vid}", timeout=10.0)
+            if r.status_code == 200:
+                d = r.json() or {}
+                ss = d.get("summary_stats") or {}
+                insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
+                         if isinstance(i, dict) and i.get("display_name")]
+                if not insts:
+                    for aff in (d.get("affiliations") or [])[:2]:
+                        nm = ((aff or {}).get("institution") or {}).get("display_name")
+                        if nm:
+                            insts.append(nm)
+                orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
+                if isinstance(orcid, str):
+                    orcid = orcid.rsplit("/", 1)[-1]
+                payload = {
+                    "available": True, "name": d.get("display_name"),
+                    "affiliations": insts,
+                    "paperCount": d.get("works_count"), "citationCount": d.get("cited_by_count"),
+                    "hIndex": ss.get("h_index"), "homepage": None,
+                    "orcid": orcid if isinstance(orcid, str) else None,
+                    "papers": [], "source": "openalex",
+                }
     except Exception as e:
-        logger.debug("author_profile fetch failed for %s: %s", author_id, e)
+        logger.debug("author_profile fetch failed for %s: %s", cache_key, e)
         payload = {"available": False}
 
-    _AUTHOR_PROFILE_CACHE[author_id] = (_time.monotonic(), payload)
+    _AUTHOR_PROFILE_CACHE[cache_key] = (_time.monotonic(), payload)
     return payload
 
 

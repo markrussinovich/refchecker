@@ -1446,7 +1446,7 @@ function _authorColor(name) {
 
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const [open, setOpen] = useState(false)
-  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id) || null)
+  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
   const wrapperRef = useRef(null)
   const enterTimer = useRef(null)
   const leaveTimer = useRef(null)
@@ -1454,13 +1454,15 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   // Lazily pull the richer Semantic Scholar profile the first time the card
   // opens for an author that has an S2 id. Soft-fails to the basic card.
   const loadProfile = () => {
-    const id = e?.s2_author_id
-    if (!id || profile) return
-    if (_authorProfileCache.has(id)) { setProfile(_authorProfileCache.get(id)); return }
-    fetchAuthorProfile(id)
+    const s2 = e?.s2_author_id
+    const oa = e?.openalex_id
+    const key = s2 || (oa ? `oa:${oa}` : null)
+    if (!key || profile) return
+    if (_authorProfileCache.has(key)) { setProfile(_authorProfileCache.get(key)); return }
+    fetchAuthorProfile(s2 ? { author_id: s2 } : { openalex_id: oa })
       .then(res => {
         const data = res?.data || { available: false }
-        _authorProfileCache.set(id, data)
+        _authorProfileCache.set(key, data)
         setProfile(data)
       })
       .catch(() => { /* keep basic card */ })
@@ -1520,7 +1522,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           ? profile.affiliations
           : (Array.isArray(e.institutions) ? e.institutions : [])
         const hasMetrics = profile?.available && (profile.paperCount != null || profile.citationCount != null || profile.hIndex != null)
-        const loading = !!e.s2_author_id && !profile
+        const loading = (!!e.s2_author_id || !!e.openalex_id) && !profile
         const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
         const chip = (label, val, title) => (
           <span title={title} className="inline-flex flex-col items-center px-2.5 py-1 rounded-lg"

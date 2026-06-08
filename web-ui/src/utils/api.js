@@ -174,8 +174,15 @@ export const expandPaper = ({ paper_id, limit = 8, title = null, ai_detection = 
   api.post('/papers/expand', { paper_id, limit, title, ai_detection })
 
 // Enriched Semantic Scholar author profile for the hover card (cached server-side).
-export const fetchAuthorProfile = (authorId) =>
-  api.post('/authors/profile', { author_id: String(authorId) }, { timeout: 15000 })
+// Author profile for the hover card. Accepts a Semantic Scholar id (string) or
+// { author_id, openalex_id } — OpenAlex is the fallback for non-S2 authors so
+// h-index / citations / ORCID still appear.
+export const fetchAuthorProfile = (idOrOpts) => {
+  const body = typeof idOrOpts === 'string'
+    ? { author_id: String(idOrOpts) }
+    : { author_id: idOrOpts?.author_id ? String(idOrOpts.author_id) : null, openalex_id: idOrOpts?.openalex_id || null }
+  return api.post('/authors/profile', body, { timeout: 15000 })
+}
 
 // Nodes + edges for the 3D Seen-References library graph.
 export const fetchReferenceLibraryGraph = ({ limit = 400, min_times_seen = 1, edge_strategy = 'shared-authors' } = {}) =>
