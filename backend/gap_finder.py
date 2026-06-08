@@ -106,7 +106,17 @@ def find_gaps(references: Any,
         t = titles.get(wid)
         if not t or not t.get("title"):
             continue  # only surface works we could resolve to a real title
-        suggestions.append({"openalex_id": wid, "co_citations": c, **t})
+        # Reality/provenance: every suggestion is an OpenAlex-resolved real work
+        # (from the bibliography's own referenced_works — never LLM-generated).
+        # Surface a verifiable link + a `resolved` flag so the UI can show it.
+        short = str(wid).rsplit("/", 1)[-1]
+        suggestions.append({
+            "openalex_id": wid,
+            "co_citations": c,
+            "resolved": True,
+            "openalex_url": wid if str(wid).startswith("http") else f"https://openalex.org/{short}",
+            **t,
+        })
 
     return {"checked": len(dois), "analyzed": len(meta),
             "suggestions": suggestions, "source": "openalex"}

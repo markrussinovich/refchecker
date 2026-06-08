@@ -29,6 +29,7 @@ export default function GapFinder({ checkId, references }) {
   const [added, setAdded] = useState({})
   const [info, setInfo] = useState({})       // key -> { insertedIndex }
   const [preview, setPreview] = useState({}) // key -> { open, loading, data, error }
+  const [collapsed, setCollapsed] = useState(false) // collapse the results panel
   const keyOf = (s, i) => s.openalex_id || s.doi || `i${i}`
 
   // Step 1: show a read-only "document changes" preview before committing. The
@@ -86,9 +87,13 @@ export default function GapFinder({ checkId, references }) {
       {state.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
       {d && suggestions.length > 0 && (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <div style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
-            {suggestions.length} work{suggestions.length === 1 ? '' : 's'} your references cite that you might add
-          </div>
+          <button type="button" onClick={() => setCollapsed((c) => !c)}
+            className="w-full flex items-center justify-between gap-2 text-left"
+            style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            <span>{suggestions.length} work{suggestions.length === 1 ? '' : 's'} your references cite that you might add</span>
+            <span className="text-xs font-normal" style={{ color: 'var(--color-text-muted)' }}>{collapsed ? '▸ show' : '▾ hide'}</span>
+          </button>
+          {!collapsed && (<>
           <ul className="mt-1.5 space-y-1.5">
             {suggestions.map((s, i) => (
               <li key={`${s.openalex_id}-${i}`} style={{ color: 'var(--color-text-primary)' }}>
@@ -100,6 +105,11 @@ export default function GapFinder({ checkId, references }) {
                 {s.doi && (
                   <a href={doiLink(s.doi)} onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(doiLink(s.doi)) } }}
                     target="_blank" rel="noopener noreferrer" className="ml-1.5 underline text-xs" style={{ color: 'var(--color-accent)' }}>DOI ↗</a>
+                )}
+                {s.resolved && s.openalex_url && (
+                  <a href={s.openalex_url} onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(s.openalex_url) } }}
+                    target="_blank" rel="noopener noreferrer" className="ml-1.5 text-xs" style={{ color: 'var(--color-success)' }}
+                    title="Verified: a real OpenAlex record (not AI-generated)">✓ OpenAlex ↗</a>
                 )}
                 {(() => {
                   const k = keyOf(s, i)
@@ -162,8 +172,9 @@ export default function GapFinder({ checkId, references }) {
             ))}
           </ul>
           <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
-            Advisory only (OpenAlex co-citation). These are not required citations — judge relevance yourself.
+            Advisory only (OpenAlex co-citation). Each is a real OpenAlex-resolved work cited by your own references — not AI-generated. Judge relevance yourself.
           </div>
+          </>)}
         </div>
       )}
       {d && suggestions.length === 0 && (

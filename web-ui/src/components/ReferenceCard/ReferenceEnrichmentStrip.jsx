@@ -105,7 +105,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     counters.push({ label: 'Citing Patents', value: citing_patents_count.toLocaleString() })
   }
   if (typeof cited_by_count === 'number') {
-    counters.push({ label: 'Citing Scholarly Works', value: cited_by_count.toLocaleString() })
+    counters.push({ label: 'Citations', value: cited_by_count.toLocaleString(), title: 'Times this work is cited by other scholarly works (OpenAlex / Semantic Scholar / Crossref)' })
   }
   if (typeof reference_count === 'number') {
     counters.push({ label: 'Reference Count', value: reference_count.toLocaleString() })
@@ -141,7 +141,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
       {counters.length > 0 && (
         <div className="flex flex-wrap items-center" style={{ color: 'var(--color-text-muted)' }}>
           {counters.map((c, i) => (
-            <span key={c.label} className="flex items-center">
+            <span key={c.label} className="flex items-center" title={c.title || undefined}>
               {i > 0 && <span className="mx-2">·</span>}
               <span>{c.label}: </span>
               <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{c.value}</strong>

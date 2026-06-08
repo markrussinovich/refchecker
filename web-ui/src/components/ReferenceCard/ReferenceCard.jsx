@@ -631,17 +631,21 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               style={{ color: 'var(--color-text-primary)' }}
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
-              {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (
-                <span
-                  title="Cited inline — this reference is mentioned in the body text"
-                  className="inline-flex items-center align-middle ml-1.5"
-                  style={{ color: 'var(--color-accent, #3b82f6)' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-label="Cited inline">
-                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
-                  </svg>
-                </span>
-              )}
+              {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (() => {
+                const inlineUses = reference.citation_count || reference.citation_contexts?.length || 0
+                return (
+                  <span
+                    title={`Cited inline — mentioned ${inlineUses || 1}× in this paper's body text`}
+                    className="inline-flex items-center gap-1 align-middle ml-1.5 px-1.5 py-0.5 rounded text-xs font-medium"
+                    style={{ color: 'var(--color-accent, #3b82f6)', background: 'rgba(59,130,246,0.14)', verticalAlign: 'middle' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
+                    </svg>
+                    Cited inline{inlineUses > 0 ? ` · ${inlineUses}×` : ''}
+                  </span>
+                )
+              })()}
             </div>
 
             {/* Export button */}
