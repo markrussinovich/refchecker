@@ -25,10 +25,12 @@ const SIMILAR_INFLIGHT = new Map()
  */
 // Discovery modes (#63). 'similar' is the existing co-citation/overlap
 // pipeline; 'cites_refs' shows the source paper's real OpenAlex
-// references + citations.
+// references + citations; 'both' merges the two (Similar results first,
+// then cites/refs candidates not already surfaced, deduped server-side).
 const MODES = [
   { id: 'similar', label: 'Similar' },
   { id: 'cites_refs', label: 'Cites & Refs' },
+  { id: 'both', label: 'Both' },
 ]
 
 // Extract a DOI or arXiv id from the source string (a URL or raw id) so
@@ -207,6 +209,8 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
         <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           {mode === 'cites_refs'
             ? "This paper's real citation neighbourhood from OpenAlex — the works it cites and the works that cite it."
+            : mode === 'both'
+            ? 'Similar papers (shared references) plus this paper\'s real OpenAlex cites & refs, merged into one list.'
             : 'Find up to 5 papers from Semantic Scholar that share the most references with this paper.'}
         </div>
         <button
@@ -218,7 +222,13 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
         >
           {loading
             ? `Searching… ${elapsedSec}s`
-            : (loaded ? 'Refresh' : (mode === 'cites_refs' ? 'Find cites & refs' : 'Find similar papers'))}
+            : (loaded
+              ? 'Refresh'
+              : (mode === 'cites_refs'
+                ? 'Find cites & refs'
+                : mode === 'both'
+                ? 'Find similar + cites & refs'
+                : 'Find similar papers'))}
         </button>
       </div>
 
