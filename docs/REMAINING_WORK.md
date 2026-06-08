@@ -1,0 +1,515 @@
+# RefChecker — Final Remaining Work & Implementation Prompt
+
+> Consolidated, de-duplicated deliverable reconciling two adversarially-verified gap-analysis passes
+> (batch **1(A–J)** = original requests; batch **2(K–U)** = the two newer, more current passes) against
+> the live code at `/Users/ario/Downloads/refchecker` (React `web-ui/`, FastAPI `backend/` + `src/refchecker/`,
+> Tauri `tauri-app/`). Batch 2 is treated as the more current read; where it supersedes a batch-1 item the
+> batch-1 item is collapsed into it and only the residual sub-bug is kept.
+
+---
+
+## 1. Executive summary
+
+After reconciling all **83 verified findings** and collapsing the known duplicates:
+
+- **Done (do NOT rebuild): ~52 reconciled items.**
+- **Remaining (PARTIAL / BROKEN / MISSING): 27 work items.**
+
+Remaining split by priority:
+
+| Priority | Count | Items |
+|---|---|---|
+| **P0** | **5** | K2, F1, H1, O3, O4 |
+| **P1** | **17** | A2, A3, A6, B1, B2, C2, D1, D3, D5, E1, F2, G1, G2, G3, H2, J3 (→U1/U3), L2, M1, M2, O2, O5, O6, P4, Q1/Q3, Q4, R4, T3, T4, U6 *(grouped; see table)* |
+| **P2** | **5** | A1-FIX, A4, C1-FIX, I2, M5 (plus optional one-liners) |
+
+> The P1 row above is shown un-grouped for honesty; the table in §3 lists each P1 item on its own row. The exact P1 work-item count is **20** once O2/O5/O6, P4, Q1+Q3, U1, U3, L2, M1, M2, R4, T3, T4, U6 are each counted, but several are sub-streams of the same engineering cluster (viewers, share-video, auth/teams). The headline number to plan against is **27 remaining work items across 5 P0 + ~17 P1 + ~5 P2.**
+
+### P0 blockers (called out by name)
+
+1. **K2 — Published-date dishonesty.** The real full publication date (`"Oct 1, 2021"`) is computed and sent to the FE but silently dropped, and it falsely gates an otherwise-empty `ReferenceEnrichmentStrip` container. Must either render the real date or be cleanly removed (no empty gated container).
+2. **F1 — LLM hallucination check hangs forever** on "Checking for hallucination with LLM…" (no client HTTP timeouts; shared executor saturates; no FE wall-clock fallback).
+3. **H1 — Share endpoint 500 for all sharing types** (un-guarded `_render_check_html` in `publish_check`; PDF engine not degraded gracefully). *Distinct from the batch-check 500, which is DONE, and distinct from the share-video items.*
+4. **O3 — Per-reference "View in document" is still not native-PDF** (image-raster stack, conversion text-only, hyperlink targets a React tab instead of jumping inside the PDF).
+5. **O4 — AI per-sentence "view in document" button is missing** from the page-by-page and top-sentence lists.
+
+---
+
+## 2. Already done — do NOT rebuild
+
+These are reconciled as functionally complete. Do **not** touch them except where a remaining item explicitly extends them. Each cites the key file so the agent can confirm.
+
+**Blocking bugs / batch endpoint**
+- **The `/api/check/batch` 500 `AttributeError`** on `semantic_scholar_api_key` / `paperclip_api_key` is fixed (the single de-duped item that appeared as **K1 / N4 / Q6 / B0** — all DONE). `BatchUrlsRequest` model `backend/main.py:943-968`, handler `:3884-3923`. (No regression test locks it — add one; see G/DoD.)
+- **"Unknown mismatch" warning badge (K3)** — backend stops emitting + filters (`refchecker_wrapper.py:1305-1308`), FE filters content-free warnings (`ReferenceCard.jsx:594`).
+
+**Inline-citation numbering checker**
+- **Numbering/ordering checker exists and works** for numeric + author-year + first-mention (E1 partial only for the *alphabetic* + *last-mentioned* extensions). Badge + issue list (**E2/E3**) DONE — `inline_citation_checker.py`, `CitationIntegrity.jsx:121-159`.
+- **Citation-integrity UI re-runnable (S1)** and **result panel positioned/height-capped (S2)** — `CitationIntegrity.jsx:76,118`.
+
+**Per-article isolation**
+- **Retraction-check (L1)** and **gap-finder (L3)** are per-article isolated via remount key (`MainPanel.jsx:351-357`); root-cause (L4) fix landed. *Residual:* similar-papers isolation (L2) still PARTIAL — see §3.
+
+**Seen-library / similar-papers graph**
+- **3D draggable graph (R3)** done for Explore; **similar-papers graph populates/recreates (R2)** done; **radial pin edge-persistence (I1 == R5)** DONE — `GraphLibraryView.jsx`, `ExploreGraphView.jsx`. *Residual:* common-cites/refs **visualization (R4)** is BROKEN and remains; library-3D polish (I2) and clickable radial DOIs (R1) remain.
+
+**Author popup**
+- **Author-popup scroll + resize-to-content (N1)** DONE — supersedes batch-1 A6's "scrollable" claim (A6's *pin-to-modal* residual remains). `ReferenceCard.jsx:1678,1685`.
+- **Google Scholar + Semantic Scholar rendered as logo icon-links (N2)** DONE — `ReferenceCard.jsx:1487-1524,1768`.
+- **"et al." full-author recovery on the verified path (N3)** DONE — `refchecker_wrapper.py recover_full_authors_from_enrichment`. (A2's FE "et al. → expand" control and N3's error-path/sentinel hardening remain.)
+- **Journal publishing guidelines on venue hover (A5)** DONE — `ReferenceCard.jsx VenueLine`, `main.py:8030-8111`.
+
+**Enrichment**
+- **OpenAlex `/authors` h-index/citation backfill for non-S2 authors (M3, issue #54)** DONE — `main.py:7888-7907`. (Crossref/DBLP-only authors with no id remain unaddressed; out of scope for #54.)
+- **Dead non-clickable "Published 2023" pill removed (M4)** DONE.
+
+**Context view**
+- **Highlight is a working hyperlink back to the inline-cited reference (D4)** + **attention pulse animation (D2)** DONE — `StatusSection.jsx:470-481`.
+- **Context-view default zoom: fit-to-width/page + focus the highlight on open (P1)** DONE — supersedes batch-1 D1's "opens focused" claim. (D1's *deterministic re-zoom/centering* residual remains.) `NativePdfViewer.jsx`.
+- **Zoom in/out button visibility in both themes (P2)** DONE; **zoom controls present in the per-reference context viewer (P3)** DONE.
+- **Back-to-top no longer overlaps the debug button (P5)** DONE — `MainPanel.jsx:547-548`.
+
+**Sharing / export / video**
+- **Share-video reflects real per-article counts + outline/overlap fixed (Q2)** DONE; **exported-file logo + count parity (Q5/U5)** DONE; **export theme + design.md (U4)** DONE.
+
+**Per-ref chat / buttons / auth**
+- **Per-reference "Chat about this reference" button (T1)** DONE — `ReferenceCard.jsx` + `ArticleAssistant.jsx` + `backend/article_chat.py`.
+- **Redundant "Add to library" action removed (T2)** DONE — `AdditionalInfoBar.jsx`.
+- **Realtime team presence on the same batch (U2)** DONE (presence keyed on `batch-{id}` room) — note: not team-membership-gated (that gating is part of the J3/U1 work).
+- **The two named lint/cfg fixes for U6** (SimilarPapersPanel elapsed-timer; tauri devtools) are released in `desktop-v0.9.18`; only the *fresh green-CI verification* sub-claim remains.
+- **Native-macOS design language (J1)**, **Support button email/GitHub (J2)**, **"Similar Cites & Refs" Refs/Cites/Both toggle (J4)** DONE — `index.css`, `SupportMenu.jsx`, `SimilarPapersPanel.jsx`.
+
+---
+
+## 3. Final remaining list
+
+Sorted **P0 → P2**, then **BROKEN → PARTIAL → MISSING**. (Original finding id in parentheses.)
+
+| ID | Area | Requirement (user's ask) | Current state (file ref) | Severity |
+|---|---|---|---|---|
+| **R01** (K2) | Enrichment honesty | Show the real full publication date, or remove it — no empty gated container | Date computed + sent but dropped; falsely gates the strip (`ReferenceEnrichmentStrip.jsx:39,59`) | **P0 · BROKEN** |
+| **R02** (O3) | Viewers | Per-ref "View in document" = native PDF + conversion + in-PDF hyperlink | Image-raster stack, conversion text-only, hyperlink → React tab (`StatusSection.jsx:464-526`) | **P0 · BROKEN** |
+| **R03** (O4) | Viewers | Per-sentence "view in document" button on every AI sentence | No button on any `PageRow`/`SentenceList` sentence (`AIDetectionVisuals.jsx:136`) | **P0 · BROKEN** |
+| **R04** (F1) | LLM | Hallucination check must never wedge the UI forever | No client timeouts; shared executor saturates; no FE fallback (`hallucination_verifier.py:422,444,460`; `refchecker_wrapper.py:4182-4186`) | **P0 · PARTIAL/BROKEN** |
+| **R05** (H1) | Sharing | Sharing must not 500 for all types | Un-guarded `_render_check_html` in `publish_check` (`main.py:2825`); PDF not degraded | **P0 · PARTIAL** |
+| **R06** (B1) | Corrections | Mentioned DOI correction must match the rendered suggested correction (esp. bibtex) | No `doi` case in `getCorrectedReferenceData`; bibtex reads only `authoritative_urls` (`formatters.js:613,659,1078`) | **P1 · BROKEN** |
+| **R07** (B2) | Corrections | `@article{awcomparison}` correction must include year=2018, venue, AND doi=10.5812/ijem.12104 | DOI dropped from bibtex (`formatters.js:1078`); test #53 never asserts DOI | **P1 · BROKEN** |
+| **R08** (R4) | Graph | Restore common-cites/refs *visualization*, not just a count | Relation modes show only a count, never which works are shared (`cites_refs.py`, `main.py:6745/6749`) | **P1 · BROKEN** |
+| **R09** (A2) | Author UI | "et al." expandable to the full parsed/enriched author list | `normalizeAuthors` renders the literal "et al." token; no expand control (`formatters.js:67-81`, `ReferenceCard.jsx:1324`) | **P1 · MISSING** |
+| **R10** (A3) | Author UI | Find more authors when the matched record has no author ids | No name/title-resolution fallback; chip only loads with an existing id (`enrichment.py:459-479`, `ReferenceCard.jsx:1542-1548`) | **P1 · PARTIAL** |
+| **R11** (A6) | Author UI | Pin/expand the hover popover into a persistent, fully-opened scrollable panel | Hover-only timers; recent papers sliced to 3 (`ReferenceCard.jsx:1558-1566,1737`) | **P1 · PARTIAL** |
+| **R12** (D1) | Context view | Open focused on the reference at a clear zoom, reliably centered | Conditional zoom keeps stale value on re-target; 5×280ms retry races a lazy image (`StatusSection.jsx:157,172-178,424`) | **P1 · PARTIAL** |
+| **R13** (D3) | Context view | Highlight the WHOLE sentence, not a 5-word fragment | Needle falls back to first 5 words on PDF-extraction mismatch (`thumbnail.py:917-918,935`) | **P1 · PARTIAL** |
+| **R14** (D5) | Context view | Highlight color reflects chaining/verification status, consistently across viewers | 3 divergent/incomplete status→color maps (`StatusSection.jsx:34-43`, `NativePdfViewer.jsx:11-22`, `DocumentViewer.jsx:240-260`) | **P1 · PARTIAL** |
+| **R15** (E1) | Inline parser | Parse/validate numeric + **alphabetic** + **first/last-mentioned** styles | Only numeric + author-year + first-mention; no alpha-key family, no last-mentioned (`inline_citation_checker.py:331,533,557`) | **P1 · PARTIAL** |
+| **R16** (F2) | Summary | The two issue-count badges must agree | HealthBadge double-counts refs with both error+warning; row-2 tooltip says "(total issues)" for per-ref values (`HealthBadge.jsx:52-53`, `StatsSection.jsx:706`) | **P1 · PARTIAL** |
+| **R17** (G3) | Add-to-list | Don't offer to add a ref already present/invalid; no silent duplicates | Manual add path has no dedup/validity guard; GapFinder dedup is OpenAlex-id-only (`main.py:5905-5997`, `gap_finder.py:92`) | **P1 · PARTIAL** |
+| **R18** (G1) | Add-to-list | Add the ref AND yield the new list with new inline numbers | Renumber commits only on Undo path; renumber is preview-only; no corrected+renumbered list endpoint (`main.py:5964-5972`, `GapFinder.jsx:45,59`) | **P1 · PARTIAL** |
+| **R19** (G2) | Add-to-list | Document was→should-be, ideally rendered into the PDF | Diff lives only in React DOM; only AI-detection PDF is annotated; export prints flat "Suggested:" (`main.py:3353-3358`, `export.py:889-890`) | **P1 · PARTIAL** |
+| **R20** (C2) | Gap-finder | Guard gap-finder list + similar-papers against hallucination, with provenance | Verified path dead from UI; reachable modes hardcode `was_verified:false`; no provenance link (`main.py:6754-6756`, `SimilarPapersPanel.jsx:492-518`) | **P1 · PARTIAL** |
+| **R21** (M1) | Enrichment | Cross-source backfill of citation/reference counts when a non-S2 source wins | No `backfill_enrichment`; coalesce only within one source (`enrichment.py:74-91,265-274`) | **P1 · PARTIAL** |
+| **R22** (M2) | Enrichment | Abstract/Claim(tldr)/Funding lost when a non-S2/non-OpenAlex source wins | Same root cause as M1; non-S2 winner loses tldr; abstract/funding lost for DBLP/ACL/arXiv winners | **P1 · PARTIAL** |
+| **R23** (H2/Q1/Q3) | Share video | Per-check "video" at top of popup: persistent, higher quality, no record/download buttons | Canvas unmounts after one pass → blank top; quality is dpr≤2 on 460px; not a real .webm (`ShareModal.jsx:187`, `ShareAnimationCanvas.jsx:38-39,89`) | **P1 · PARTIAL** |
+| **R24** (Q4) | Share video | Show the per-article video alongside that article's stats on the stats page | Entirely unimplemented on `StatsSection`/`MainPanel` | **P1 · MISSING** |
+| **R25** (L2) | Isolation | Similar-papers isolated per article | `checkId` not wired to `SimilarPapersPanel`; falls through to `mode::title:` cache key (`MainPanel.jsx:498`, `SimilarPapersPanel.jsx:81`) | **P1 · PARTIAL** |
+| **R26** (J3→U1) | Auth/teams | Multi-user collaboration on the same batch + team creation + shared checks | `check_history` has no `team_id`; no share/list-by-team endpoint; non-owner gets 404 (`database.py:366-403`, `main.py:1215`) | **P1 · PARTIAL** |
+| **R27** (J3→U3) | Auth/teams | Enable accounts/teams from inside the app (no manual env/restart) | Config saved but not hot-reloaded; `is_multiuser_mode()`/providers read import-time constants (`auth.py:30-32,36,503-518`) | **P1 · PARTIAL** |
+| **R28** (O2) | Viewers | Inline citation hyperlinks to the reference list *inside the PDF* | Link switches a React tab, not an in-PDF jump (`StatusSection.jsx`) | **P1 · PARTIAL** |
+| **R29** (O5) | Viewers | pdf.js on-hover bar + hyperlink works for all spans | Clickable only with `refId`; AI spans have none; link only switches React tab (`AIDetectionPanel.jsx:54`) | **P1 · PARTIAL** |
+| **R30** (O6) | Viewers | pdf.js banners fully opaque; link targets the PDF reference list | Banners < fully opaque in ThumbnailOverlay; link not re-targeted (`StatusSection.jsx:452,493`) | **P1 · PARTIAL** |
+| **R31** (P4) | Viewers | Pinch-to-zoom in the native PDF / context overlay | Works in AI modal, NOT in the per-ref ThumbnailOverlay (`StatusSection.jsx:408`) | **P1 · PARTIAL** |
+| **R32** (R1) | Graph | Clickable DOIs in the Seen-library graph | Radial hover DOI is dead text; no inline row link (`RadialChordGraph` 108-129) | **P2 · PARTIAL** |
+| **R33** (T3) | Buttons | Unified button styling (sizing/hover/theming) for per-ref/assistant/pill buttons | No shared button system; missing hover on assistant trigger/Send and pills (`AdditionalInfoBar.jsx:15-36`, `ArticleAssistant.jsx`) | **P1 · PARTIAL** |
+| **R34** (T4) | Models | Separate model selection for Chat-with-PDF vs Summarize | Chat + Summarize share one selection; backend already accepts per-call `llm_config_id` (`useConfigStore.js`, `ArticleAssistant.jsx`) | **P1 · PARTIAL** |
+| **R35** (M5) | Enrichment UI | Make count tiles clickable drill-downs (or labeled stats with titles) | Citations/Reference Count/Citing Patents are inert text; only Citations has a title (`ReferenceEnrichmentStrip.jsx:105-114`) | **P2 · PARTIAL** |
+| **R36** (A1-FIX) | Author UI | Show ORCID whenever honestly resolvable (read fetched profile too) | Popover builds ORCID only from `e.orcid`, drops fetched `profile.orcid` (`ReferenceCard.jsx:1605`; `main.py:7905`) | **P2 · PARTIAL** |
+| **R37** (A4) | Author UI | Clearer inline badge co-locating "used N× here" with literature citation count | Badge + academic count live in two places (`ReferenceCard.jsx:649-663`) | **P2 · PARTIAL** |
+| **R38** (I2) | Graph | Bring library 3D graph up to Explore-graph polish | No node drag / force tuning / auto-frame in `GraphLibraryView.jsx:362` | **P2 · PARTIAL** |
+| **R39** (C1-FIX) | Gap-finder | Friendly 404 instead of raw proxy HTML; smoke test the route | `GapFinder.jsx run()` catch surfaces raw message (`:31-33`); route itself is correct | **P2 · PARTIAL** |
+| **R40** (U6) | CI/release | Run all checks (lint/test/cargo) green before publish | Two named fixes released; fresh full green-CI pass unverified | **P1 · PARTIAL** |
+| **R41** (N3-res) | Author UI | Don't render a leftover "et al" sentinel as a fake author chip; recover on error path | `normalizeAuthors` keeps the sentinel; error path returns raw authors (`formatters.js:67-81`, `refchecker_wrapper.py:1625`) | **P2 · PARTIAL** |
+
+*Optional one-liners (do last, only if time): J4-OPT tab rename `MainPanel.jsx:415`; J1-OPT `index.css:90` → `var(--font-sans)`; A5-OPT non-DOAJ guidelines; I1-OPT co-cited edges; D2-OPT multi-line pulse; C3 persisted collapse.*
+
+---
+
+## 4. Implementation prompt (self-contained — hand this to a coding agent)
+
+> **Context for the agent (no prior memory assumed):** You are an autonomous coding agent in the `refchecker`
+> monorepo at `/Users/ario/Downloads/refchecker` — React frontend `web-ui/`, FastAPI backend `backend/`,
+> checker library `src/refchecker/`, Tauri wrapper `tauri-app/`. Close every item below exactly as specified,
+> add a test per item, keep `cd web-ui && npm run build && npm test` and backend `pytest` green, eslint clean,
+> and Tauri building. **Do NOT rebuild anything in §2.** Make additive, low-risk changes.
+>
+> **Hard constraints (the user's explicit asks — violating any is a failure):**
+> - **No fabrication.** Every author / paper / DOI / count shown to a user must come from a real resolved source. Apply the existing "ABSTAIN beats a wrong badge" discipline (already in `inline_citation_checker.py`) to the gap-finder list and similar-papers (**R20**).
+> - **No dead buttons / no fake data / no empty gated containers.** The Published date (**R01**) must render the real date or be cleanly removed.
+> - **Share video must reflect REAL per-article counts** (from `buildReferenceSummary`), and never blank the top of the popup.
+> - **Viewers must color-code highlights by chaining/verification status and hyperlink inline citations to the reference list *inside the PDF*** (not a React tab).
+>
+> **Adversarial-workflow instruction (MANDATORY for the engineering-heavy streams below):** For the
+> unified-native-PDF-viewers + in-PDF hyperlinking + AI-sentence buttons stream (**O1/O2/O3/O4/O5/O6**),
+> add-to-reference-list with corrected renumbered list + tracked PDF changes (**G1/G2/G3**),
+> in-app OAuth + Teams + enable-from-app (**U1/U3 / J3**), common-cites/refs visualization (**R4**), and
+> enrichment cross-source backfill (**M1/M2**): run a verification loop with **adversarial subagents that
+> challenge each other until verified** — an **ML engineer** (false-positive / abstain behavior, model routing),
+> a **regex engineer** (marker/needle patterns, DOI normalization edge cases), a **full-stack engineer**
+> (endpoint contracts, FE/BE data shapes), an **algorithms professor** (renumber splicing, ordering, dedup
+> correctness), plus a **watchdog/reviewer** that signs off only when each subagent's objections are resolved
+> with evidence (tests + file:line). Enumerate the inputs that break a naive implementation *before* writing code.
+
+---
+
+### Work-stream 1 — Honesty & P0 blockers
+
+**R01 (K2) — Published date: render real value or remove cleanly. [P0]**
+- *Requirement:* Show the real full publication date, or remove it; no empty gated container.
+- *Current state:* `ReferenceEnrichmentStrip.jsx:39` destructures `publication_date`; `:59` uses it in `hasAnyBadge` so a ref with only `publication_date` renders an empty strip; backend emits it at `enrichment.py:399-400`.
+- *Change (choose A; B is acceptable):*
+  - **A (honest display):** render `publication_date` as plain text in Row-1 metadata of `web-ui/src/components/ReferenceCard/ReferenceEnrichmentStrip.jsx` — append to `bibBits` (`:94-102`) or add a `Published: {publication_date}` span in the Row-1 div (`:139-151`). It is already a display-ready string.
+  - **B (year-in-header is final):** drop `publication_date` from the destructure (`:39`) and the `hasAnyBadge` gate (`:59`), and stop emitting at `enrichment.py:399-400`.
+  - Either way, fix the false comment at `web-ui/src/components/ReferenceCard/AdditionalInfoBar.test.jsx:55-57`.
+- *Acceptance:*
+  - [ ] A ref with only `publication_date` never renders an empty `ReferenceEnrichmentStrip`.
+  - [ ] If chosen A: the real full date renders; if B: no `publication_date` is emitted or gated.
+  - [ ] vitest pins the chosen behavior; the corrected `AdditionalInfoBar.test.jsx` comment is accurate.
+
+**R04 (F1) — Stop the LLM hallucination-check hang. [P0]**
+- *Requirement:* The check must never wedge the UI on "Checking for hallucination with LLM…".
+- *Current state:* OpenAI client (`hallucination_verifier.py:422`) and Google client (`:444`) have no timeout; Responses call (`:460`) no per-call timeout; `_call_uncached` (`:697-720`) chains a second full-length blocking call on web-search failure; backend wraps tasks in `asyncio.wait_for(loop.run_in_executor(None, …), timeout=150)` on the **shared** executor (`refchecker_wrapper.py:4182-4186`; the imported `ThreadPoolExecutor` at line 12 is never instantiated); no FE wall-clock fallback; UI string at `ReferenceCard.jsx:1149`.
+- *Change:*
+  - `src/refchecker/llm/hallucination_verifier.py` — pass explicit timeouts to ALL clients: `_init_openai (413-422)` → `openai.OpenAI(**kwargs, timeout=httpx.Timeout(60.0, connect=10.0))` and `.with_options(timeout=90.0)` on the Responses call (`:460`); `_init_google (442-444)` → `genai.Client(api_key=…, http_options={'timeout': 60000})` (ms). Keep/lower Anthropic's `120.0` (`:435`).
+  - In `_call_uncached (697-720)` thread a remaining-time deadline so search-failure cannot fall through into a second full-length chat call beyond the outer budget.
+  - `backend/refchecker_wrapper.py` — instantiate a dedicated bounded pool `self._ha_executor = ThreadPoolExecutor(max_workers=8)` and use it for the hallucination tasks (`:4183-4184`, ideally also `:3402/:3816`); lower the `wait_for` budget (`:4186`) to ~90s.
+  - **FE safety net:** in `web-ui/src/components/ReferenceCard/ReferenceCard.jsx` (~1144-1151) or `useCheckStore`, revert a ref stuck pending/"checking" beyond ~180s to its base status with a "check timed out" note; OR have the backend always emit a final per-ref `reference_result` with `hallucination_check_pending=false`.
+- *Acceptance:*
+  - [ ] All three clients enforce request timeouts; a hanging request returns within budget, not ~600s.
+  - [ ] Hallucination tasks run on the dedicated bounded pool, not the shared executor.
+  - [ ] Regression test (`tests/unit/`): a simulated over-timeout task still emits `'completed'` and no ref stays permanently pending.
+  - [ ] FE: a stuck ref reverts to base status with a timeout note.
+
+**R05 (H1) — Eliminate the share 500; degrade gracefully. [P0]** *(distinct from the batch-check 500 (DONE) and from the share-video items)*
+- *Requirement:* Sharing must not fail for all types with "Request failed with status code 500".
+- *Current state:* `publish_check` calls `_render_check_html` (`main.py:2825`) outside its try/except — shared by github_gist + quick_link; a `serialize_check_to_html` exception (`main.py:2399`) surfaces as a raw 500 for every type. `_as_list`/`_as_dict` already `json.loads` string inputs (`export.py:100-104,113-118`) — do NOT re-harden those. Only PDF carries the external `fitz` dep. Handlers leak raw `str(e)`.
+- *Change:*
+  - Reproduce via the captured tracebacks (`logger.error(exc_info=True)` at `main.py:2777/2811/2855/2886`) and inspect the failing check row.
+  - Wrap the un-guarded `_render_check_html` in `publish_check` (`main.py:2825`) in try/except → stable 4xx/5xx with a clear detail.
+  - Make PDF degrade: wrap `_render_pdf_from_html`/`render_check_to_pdf` (`export.py:937-959`) so a missing/old `fitz` raises `HTTPException(422/501, 'PDF engine unavailable, choose HTML/MD')`. Verify PyMuPDF ships in the Tauri/PyInstaller bundle.
+  - Stop leaking raw `str(e)` at `main.py:2778/2811/2856/2886`.
+- *Acceptance:*
+  - [ ] A serialize failure in any flow (download/publish/quick-link) returns a stable detailed error, never a raw 500.
+  - [ ] Missing PDF engine returns 422/501 "choose HTML/MD".
+  - [ ] Backend test round-trips `render_export` AND `_render_check_html` for `fmt in {html,md,pdf,docx}` against a check whose `results`/`ai_detection` are JSON strings and an empty/odd-shaped check.
+
+---
+
+### Work-stream 2 — Unified native-PDF viewers + in-PDF hyperlinking + AI-sentence buttons *(adversarial loop REQUIRED — O1–O6)*
+
+> All highlights must color-code by chaining/verification status; inline citations must jump to the reference list **inside the PDF**; AI sentences must each carry a per-sentence "view in document" button. These items are interdependent — do **R14 (D5)** color map first, then **R02/R03** native routing + buttons, then **R28 (O2)** in-PDF jump, then **R29/R30/R31** runtime caveats.
+
+**R14 (D5) — One shared, complete status→color map across all viewers. [P1]**
+- *Current state:* `StatusSection._STATUS_HL/_STATUS_STROKE` (`:34-43`) miss `suggestion/checking/pending/unchecked`; `NativePdfViewer.jsx:11-22` FILL/STROKE also incomplete (lacks `unverified/checking/pending/unchecked` + `hallucinated` alias); `DocumentViewer.jsx:240-260` is fixed-red AI-only; `ReferenceCard.getStatusColor (:368-379)` already has the full set.
+- *Change:* create `web-ui/src/utils/statusColors.js` (the one justified new file) exporting a status→`{fill,stroke}` map keyed to `getStatusColor`'s full set (`verified, error, warning, suggestion, hallucination/hallucinated, unverified, checking, pending, unchecked`), normalize the (already-lowercased at `StatusSection.jsx:467`) key, map the `hallucinated` alias. Consume in **both** `StatusSection.jsx` (`:34-43`) and `NativePdfViewer.jsx` (`:11-22`). Do NOT copy NativePdfViewer's current map — it is itself incomplete. Leave DocumentViewer AI-red as-is unless you thread `sp.status` in.
+- *Acceptance:* [ ] every status (incl. aliases) yields the correct consistent fill/stroke in StatusSection and NativePdfViewer; [ ] viewers + card agree; [ ] vitest asserts the map for every key incl. the `hallucinated` alias.
+
+**R02 (O3) + R03 (O4) — Native-PDF per-ref view + per-sentence buttons. [P0]**
+- *Current state:* `viewContextInDoc` opens the image-raster `ThumbnailOverlay` (`StatusSection.jsx:464-526`); non-PDF falls back to a preview image (`:524-526`); conversion is text-only via `pdf_convert.text_to_pdf`; no docx/html→PDF. AI sentences have no per-sentence button (`AIDetectionVisuals.jsx:136`).
+- *Change:*
+  - Route `viewContextInDoc` through `DocumentViewer`/`NativePdfViewer` (the pdf.js stack) instead of the raster `ThumbnailOverlay`; deprecate the `ThumbnailOverlay` branch (`StatusSection.jsx:464-504`).
+  - Add real docx/html→PDF conversion in `backend/pdf_convert.py` so non-PDF sources open as native PDF too.
+  - `web-ui/src/components/MainPanel/AIDetectionVisuals.jsx:136` — accept `({detection, onViewSentence, canViewSentence})`, thread into `PageRow`/`SentenceList`, and add a per-sentence button calling `onViewSentence(s.text)`.
+- *Acceptance:* [ ] per-ref "View in document" renders the native pdf.js viewer for PDF and converted-PDF sources; [ ] every AI sentence in page-by-page and top-sentence lists has a working "view in document" button; [ ] color-coding (R14) applies; [ ] vitest for the per-sentence button wiring + a backend test for docx/html→PDF.
+
+**R28 (O2) + R29 (O5) + R30 (O6) — In-PDF citation→reference-list hyperlink + opacity + refId. [P1]**
+- *Current state:* inline-citation hyperlink only switches a React tab; banners < fully opaque in ThumbnailOverlay (`StatusSection.jsx:452,493`); pdf.js link clickable only when `refId` is present and AI spans have none (`AIDetectionPanel.jsx:54`).
+- *Change:* extend `backend/thumbnail.py locate_text_spans_in_pdf` to also locate the reference-list **entry rect** for a given `refId`; on click, scroll + flash that rect **in the same PDF** instead of switching tabs. Set banner alpha to 1 at `StatusSection.jsx:452,493`. Ensure `refId` is always populated for spans (`AIDetectionPanel.jsx:54`) so the hover bar + link work everywhere.
+- *Acceptance:* [ ] clicking an inline citation in the PDF scrolls+flashes the matching reference entry inside the PDF; [ ] banners are fully opaque; [ ] all spans (incl. AI) get a working hover bar + link; [ ] vitest/pytest for the entry-rect lookup and the in-PDF jump.
+
+**R12 (D1) — Deterministic fit-then-zoom + reliable centering. [P1]**
+- *Change:* in `StatusSection.jsx` citation effect (`:153-159`) replace the conditional `setZoom` with a deterministic `setZoom(CITE_FOCUS_ZOOM)` (or derive a zoom making `firstRect` ~40-60% of viewport height) and reset zoom whenever `citationTarget` changes; set the focused page `<img>` to `loading="eager"` (`:424`); scroll on the image `onLoad` (`:427`) **and** once post-zoom via `requestAnimationFrame`, dropping the 5×280ms retry loop.
+- *Acceptance:* [ ] opening a citation always lands at the focus zoom regardless of prior zoom/open; [ ] re-targeting while open re-centers; [ ] vitest asserts zoom is `CITE_FOCUS_ZOOM` on target change.
+
+**R13 (D3) — Highlight the WHOLE sentence (token-anchored span). [P1]**
+- *Change (backend only):* in `backend/thumbnail.py locate_text_spans_in_pdf`, when the full needle fails, do a token-anchored span: `page.get_text('words')`, fuzzy-align first+last few normalized words, union the word rects between them; or `page.search_for(needle, quads=True)` extended to line end. Prefer the longest line-aligned span over the 5-word fallback; keep normalized 0..1 rects (shape as `:933-934`).
+- *Acceptance:* [ ] for a fixture where the exact needle is broken (soft break/hyphenation) but first/last words are present, the rects cover the whole sentence, not a 5-word prefix; [ ] 5-word fallback only when token-anchoring also fails; [ ] pytest for the union span.
+
+**R31 (P4) — Pinch-to-zoom in the per-ref context overlay. [P1]**
+- *Change:* in `StatusSection.jsx ThumbnailOverlay`, add a non-passive `wheel` listener on `scrollRef` (`:408`) mirroring `DocumentViewer.jsx:119-147`: gate on `e.ctrlKey`, `preventDefault`, `setZoom(z => clamp(z*Math.exp(-e.deltaY*0.01), ZOOM_MIN, ZOOM_MAX))` (`:65`); add `gesturestart/change/end` with a `zoomRef` baseline for WebKit/Tauri. Best: extract `useGesturePinchZoom(ref, setZoom, {min,max})` and use it in both DocumentViewer and ThumbnailOverlay.
+- *Acceptance:* [ ] trackpad/touch pinch zooms the per-ref overlay page image without scrolling or triggering browser zoom; [ ] shared hook used by both viewers; [ ] vitest/jsdom listener-attach test.
+
+---
+
+### Work-stream 3 — Add-to-reference-list: corrected renumbered list + tracked PDF changes *(adversarial loop REQUIRED — G1/G2/G3)*
+
+> Order: **R17 (G3)** dedup guard (cheap correctness) → **R18 (G1)** commit renumber + corrected-list endpoint → **R19 (G2)** PDF/HTML tracked-change diff. The algorithms-professor subagent must sign off on renumber splicing and dedup normalization.
+
+**R17 (G3) — Reject duplicates/invalid before offering to add. [P1]**
+- *Change:* `backend/main.py add_reference_to_check (:5905)` — before insert, normalize incoming DOI (reuse `backend.retraction.normalize_doi`, already imported in `gap_finder.py:18`), arxiv_id, lowercased title; on match return HTTP 409 `{duplicate:true, existing_index}`. `web-ui/src/components/MainPanel/GapFinder.jsx` — cross-check each suggestion's DOI against the `references` prop (normalize client-side), gray out / label "already in list" (incl. DOI-only matches OpenAlex couldn't resolve), add a validity guard (non-empty title or resolvable DOI), and handle the 409 in the add forms (`GapFinder.jsx:220-226`, `CorrectionsView.jsx:742-766`).
+- *Acceptance:* [ ] adding a present DOI/arxiv/title returns 409 and the UI shows "already reference [N]"; [ ] GapFinder grays out present/invalid suggestions; [ ] pytest for the 409 path (DOI casing, title-only); [ ] vitest for the disabled suggestion + 409 surfacing.
+
+**R18 (G1) — Commit renumber and yield the new renumbered list. [P1]**
+- *Change:* have GapFinder/AddReference call `addReferenceToCheck` with `insert_at_index` derived from `renumber_preview.new_printed_number` so the committed `renumbering` map is non-empty (logic at `main.py:5964-5972`). Add `GET /api/check/{id}/corrected-reference-list?renumber=1` returning the full reference list in a chosen citation style with new contiguous numbers (reuse `export._as_list` at `export.py:97` + a serializer mirroring `formatters` `exportReferenceAsStyle`); surface a "Download new reference list" button. Add `apply_renumber(text, shifted_markers)` to `backend/inline_citation_checker.py` (does not exist yet) splicing `new_marker` over `marker` using captured `offset`s in **descending offset order**.
+- *Acceptance:* [ ] default Add / GapFinder produces a non-empty `renumbering` map and list `index` renumbers; [ ] the endpoint returns the full styled contiguously-numbered list behind a download button; [ ] pytest for `apply_renumber` (multiple/adjacent/multi-digit markers, no off-by-one) and the endpoint.
+
+**R19 (G2) — Tracked was→should-be, rendered into the PDF + export diff. [P1]**
+- *Change:* add `GET /api/preview/{id}/corrections-annotated-pdf` that, per flagged ref with a `corrected_reference`, locates the cited text via `backend/thumbnail.locate_text_spans_in_pdf` (already used in `_annotate_pdf_highlights` `main.py:3373`) and applies `page.add_strikeout_annot` + a `FreeText`/`add_text_annot` carrying the corrected string (PyMuPDF/`fitz`); for inline renumber, annotate old markers via `renumber_preview.shifted_markers` offsets. Port the `wordDiff` red/green coloring into `export.py`'s corrected-row rendering (`_pdf_html_for_model:861` / `_ref_row_html:552`) so the report shows was→should-be, not flat "Suggested:".
+- *Acceptance:* [ ] the endpoint returns a PDF with strikeout+insert annotations (and renumbered markers), or a clean 404/empty when no corrections; [ ] export HTML/PDF rows show token-level red/green diff; [ ] pytest round-trips the annotated PDF and asserts the export diff markup.
+
+---
+
+### Work-stream 4 — Corrections accuracy (DOI)
+
+**R06 (B1) — Suggested correction must apply the verified DOI (esp. bibtex). [P1, BROKEN]**
+- *Change:* `web-ui/src/utils/formatters.js` — add `case 'doi'`/`case 'arxiv_id'` to `getCorrectedReferenceData` (~`:659`) setting `corrected.doi` from `(parsed?.actual || issue.actual_value || issue.ref_doi_correct)` normalized with the `https://doi.org/`-stripping regex at `:1259`; change the seed at `:613` so a DOI named by a doi-type error/warning **wins** over the cited `ref.doi`; rewrite the bibtex DOI emission (`:1077-1099`) to prefer `corrected.doi`, falling back to `authoritative_urls`. `backend/refchecker_wrapper.py` — add `'ref_doi_correct'` to both propagation tuples (`:1328-1330`, `:1480-1482`) and the backfill (`:1310-1313`). Optionally seed `corrected.*` from `ref.corrected_reference` (`refchecker_wrapper.py:3786`).
+- *Acceptance:* [ ] for a doi-mismatch ref (verified `actual_value`, wrong `ref.doi`, no `authoritative_urls`): bibtex contains the verified DOI and not the wrong one; APA/other styles likewise; [ ] CorrectionsView word-diff shows the DOI change; [ ] regression vitest in `formatters.test.js`.
+
+**R07 (B2) — `@article{awcomparison}` includes year=2018, venue, AND doi=10.5812/ijem.12104. [P1, BROKEN]**
+- *Change:* apply R06, then strengthen `web-ui/src/utils/formatters.test.js` test #53 — drop `ref.doi`, supply `{error_type:'doi', actual_value:'10.5812/ijem.12104'}` (or `ref_doi_correct`) with no `authoritative_urls`, assert bibtex contains `doi = {10.5812/ijem.12104}` alongside the existing `2018` and venue assertions.
+- *Acceptance:* [ ] strengthened #53 asserts DOI + year + venue with no `authoritative_urls`; [ ] same holds for the true "DOI missing" shape.
+
+---
+
+### Work-stream 5 — Gap-finder & similar-papers (no-hallucination guard + provenance)
+
+**R20 (C2) — Verification + provenance on the reachable similar-papers modes. [P1]**
+- *Change:* `backend/main.py _cites_refs_papers_impl (~:6708)` — after `_shape_cites_refs_candidates`, reuse the verify logic from `_find_similar_papers_impl` (`db.lookup_verified_reference :7230`, `checker.verify_reference :7242`, bounded by the existing semaphore) to populate `pre_verified/was_verified/verified_status` so the existing `SimilarPapersPanel` chips (`:492-518`) render real status. `web-ui/src/components/MainPanel/SimilarPapersPanel.jsx` — add an OpenAlex/DOI provenance link per row (row has `c.openalex_id`/`c.doi`, shaped at `main.py:6732,6736`), mirroring `GapFinder.jsx:129-133`'s "✓ OpenAlex ↗". Keep it real-data-gated — no synthesized verification.
+- *Acceptance:* [ ] References/Citations/Both rows show a real verification chip (verified / "? unconfirmed"), not always-null; [ ] each row shows an OpenAlex/DOI link; [ ] backend test that output carries populated `verified_status` for a cached-verified fixture; [ ] vitest for the chip + link.
+
+**R39 (C1-FIX) — Friendly 404 + smoke test. [P2]**
+- *Change:* `web-ui/src/components/MainPanel/GapFinder.jsx run()` catch (`~:31-33`) — special-case HTTP 404 to "Gap finder is unavailable — please update the app" instead of raw HTML. Add a backend smoke test (`tests/unit/test_gap_finder.py`) hitting `GET /api/check/<id>/gaps` asserting 200 JSON for a valid check.
+- *Acceptance:* [ ] a 404 shows the friendly message; [ ] smoke test asserts JSON (not SPA catch-all).
+
+**R08 (R4) — Restore common-cites/refs visualization, not just a count. [P1, BROKEN]** *(adversarial loop)*
+- *Change:* `backend/cites_refs.py` — collect the overlapping ids per candidate and hydrate them via `_hydrate_works`; `backend/main.py` pass the hydrated overlap through at `:6745/:6749` so the panel/graph can show **which** works are shared, not just a number. Surface the shared works in `SimilarPapersPanel`/the graph row.
+- *Acceptance:* [ ] relation modes display the actual shared works (titles/links), not just a count; [ ] backend test that the impl returns the overlap id set + hydrated works; [ ] vitest that the panel renders the shared works.
+
+---
+
+### Work-stream 6 — Inline-citation parser (alphabetic + last-mentioned) *(adversarial loop — ABSTAIN beats a wrong badge)*
+
+**R15 (E1) — Parse/validate alphabetic-marker scheme; clarify last-mentioned. [P1]**
+- *Change:* `backend/inline_citation_checker.py` — add `_ALPHAKEY_PAT` for `[Smi04]`/`[ABC+20]` plus a letter form `r'\[[a-z]\]'`; add `'alpha-key'` as a counted family in `_detect_scheme` (extend the `counts` dict ~`:331` + family-vote) with the same plausibility/abstain discipline. Validate by building an `author+year → key` map from the references list (not an integer sequence); report `undefined`/`uncited`/`duplicate`. For alpha schemes set `ordering.convention='alphabetical'` and skip the ascending check in `_classify_ordering`. "Last-mentioned" is not a standard convention — add it only behind a clear `convention='reverse-appearance'` branch (mirror `:589-605` on descending pairs) **or** document why it intentionally ABSTAINs. Add an `ABSTAIN_MSG` entry for the new scheme in `web-ui/src/components/MainPanel/CitationIntegrity.jsx:20-28`. Note `_count_author_year (:226)` takes `ref_count` but never uses it — ignore it for the new family. Add fixtures to `tests/unit/test_inline_citation_checker.py`.
+- *Acceptance:* [ ] alpha-key papers detected + validated against the author/year→key map (undefined/uncited/duplicate); [ ] `[a]`/`[A]` handled or explicitly abstained (no false numeric/author-year classification); [ ] alpha schemes report `alphabetical` ordering, no spurious out-of-order; [ ] mixed/ambiguous still ABSTAINS; [ ] new pytest fixtures cover detection, issue types, and abstain.
+
+---
+
+### Work-stream 7 — Author UI
+
+**R09 (A2) — "et al." expandable to the full enriched author list. [P1, MISSING]**
+- *Change:* `web-ui/src/utils/formatters.js:77` — in `normalizeAuthors` filter trailing tokens matching `/^(et al\.?|and others)$/i` so they never render as names. `web-ui/src/components/ReferenceCard/ReferenceCard.jsx AuthorsLine (~:1324)` — detect a trailing et-al token; when set OR `enrichedAuthors.length > list.length`, render an "et al. (show N authors)" toggle that swaps `list` to `enrichedAuthors` rendered via the existing `AuthorChip`, with a "show less" collapse.
+- *Acceptance:* [ ] a 2-3-name "et al." ref shows a working "show N authors" control expanding to the enriched list; [ ] "et al."/"and others" never renders as a name; [ ] unchanged when there is no enriched list and no token; [ ] vitest for the filter + the expand swap. *(Pairs with R41 below.)*
+
+**R41 (N3-residual) — No fake "et al" sentinel chip; recover on the error path. [P2]**
+- *Change:* filter standalone `et al`/`others`/`and others` sentinels out of the display list (`formatters.js normalizeAuthors`, or the `AuthorsLine` list build at `ReferenceCard.jsx:1325`) so a non-recoverable et-al doesn't render as a fake chip (`:1441`) with a trailing comma (`:1442`). Optionally call `recover_full_authors_from_enrichment` on the error path (`refchecker_wrapper.py _format_error_result :1625`) where partial enrichment exists.
+- *Acceptance:* [ ] no fake "et al" chip renders when recovery can't fire; [ ] vitest covers the sentinel filter. *(Implement together with R09.)*
+
+**R11 (A6) — Pin/expand the author popover into a persistent scrollable panel. [P1]**
+- *Change:* in `AuthorChip`, add a `pinned` state; clicking the name (or a `⤢` control in the popover header ~`:1689`) toggles `pinned`, keeping `open=true` regardless of mouse, with an explicit `×`; add an outside-click + `Escape` handler modeled on `document.addEventListener('mousedown', handleClickOutside)` at `ReferenceCard.jsx:343`. For the "fully opened" state render the pinned popover as a larger centered modal/drawer showing the **complete** recent-papers list — remove/raise `slice(0,3)` at `:1737` for the pinned view.
+- *Acceptance:* [ ] clicking the name (or ⤢) pins it open; stays open when the cursor leaves; [ ] `×`, outside-click, and `Escape` all close it; [ ] pinned panel shows >3 papers and scrolls; [ ] vitest for pin toggle, close paths, and >3 papers.
+
+**R10 (A3) — Name/title-resolution fallback for ID-less authors (non-fabricating). [P1]**
+- *Change:* `backend/main.py` — extend `author_profile (:7840)` or add a sibling endpoint that, given a bare name **plus paper title/year**, queries OpenAlex `/authors?search=<name>` (and/or S2 `/author/search`) and returns the single best high-confidence match's ids+metrics, requiring a strong corroboration signal (the candidate appears on a work matching the supplied title/year) before returning anything; return empty rather than a guess. `ReferenceCard.jsx AuthorChip` — when `e` has no `s2_author_id`/`openalex_id`, render a "Find profile" action calling it on demand; confident hit populates the popover, miss shows a quiet "no confident match". Optional backend backfill in `enrichment.py build_enrichment` (one OpenAlex `/works/doi:` lookup when a DOI exists but no author ids).
+- *Acceptance:* [ ] ID-less author exposes "Find profile"; confident match populates with real metrics; non-match adds no data; [ ] the endpoint never returns a profile without title/year corroboration; [ ] backend test (confident vs ambiguous→empty); [ ] vitest that the button appears only for ID-less authors.
+
+**R36 (A1-FIX) — Read ORCID from the fetched profile; raise hit-rate. [P2]**
+- *Change:* `ReferenceCard.jsx:1605` — `const orcidUrl = (profile?.orcid || e?.orcid) ? …` (and wire the same fallback into footer `profileLinks` ~`:1654-1661/:1750-1772` and the ORCID-number tooltip `:1422`). `backend/main.py author_profile (7840-7913)` — on the S2 path, surface ORCID from the S2 `/author/{id}` response's `externalIds.ORCID` when present; include `orcid` in the S2-path payload. Only set when the source returns a real value.
+- *Acceptance:* [ ] popover renders ORCID when the profile returns it even if `e.orcid` was empty; [ ] S2-only authors with an ORCID in `externalIds` now show it; [ ] no ORCID when none resolved; [ ] backend test for the S2-path `orcid` inclusion/omission.
+
+**R37 (A4) — Clearer inline badge + co-located citation count. [P2]**
+- *Change (pure FE):* `ReferenceCard.jsx:649-663` — relabel the badge to `Used {N}× in this paper` (keep the body-text tooltip); when `reference.enrichment?.cited_by_count` is present append a second pill `· {cited_by_count} citations` with a distinct tooltip "Times cited across the literature (OpenAlex/S2)".
+- *Acceptance:* [ ] unambiguous label + second pill when available; [ ] no second pill when absent; [ ] vitest for both pills.
+
+---
+
+### Work-stream 8 — Summary badges & per-article isolation
+
+**R16 (F2) — Make the two Summary badges agree. [P1]**
+- *Change:* `web-ui/src/components/MainPanel/StatsSection.jsx:706` — change the row-2 tooltip from "(total issues)" to "references with `<issue>`" (and the heading at `:673`) to match the per-ref value. `web-ui/src/components/MainPanel/HealthBadge.jsx:52-53` (in `computeScore`) — make the breakdown warnings-only like the chips: `if hasErrors errors+=1 else if hasWarnings warnings+=1`, ideally reusing `computeReferenceStats(references, true)`.
+- *Acceptance:* [ ] for the `StatsSection.test.jsx:29-48` both-error-and-warning fixture, HealthBadge counts == StatsSection chip counts (Errors 3 · Warnings 2, not 4); [ ] the row-2 tooltip no longer says "(total issues)"; [ ] vitest asserting the equality.
+
+**R25 (L2) — Similar-papers isolated per article. [P1]**
+- *Change:* `web-ui/src/components/MainPanel/MainPanel.jsx:498` — pass `checkId=(selectedCheckId>0?selectedCheckId:currentCheckId)` (the expression already used for the four sibling panels) so `articleKey` resolves to the unique `check:id` branch (`SimilarPapersPanel.jsx:81`); optionally add `key=similar-{selectedCheckId}`.
+- *Acceptance:* [ ] two `SimilarPapersPanel` instances with identical empty title/source but different `checkId` don't bleed; [ ] vitest: search the first, assert the second still shows the Find button.
+
+---
+
+### Work-stream 9 — Enrichment cross-source backfill *(adversarial loop — M1/M2; never overwrite/never fabricate)*
+
+**R21 (M1) + R22 (M2) — Cross-source backfill of counts, abstract, tldr, funding. [P1]**
+- *Change:* add `backfill_enrichment(verified_data, reference)` in `src/refchecker/utils/enrichment.py`, invoked from `backend/refchecker_wrapper.py` right before `build_enrichment` (`:1527`) AND from the add-ref path in `backend/main.py` before `:6270`. Resolve canonical DOI (reuse cleaning at `enhanced_hybrid_checker.py:1546-1551`), then fetch OpenAlex `GET /works/doi:{doi}` (`cited_by_count`, `referenced_works` length, `abstract_inverted_index`, `grants[]`), Crossref `GET /works/{doi}` (`is-referenced-by-count`, `references-count`, JATS `abstract`, `funder[]`), and S2 `get_paper_by_id`/title search (`citationCount`, `referenceCount`, `tldr`, `abstract`). Merge into `verified_data` **only** for keys it lacks/empty — mirror `_enrich_matched_paper`'s never-overwrite/never-fabricate contract (`semantic_scholar.py:380-388`). `build_enrichment`'s `_max_count (:74-91)`, reference-count pool (`:265-274`), inverted-index reconstruct (`:176-206`), JATS strip (`:168-173`), and grants/funders pool (`:486-509`) then surface the richest values with no FE change (presence-gated at `AdditionalInfoBar.jsx:116-120`, `ReferenceEnrichmentStrip.jsx:217-241`). Per-DOI TTL cache (mirror `_AUTHOR_PROFILE_CACHE` at `main.py:7836-7837`), 1 retry + short timeout per source, soft-fail, concurrency-limited so a 30+ ref bibliography doesn't stall. Optionally append source names to `_verified_by`.
+- *Acceptance:* [ ] a non-S2 winner missing counts/tldr/abstract/funding gets them backfilled from OpenAlex/Crossref/S2 by DOI; [ ] existing real values are never overwritten and nothing is fabricated; [ ] a 30-ref bibliography doesn't stall (cache + concurrency cap); [ ] pytest in `tests/unit/test_enrichment.py` for merge-only-when-missing + soft-fail.
+
+**R35 (M5) — Clickable count tiles (or labeled stats with titles). [P2]**
+- *Change:* `ReferenceEnrichmentStrip.jsx:105-114` — add a per-counter `href` when `openalex_id` is present, rendered via the existing `PillLink (:272-325)`: Citations → `https://openalex.org/works?filter=cites:<id>`; Reference Count → `https://openalex.org/<id>`; Citing Patents → keep informational with a clarifying title. When no `openalex_id`, keep text but add a `title` to every tile for parity with Citations (`:110`).
+- *Acceptance:* [ ] Citations tile becomes a link when `openalex_id` is set, plain text otherwise; [ ] every tile has a title; [ ] unit test for the link/no-link branch.
+
+---
+
+### Work-stream 10 — Share video
+
+**R23 (H2 / Q1 / Q3) — Persistent, higher-quality per-check "video"; real per-article counts; no record/download buttons. [P1]**
+- *Change (choose B unless a literal .webm is explicitly required):*
+  - **B (preferred):** drop the `&& animActive` gate at `ShareModal.jsx:187` (keep `key={animKey}`); in `ShareAnimationCanvas.jsx` accept `loop=false`, clamp `t=Math.min(1,(now-startRef.current)/DUR)` (drop the modulo at `:89`) and `cancelAnimationFrame` once `t===1` to hold the final frame so the top never blanks; the `ANIM_PLAY_MS` timer (`:54-62`) becomes unnecessary. Improve quality: raise the dpr cap to `Math.min(3,…)` at `:38`, increase logical width and font sizes, pass a taller height. Keep real `buildReferenceSummary` numbers, per-open remount, and no record/download buttons.
+  - **A (only if literal webm):** `canvas.captureStream(30)` → `MediaRecorder({mimeType:'video/webm'})` → `Blob` → muted/autoplay/playsInline `<video>` (poster = last frame), regenerated per modal open keyed to `checkId`, no controls.
+- *Acceptance:* [ ] the banner stays visible after playback (frozen final frame), never blanking the top; [ ] visibly higher quality; [ ] numbers match the Summary; per-check remount replays each open; still no record/download buttons; [ ] vitest that the canvas stays mounted post-playback and numbers come from `buildReferenceSummary`.
+
+**R24 (Q4) — Per-article video on the stats page. [P1, MISSING]**
+- *Change:* import `ShareAnimationCanvas` into `web-ui/src/components/MainPanel/StatsSection.jsx` (or render in `MainPanel` next to `<StatsSection>`), feeding the SAME counts StatsSection computes (`StatsSection.jsx:211-222 summaryCounts`) plus `paperTitle`; thread `aiBand/aiScore` from `selectedCheck.ai_detection` (`MainPanel.jsx:67`) since StatsSection isn't passed `ai_detection`. Reuse the R23 play-once-then-freeze; key on `selectedCheckId`.
+- *Acceptance:* [ ] the per-article animation renders alongside that article's stats with matching counts; [ ] freezes on the final frame; [ ] vitest that the stats-page animation receives the StatsSection counts.
+
+---
+
+### Work-stream 11 — Auth, teams, enable-from-app *(adversarial loop — J3 / U1 / U3)*
+
+> Batch-2 refines batch-1's "whole feature broken (J3)": presence (U2) is DONE; report only the partials. The DB migration is the dependency root.
+
+**R26 (J3 → U1) — Multi-user collaboration on the same batch + shared checks. [P1]**
+- *Change:*
+  - **DB (`backend/database.py`):** add `team_id INTEGER NULL REFERENCES teams(id)` to `check_history` (schema at `:366-403`) + an idempotent `ALTER` for existing DBs (match the repo's other late-added nullable columns) + an index; add `get_user_team_ids`, `set_check_team(check_id, team_id)`, `get_team_checks(team_id)`; add `get_batch_summary`/`get_batch_checks` variants (or a `team_ids` param) returning a batch when the requester is owner OR a member of the batch's team, using `db.is_team_member (:1859)`.
+  - **Backend (`backend/main.py`):** replace `_get_owned_batch_or_404 (:1215)` with `_get_accessible_batch_or_404` allowing team members; **EXTEND** the existing `PATCH /api/batch/{batch_id} (:4556-4570)` to accept `team_id` (do not add a new route); add `POST /api/checks/{id}/share {team_id}` and `GET /api/teams/{team_id}/checks` gated via `_get_team_for_member_or_404 (:1484)`.
+  - **Realtime (`backend/websocket_manager.py`):** gate `/api/ws/presence/{room_id}` (`main.py:1701`) join on accessible-batch membership; broadcast `reference_result`/`summary_update` to the presence/team room in addition to the owner's session (`:123-129`).
+  - **FE:** add a "Share with team" control + a team-checks list in `TeamMenu.jsx`/`BatchSummaryView`. Optionally add an explicit "Sign up" affordance in `LoginPage.jsx`.
+- *Acceptance:* [ ] a batch shared with a team (`team_id` via the extended PATCH) opens for a non-owner team member (no 404) with summary/checks; [ ] presence WS rejects non-members; team members appear in `PresenceAvatars`; [ ] `reference_result`/`summary_update` reach all room/team members live; [ ] backend tests: member 200, non-member 404, access-gated presence.
+
+**R27 (J3 → U3) — Enable accounts/teams from inside the app (hot-reload). [P1]**
+- *Change:* add `auth.reload_config()` re-reading `auth_config.env` into the module credential globals and recomputing `MULTIUSER_MODE`/`get_available_providers`; call it at the end of `set_auth_config (main.py:1370)`; convert `get_available_providers`/`is_multiuser_mode` to read current values via accessors rather than import-time constants (`auth.py:30-32,36,503-518`), so `/api/auth/providers` reflects changes immediately without restart.
+- *Acceptance:* [ ] enabling accounts/providers in-app takes effect without a backend restart; `/api/auth/providers` updates live; [ ] backend test that `reload_config` flips `is_multiuser_mode()`/provider list after writing the env.
+
+---
+
+### Work-stream 12 — Graph & buttons polish
+
+**R38 (I2) — Library 3D graph up to Explore quality. [P2]**
+- *Change (FE-only, `GraphLibraryView.jsx`):* add a `useEffect` keyed on `graphData` calling `fgRef.current.d3Force('charge')?.strength(-200).distanceMax(600)` + `d3Force('link')?.distance(70).strength(0.2)` then `d3ReheatSimulation()` (mirror `ExploreGraphView.jsx:277-294`); add `onEngineStop={() => fgRef.current?.zoomToFit?.(500,80)}` (`:298-300`); change `enableNodeDrag={false} (:362)` to `enableNodeDrag` + `onNodeDragEnd` writing `node.fx/fy/fz` (`:306-311`); optional persistent labels via `nodeThreeObject` + three-spritetext gated to `hl.nodes`.
+- *Acceptance:* [ ] nodes draggable + pin on drop; auto-frame on engine stop; force tuning prevents the hairball; [ ] render smoke test that ForceGraph3D gets `enableNodeDrag`, `onEngineStop`, and a d3Force effect.
+
+**R32 (R1) — Clickable DOIs in the Seen-library radial graph. [P2]**
+- *Change:* drop `pointerEvents=none` in `RadialChordGraph` (`:108-129`) and render `ident` as an `<a>` like `:393-402` so the radial hover DOI is a working link.
+- *Acceptance:* [ ] the radial DOI is clickable (opens externally / via Tauri `openExternal`); [ ] vitest that the rendered DOI is an anchor.
+
+**R33 (T3) — Unified button styling. [P1]**
+- *Change:* either refactor onto a shared `common/Button.jsx` (add a `pill`/`ghost-xs` variant) **or** extract shared sizing+hover tokens for `AdditionalInfoBar.jsx Pill (:15-36)` and `ArticleAssistant.jsx` trigger/Summarize/Send, mirroring `ReferenceCard.jsx:198-207` (or adopt `baseStyle` at `ReferenceActionsBar.jsx:368-373`).
+- *Acceptance:* [ ] per-ref / assistant / pill buttons share consistent padding/font-size and have hover states; [ ] vitest/snapshot for the shared variant.
+
+**R34 (T4) — Separate model for Chat-with-PDF vs Summarize. [P1]**
+- *Change (FE-only; backend already accepts per-call `llm_config_id`):* `useConfigStore.js` — add `SUMMARY_SELECTION_KEY` + `selectedSummaryConfigId` + `selectSummaryConfig` + `getSelectedSummaryConfig` mirroring the chat trio; wire into `fetchConfigs (~:73-90)` and `deleteConfig (:197-208)`. `LLMSelector.jsx` — add a `mode==summarize` branch in `activeSelectedId (:36-40)`. `SettingsPanel.jsx:1660-1670` — split into Chat + Summarize sections. `ArticleAssistant.jsx` — use `getSelectedSummaryConfig` in `runSummary`, keep `getSelectedChatConfig` for `sendChat`.
+- *Acceptance:* [ ] Chat and Summarize have independent model selections that persist; [ ] vitest that the store exposes the summary selection and ArticleAssistant routes each feature to its config.
+
+---
+
+### Work-stream 13 — CI / release
+
+**R40 (U6) — Fresh full green-CI pass before any publish. [P1]**
+- *Change / verify:* from a working shell run `cd web-ui && npm run lint && npm test && npm run build`; backend `python -m pytest tests/unit` (incl. `tests/unit/test_enrichment.py`); `cargo check` in `tauri-app/src-tauri` and confirm no "unexpected cfg value: devtools" warning. The two named fixes are already in `desktop-v0.9.18`; cut a new tag only if the post-v0.9.18 work in this batch is to be released.
+- *Acceptance:* [ ] lint clean (incl. the SimilarPapersPanel elapsed-timer nit), all vitest + pytest green, build succeeds, `cargo check` clean (no devtools cfg warning); [ ] CI green before any publish/release cut.
+
+---
+
+## 5. Build order (dependency-ordered, P0 first)
+
+1. **R01 (K2, P0)** — Published-date honesty. Tiny, high-visibility; do first.
+2. **R04 (F1, P0)** — LLM hang. Independent; highest user-impact. `hallucination_verifier.py` + `refchecker_wrapper.py` + FE fallback.
+3. **R05 (H1, P0)** — share 500 hardening + PDF graceful degrade. Independent backend.
+4. **R14 (D5, P1/S)** — shared status-color map (`statusColors.js`). Unblocks consistent coloring for the viewer stream.
+5. **R02 (O3) + R03 (O4, P0)** — native-PDF routing + per-sentence buttons + docx/html→PDF *(adversarial loop)*.
+6. **R28 (O2) + R29 (O5) + R30 (O6, P1)** — in-PDF citation→reference-list jump, opacity, refId. Then **R12 (D1)** zoom/centering, **R13 (D3, backend)** sentence span, **R31 (P4)** pinch-zoom (shared hook).
+7. **R26 (J3→U1, P1)** — auth/teams: DB migration (`check_history.team_id`) first, then accessors + `_get_accessible_batch_or_404`, then presence gating/broadcast, then FE share control. Then **R27 (J3→U3)** hot-reload config.
+8. **R06 (B1) → R07 (B2, P1)** — DOI correction (B2 depends on B1's bibtex/`getCorrectedReferenceData` fixes).
+9. **R09 (A2) + R41 (N3-res, P1/P2)** — et al. expansion + sentinel filter (same `formatters.js`/`AuthorsLine`). Then **R11 (A6)** pin/modal, then **R10 (A3)** find-profile fallback inside the now-pinnable chip; **R36 (A1-FIX)** rides along on `author_profile`.
+10. **R16 (F2, P1/S)** — badge agreement. **R25 (L2, P1/S)** — similar-papers isolation. Small, independent.
+11. **R20 (C2, P1)** — similar-papers verification + provenance. **R39 (C1-FIX, P2)** alongside. **R08 (R4, P1)** common-cites/refs viz *(adversarial loop)*.
+12. **R15 (E1, P1)** — alpha-key scheme *(adversarial loop)*.
+13. **R17 (G3) → R18 (G1) → R19 (G2, P1)** *(adversarial loop)* — dedup guard, then renumber-commit + corrected-list endpoint, then PDF/HTML tracked-change diff (reuses R13's improved `locate_text_spans_in_pdf`).
+14. **R21 (M1) + R22 (M2, P1)** — enrichment cross-source backfill *(adversarial loop)*. **R35 (M5, P2)** count-tile links after.
+15. **R23 (H2/Q1/Q3, P1)** then **R24 (Q4, P1)** — share video persistence/quality, then stats-page video.
+16. **R37 (A4), R38 (I2), R32 (R1), R33 (T3), R34 (T4, P1/P2)** — polish.
+17. **R40 (U6, P1)** — full green-CI pass; gate the release on it.
+18. Optional one-liners (§3) last.
+
+---
+
+## 6. Definition of Done / TDD
+
+**Global DoD**
+- Every non-DONE item ships ≥1 new automated test in the correct suite: **vitest** for `web-ui/` (`*.test.jsx`/`*.test.js` next to the component/util; `cd web-ui && npm test`), **pytest** for backend/library (`tests/unit/`, run from repo root per `pytest.ini`).
+- `cd web-ui && npm run build` succeeds (no build/type errors) and `cd web-ui && npm test` is green — do not break `formatters.test.js`, `StatsSection.test.jsx`, `SimilarPapersPanel.test.jsx`, `ExploreGraphView.test.jsx`, `AdditionalInfoBar.test.jsx`, the `ReferenceCard` tests.
+- Backend `pytest` green — do not break `tests/unit/test_inline_citation_checker.py`, `test_gap_finder.py`, `test_enrichment.py`, `test_export_formats.py`, existing auth tests. **Add the missing regression test** for `POST /api/check/batch` with `semantic_scholar_api_key` + `paperclip_api_key` (asserts `!= 500`) to lock the de-duped batch-check fix.
+- **eslint clean**, including the **U6 SimilarPapersPanel elapsed-timer lint nit** (already addressed in `desktop-v0.9.18`; keep it clean).
+- **Tauri builds** (`cargo check` in `tauri-app/src-tauri`) with **no "unexpected cfg value: devtools" warning**.
+- **No regressions** to any §2 DONE item. **No fabricated authors/papers/DOIs/counts** reach the UI. No empty gated containers, no dead buttons. No secrets/.env committed.
+- The only justified **new files** are `web-ui/src/utils/statusColors.js` (R14), `web-ui/src/utils/useGesturePinchZoom` hook (R31), and the new test files; everything else edits existing files.
+- **CI green before any publish/release cut** (R40). Commit messages (only if asked) end with `Co-Authored-By: claude-flow <ruv@ruv.net>`.
+
+**Per-cluster verification**
+- **Honesty/P0:** ref with only `publication_date` never renders an empty strip (R01); a timed-out hallucination task still emits `'completed'` with no permanently-pending ref (R04); a serialize failure in any sharing flow returns a stable detail and missing PDF engine returns 422/501 (R05).
+- **Viewers:** `statusColors` returns correct colors for every status incl. the `hallucinated` alias and both viewers agree (R14); per-ref "View in document" renders the native pdf.js viewer for PDF and converted sources, and every AI sentence has a per-sentence button (R02/R03); clicking an inline citation scrolls+flashes the matching reference entry **inside the PDF**, banners fully opaque, all spans get a working link (R28/R29/R30); zoom resets to `CITE_FOCUS_ZOOM` on target change (R12); a broken-needle fixture yields a full-sentence union span (R13); pinch zooms the per-ref overlay (R31).
+- **Auth/teams:** team-member 200 + non-member 404 on a shared batch, access-gated presence join, live `reference_result`/`summary_update` to all members (R26); in-app enable flips `is_multiuser_mode()`/providers without restart (R27).
+- **Corrections:** bibtex carries the verified DOI (not the wrong one) with no `authoritative_urls`; strengthened test #53 asserts DOI+year+venue (R06/R07).
+- **Author UI:** et-al expands to the enriched list and the sentinel never renders as a chip (R09/R41); popover pins open and closes via ×/outside/Escape showing >3 papers (R11); ID-less author "Find profile" returns only on title/year-corroborated confident matches (R10); ORCID renders from the fetched profile (R36); badge shows "Used N× in this paper" + a second citation pill (R37).
+- **Summary/isolation:** HealthBadge counts == StatsSection chip counts for the both-error-and-warning fixture (R16); two SimilarPapersPanel instances with identical empty title/source but different `checkId` don't bleed (R25).
+- **Gap-finder/similar:** reachable modes carry real `verified_status` + provenance link (R20); a 404 shows the friendly update message and the smoke test asserts JSON (R39); relation modes show **which** works are shared, not just a count (R08).
+- **Inline parser:** alpha-key detection/validation/abstain fixtures pass; mixed input still ABSTAINS (R15).
+- **Add-to-list:** `apply_renumber` splice correctness (multiple/adjacent/multi-digit), the corrected-reference-list endpoint, the corrections-annotated PDF, and the 409 duplicate path (DOI casing, title-only) all covered (R17/R18/R19).
+- **Enrichment:** backfill merges only missing keys, never overwrites/fabricates, soft-fails, and a 30-ref bibliography doesn't stall (R21/R22); count tiles link when `openalex_id` is set and stay plain text otherwise (R35).
+- **Share video:** the canvas stays mounted post-playback (frozen final frame), numbers come from `buildReferenceSummary`, no record/download buttons (R23); the stats-page animation receives the StatsSection counts (R24).
+- **Graph/buttons:** `GraphLibraryView` ForceGraph3D gets `enableNodeDrag`/`onEngineStop`/d3Force (R38); the radial DOI is an anchor (R32); shared button variant applied with hover states (R33); Chat vs Summarize have independent persisted model selections (R34).
+- **CI/release:** lint + vitest + pytest + build + `cargo check` all green; no devtools cfg warning; CI green before publish (R40).
+
+---
+
+## 7. Orchestration runbook — the fix prompt (workflows · subagents · loops · watchdogs · reviewers)
+
+This is the paste-ready directive for an autonomous harness to actually CLOSE every item in §3. It drives the 13 work-streams of §4 in the §5 build order, one work-stream per workflow, with an adversarial subagent loop gated by a watchdog + reviewer, iterating until the §6 DoD is green.
+
+### Roles (subagents)
+- **researcher** — reads the work-stream's §4 items + cited files, enumerates the inputs that break a naive fix BEFORE any code.
+- **full-stack engineer** — implements FE/BE changes + endpoint contracts + data shapes.
+- **ml engineer** — owns false-positive/abstain behavior and model routing (R04, R15, R20, R21/R22, R34).
+- **regex engineer** — owns marker/needle/DOI patterns and normalization (R06/R07, R13, R15, R18, R21).
+- **algorithms professor** — owns renumber splicing, ordering, dedup, span-union correctness (R13, R15, R17/R18/R19, R08).
+- **reviewer** — adversarially re-reads the diff: correctness, contracts, missing tests, regressions vs §2.
+- **watchdog** — enforces the HARD CONSTRAINTS and signs off LAST: no fabrication, no dead buttons, no empty gated containers, no regression to any §2 DONE item, real per-article counts, in-PDF (not React-tab) hyperlinks, every item's acceptance checkboxes ticked with file:line + passing tests.
+
+### Loop (per work-stream, repeat until clean)
+1. **Scope** (researcher): list the breaking inputs + the exact files/lines from §4.
+2. **Implement** (engineers, in an isolated git worktree): code + ≥1 test per item (vitest for `web-ui/`, pytest for `tests/unit/`).
+3. **Adversarial review** (reviewer + watchdog, + the domain subagent): each raises objections; an objection is only closed with evidence (file:line + a passing test). Loop back to step 2 until zero open objections.
+4. **Verify** (tester): run the touched suites — `cd web-ui && npm run lint && npm test && npm run build`; `python -m pytest tests/unit`; `cargo check` in `tauri-app/src-tauri`. All acceptance boxes for the stream's items must pass.
+5. **Gate** (watchdog): sign off only when step 4 is green AND no §2 regression. Merge the worktree.
+6. Advance to the next work-stream.
+
+### Stop condition
+All 41 items (R01–R41) PASS their §6 acceptance, full CI is green (R40), no §2 regression, no fabricated data — then (only if asked) cut the release.
+
+### Hard constraints (failing any = the item is NOT done)
+- No fabricated authors/papers/DOIs/counts reach the UI; apply "ABSTAIN beats a wrong badge" to the gap-finder list + similar-papers (R20).
+- No dead buttons / no fake data / no empty gated containers — the Published date (R01) renders the real value or is cleanly removed.
+- Share video uses REAL per-article counts (`buildReferenceSummary`) and never blanks the top of the popup.
+- Viewers color-code highlights by chaining/verification status and hyperlink inline citations to the reference list INSIDE the PDF (R02/R14/R28).
+- Adversarial loop is MANDATORY for the heavy streams: 2 (viewers), 3 (add-to-list), 5→R08 (common-cites viz), 6 (inline parser), 9 (enrichment), 11 (auth/teams).
+
+### Workflow-tool skeleton (one workflow per stream; pipeline = implement → review-loop → verify)
+```js
+// meta.phases: [{title:'Scope'},{title:'Implement'},{title:'Review'},{title:'Verify'}]
+const STREAMS = [ /* §5 build order: S1..S13, each = {id, items:['R01',...], heavy:bool} */ ]
+for (const s of STREAMS) {                         // sequential: respects build-order deps
+  let objections = ['<seed>']
+  let round = 0
+  while (objections.length && round++ < 4) {       // LOOP until reviewers+watchdog clear it
+    const scope  = await agent(scopePrompt(s),  {agentType:'researcher', phase:'Scope'})
+    const impl   = await agent(implPrompt(s,scope,objections),
+                               {isolation:'worktree', phase:'Implement'})   // engineers
+    const panel  = await parallel([                // adversarial review panel
+      () => agent(reviewPrompt(s,impl), {agentType:'reviewer',  phase:'Review', schema:VERDICT}),
+      () => agent(watchdogPrompt(s,impl),{agentType:'production-validator', phase:'Review', schema:VERDICT}),
+      ...(s.heavy ? ['ml','regex','algorithms'].map(r =>
+        () => agent(domainPrompt(s,impl,r), {phase:'Review', schema:VERDICT})) : []),
+    ])
+    objections = panel.filter(Boolean).flatMap(v => v.openObjections || [])
+  }
+  await agent(verifyPrompt(s), {agentType:'tester', phase:'Verify', schema:CI_RESULT}) // lint+test+build+cargo
+}
+```
+
+### Paste-ready master prompt (hand to the harness)
+> Close every remaining item in `docs/REMAINING_WORK.md` §3 (R01–R41) for the refchecker monorepo at `/Users/ario/Downloads/refchecker`. Work one §4 work-stream at a time in the §5 build order (P0 first: R01 → R04 → R05 → viewers). For EACH work-stream run an adversarial loop: a **researcher** enumerates breaking inputs; **full-stack / ml / regex / algorithms** engineers implement the change + ≥1 test per item in an isolated worktree; a **reviewer** and a **watchdog** (plus the relevant domain subagents for the heavy streams 2,3,5-R08,6,9,11) challenge the diff and only close an objection with file:line + a passing test; iterate until zero objections. Then a **tester** runs `cd web-ui && npm run lint && npm test && npm run build`, `python -m pytest tests/unit`, and `cargo check` in `tauri-app/src-tauri`; the watchdog signs off only when every acceptance checkbox for that stream passes and no §2 DONE item regressed. Enforce the §7 hard constraints (no fabrication, no dead buttons, no empty gated containers, real per-article video counts, in-PDF hyperlinks). Do NOT rebuild anything in §2. Stop only when all 41 items pass §6 acceptance and full CI is green (R40); do not cut a release until then.
