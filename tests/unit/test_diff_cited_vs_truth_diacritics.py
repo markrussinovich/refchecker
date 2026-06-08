@@ -68,6 +68,50 @@ def test_author_accent_only_difference_does_not_warn():
     )
 
 
+def test_venue_case_only_difference_does_not_warn():
+    # Regression: the diacritic-folding branch must STILL lowercase. A
+    # case-only venue difference ("NeurIPS" vs "neurips") agreed under the
+    # old .strip().lower() normalizer; when the fold branch dropped .lower()
+    # it re-introduced this exact spurious "Unknown mismatch" false-positive.
+    ref = {
+        "title": "A study of methods",
+        "authors": ["Smith, John"],
+        "year": 2020,
+        "venue": "NeurIPS",
+    }
+    truth = {
+        "title": "A study of methods",
+        "authors": "Smith, John",
+        "year": 2020,
+        "venue": "neurips",
+    }
+    errors, warnings = _diff_cited_vs_truth(ref, truth)
+    assert "venue" not in _all_issue_types(errors, warnings), (
+        "case-only venue difference must not raise a venue mismatch"
+    )
+
+
+def test_author_case_only_difference_does_not_warn():
+    # Companion to the venue case-only test: a surname differing only in case
+    # ("MCDONALD" vs "McDonald") must not warn after diacritic folding.
+    ref = {
+        "title": "Some paper",
+        "authors": ["MCDONALD, John"],
+        "year": 2020,
+        "venue": "NeurIPS",
+    }
+    truth = {
+        "title": "Some paper",
+        "authors": "McDonald, John",
+        "year": 2020,
+        "venue": "NeurIPS",
+    }
+    errors, warnings = _diff_cited_vs_truth(ref, truth)
+    assert "authors" not in _all_issue_types(errors, warnings), (
+        "case-only author difference must not raise an author mismatch"
+    )
+
+
 def test_clean_reference_produces_no_issues():
     ref = {
         "title": "Deep residual learning for image recognition",

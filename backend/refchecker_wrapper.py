@@ -222,14 +222,22 @@ def _diff_cited_vs_truth(reference, truth):
 
     # Diacritic/unicode folding so a field that matches the cached truth
     # modulo accents/encoding (e.g. venue "Émergent" vs "Emergent", author
-    # "Béngio" vs "Bengio", or a PDF-split combining accent "Z ̈ugner" vs
-    # "Zügner") is NOT flagged as a mismatch. Without this, the raw
-    # lower()-only comparison below treated those as genuine differences and
-    # emitted a spurious venue/author "mismatch" warning on a reference whose
-    # fields actually agree — which is the false-positive that surfaced as the
-    # confusing "Unknown mismatch" badge. REAL DATA ONLY: this only suppresses
-    # warnings when the values are genuinely the same string after
-    # accent/case/whitespace folding; true differences still warn.
+    # "Béngio" vs "Bengio", or "Łukasz" vs "Lukasz") is NOT flagged as a
+    # mismatch. Without this, the raw lower()-only comparison below treated
+    # those as genuine differences and emitted a spurious venue/author
+    # "mismatch" warning on a reference whose fields actually agree — which is
+    # the false-positive that surfaced as the confusing "Unknown mismatch"
+    # badge. REAL DATA ONLY: this only suppresses warnings when the values are
+    # genuinely the same string after accent/case/whitespace folding; true
+    # differences still warn.
+    #
+    # NOTE: normalize_diacritics uses GERMAN-style transliteration (ü -> "ue",
+    # ö -> "oe", ß -> "ss"), so it does NOT collapse every PDF-split accent
+    # back to its base letter. A combining-diaeresis split like "Z̈ugner"
+    # folds to "zugner" while precomposed "Zügner" folds to "zuegner" — those
+    # still differ and will (correctly, conservatively) warn rather than be
+    # silently equated. The win here is the common Latin accent-strip cases
+    # above, not exhaustive German↔base reconciliation.
     try:
         from refchecker.utils.text_utils import normalize_diacritics as _fold_diacritics
     except Exception:  # pragma: no cover - util import shouldn't fail
@@ -241,8 +249,12 @@ def _diff_cited_vs_truth(reference, truth):
         s = str(s).strip()
         if _fold_diacritics is not None:
             try:
-                # normalize_diacritics already lowercases + strips accents.
-                s = _fold_diacritics(s)
+                # normalize_diacritics folds accents but is CASE-PRESERVING
+                # (e.g. "NeurIPS" -> "NeurIPS", and German ü -> "ue"), so we
+                # MUST lowercase after folding — otherwise a case-only difference
+                # ("NeurIPS" vs "neurips") would wrongly trip the mismatch guard,
+                # re-introducing the spurious "Unknown mismatch" this fold fixes.
+                s = _fold_diacritics(s).lower()
             except Exception:
                 s = s.lower()
         else:
