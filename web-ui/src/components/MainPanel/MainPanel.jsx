@@ -484,6 +484,7 @@ export default function MainPanel() {
               <SimilarPapersPanel
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
+                paperSource={displayPaperSource}
                 onCheckPaper={(source) => {
                   // Switch UI to "New refcheck" so the input panel is visible,
                   // then dispatch the URL to InputSection which auto-submits.

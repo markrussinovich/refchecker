@@ -40,6 +40,7 @@ from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
+from .cites_refs import fetch_cites_and_refs
 from .auth import (
     SITE_URL,
     is_multiuser_mode,
@@ -6060,6 +6061,14 @@ class _SimilarPapersRequest(BaseModel):
     paper_title: Optional[str] = None
     paper_id: Optional[str] = None  # arXiv ID or DOI of the SOURCE paper
     limit: int = 5
+    # Discovery mode (#63):
+    #   'similar'    — the existing co-citation / reference-overlap pipeline
+    #                  (byte-identical default path).
+    #   'cites_refs' — the SOURCE paper's real OpenAlex citation
+    #                  neighbourhood: the works it cites + the works that
+    #                  cite it. A CLEAN, SEPARATE path (backend/cites_refs.py).
+    #   'both'       — merge the cites/refs candidates into the similar ones.
+    mode: str = 'similar'
 
 
 def _candidate_key(title: Optional[str], doi: Optional[str], arxiv: Optional[str]) -> str:
@@ -6102,6 +6111,12 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
     'unknown'.
     """
     try:
+        mode = (req.mode or "similar").strip().lower()
+        if mode == "cites_refs":
+            return await _cites_refs_papers_impl(req)
+        if mode == "both":
+            return await _both_papers_impl(req, current_user)
+        # Default 'similar' path is byte-identical to before.
         return await _find_similar_papers_impl(req, current_user)
     except HTTPException:
         raise
@@ -6112,6 +6127,119 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             "candidates": [],
             "error": f"Similar Papers lookup failed: {e}",
         }
+
+
+async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
+    """CLEAN SEPARATE path (#63): the SOURCE paper's real OpenAlex
+    citation neighbourhood — the works it references + the works that
+    cite it. REAL OpenAlex data only; empty in -> empty out.
+    """
+    import httpx
+    limit = max(1, min(20, int(req.limit or 5)))
+    timeout = 12.0
+
+    async with httpx.AsyncClient() as client:
+        async def _fetch(url: str, params: Optional[dict] = None) -> Optional[dict]:
+            try:
+                r = await client.get(url, params=params, timeout=timeout)
+                if r.status_code == 200:
+                    return r.json()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("OpenAlex cites/refs fetch failed for %s: %s", url, e)
+            return None
+
+        result = await fetch_cites_and_refs(
+            _fetch,
+            _candidate_key,
+            paper_id=req.paper_id,
+            paper_title=req.paper_title,
+            limit=limit,
+        )
+
+    candidates = _shape_cites_refs_candidates(result.get("candidates", []))
+    source_counts: Dict[str, int] = {}
+    for c in candidates:
+        rel = c.get("relation") or "openalex"
+        source_counts[rel] = source_counts.get(rel, 0) + 1
+    return {
+        "source_paper": req.paper_title,
+        "candidates": candidates,
+        "source_counts": source_counts,
+        "total_candidates": len(candidates),
+        "mode": "cites_refs",
+        "source_work": result.get("source_work"),
+    }
+
+
+def _shape_cites_refs_candidates(raw: list) -> list:
+    """Project OpenAlex cites/refs candidates onto the same row shape the
+    Similar-Papers UI already renders, tagging each with its relation."""
+    out = []
+    for c in raw:
+        out.append({
+            "paperId": None,
+            "openalex_id": c.get("openalex_id"),
+            "title": c.get("title"),
+            "year": c.get("year"),
+            "authors": c.get("authors") or [],
+            "doi": c.get("doi"),
+            "arxiv_id": c.get("arxiv_id"),
+            "venue": None,
+            "reason": None,
+            "relation": c.get("relation"),  # 'reference' | 'citation'
+            "shared_with_source": 0,
+            "shared_refs_count": 0,
+            "shared_refs_pct": 0.0,
+            "shared_refs_jaccard": 0.0,
+            "candidate_ref_count": 0,
+            "shared_refs_titles": [],
+            "sources": ["openalex"],
+            "via": "openalex",
+            "semantic_scholar_url": None,
+            "url": c.get("url"),
+            "pre_verified": False,
+            "was_verified": False,
+            "verified_status": None,
+            "times_seen": 0,
+        })
+    return out
+
+
+async def _both_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo) -> Dict[str, Any]:
+    """'both' mode: the existing Similar pipeline merged with the new
+    cites/refs neighbourhood. Dedupe is via _candidate_key so a paper
+    surfaced by both paths appears once; the relation tag is preserved."""
+    similar = await _find_similar_papers_impl(req, current_user)
+    cites_refs = await _cites_refs_papers_impl(req)
+
+    merged: list = []
+    seen: set = set()
+    # Similar results first (they carry the richer overlap/verification
+    # signal), then fill in cites/refs candidates not already present.
+    for c in (similar.get("candidates") or []):
+        key = _candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+    for c in (cites_refs.get("candidates") or []):
+        key = _candidate_key(c.get("title"), c.get("doi"), c.get("arxiv_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+
+    source_counts = dict(similar.get("source_counts") or {})
+    for k, v in (cites_refs.get("source_counts") or {}).items():
+        source_counts[k] = source_counts.get(k, 0) + v
+    return {
+        "source_paper": req.paper_title,
+        "candidates": merged,
+        "source_counts": source_counts,
+        "total_candidates": len(merged),
+        "mode": "both",
+        "source_work": cites_refs.get("source_work"),
+    }
 
 
 async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo):

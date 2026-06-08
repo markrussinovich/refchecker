@@ -23,8 +23,36 @@ const SIMILAR_INFLIGHT = new Map()
  * /api/check pipeline. Disabled until a check has actually produced
  * references.
  */
-export default function SimilarPapersPanel({ references, paperTitle, onCheckPaper }) {
-  const cacheKey = paperTitle || ''
+// Discovery modes (#63). 'similar' is the existing co-citation/overlap
+// pipeline; 'cites_refs' shows the source paper's real OpenAlex
+// references + citations.
+const MODES = [
+  { id: 'similar', label: 'Similar' },
+  { id: 'cites_refs', label: 'Cites & Refs' },
+]
+
+// Extract a DOI or arXiv id from the source string (a URL or raw id) so
+// 'cites_refs' mode can resolve the SOURCE paper on OpenAlex. Returns ''
+// when nothing recognisable is present (then title-only resolution runs).
+function deriveSourceId(paperSource) {
+  const s = String(paperSource || '').trim()
+  if (!s) return ''
+  const doi = s.match(/10\.\d{4,9}\/[^\s"<>]+/i)
+  if (doi) return doi[0]
+  const arxivAbs = s.match(/arxiv\.org\/abs\/([^\s?#]+)/i)
+  if (arxivAbs) return arxivAbs[1]
+  const arxivRaw = s.match(/^arxiv:\s*(.+)$/i)
+  if (arxivRaw) return arxivRaw[1].trim()
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(s)) return s
+  return ''
+}
+
+export default function SimilarPapersPanel({ references, paperTitle, paperSource, onCheckPaper }) {
+  const paperId = deriveSourceId(paperSource)
+  const [mode, setMode] = useState('similar')
+  // Cache key is mode-aware so switching Similar <-> Cites & Refs keeps
+  // each mode's results independently and never cross-contaminates.
+  const cacheKey = `${mode}::${paperTitle || ''}`
   const cached = SIMILAR_CACHE.get(cacheKey)
   const inflight = SIMILAR_INFLIGHT.get(cacheKey)
   const [loading, setLoading] = useState(Boolean(inflight))
@@ -65,7 +93,9 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
     const promise = findSimilarPapers({
       references: refsForRequest,
       paper_title: paperTitle,
+      paper_id: paperId || undefined,
       limit: 5,
+      mode,
     }).then(res => {
       const cands = res.data?.candidates || []
       const counts = res.data?.source_counts || {}
@@ -86,12 +116,15 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
   }
 
   useEffect(() => {
-    // Reset / restore state on paperTitle change. Priority:
+    // Reset / restore state on paperTitle OR mode change. Priority:
     //   1. completed cache → show those candidates
     //   2. in-flight search → attach to its promise and show loading
-    //   3. neither → empty + Find similar papers button
-    const c = SIMILAR_CACHE.get(paperTitle || '')
-    const inFly = SIMILAR_INFLIGHT.get(paperTitle || '')
+    //   3. neither → empty + Find papers button
+    // Cache key is mode-aware (`${mode}::${title}`) so each mode keeps
+    // its own results and a mode flip re-runs against the right path.
+    setError(null)
+    const c = SIMILAR_CACHE.get(cacheKey)
+    const inFly = SIMILAR_INFLIGHT.get(cacheKey)
     if (c) {
       setCandidates(c.candidates)
       setSourceCounts(c.sourceCounts)
@@ -110,7 +143,7 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
     } else {
       setLoaded(false); setCandidates([]); setLoading(false); setSearchStartedAt(null)
     }
-  }, [paperTitle])
+  }, [paperTitle, mode, cacheKey])
 
   // Tick a re-render every second while a search is in flight so the
   // elapsed-time progress label updates instead of freezing.
@@ -134,12 +167,47 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
 
   return (
     <div className="space-y-2">
+      {/* Segmented mode toggle (#63): Similar = co-citation/overlap path;
+          Cites & Refs = the source paper's real OpenAlex references +
+          citations. Switching modes re-runs against the matching path. */}
+      <div className="flex" role="tablist" aria-label="Discovery mode"
+        style={{
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          overflow: 'hidden',
+          width: 'fit-content',
+          background: 'var(--color-bg-secondary)',
+        }}>
+        {MODES.map((m) => {
+          const active = mode === m.id
+          return (
+            <button
+              key={m.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => { if (m.id !== mode) { setMode(m.id); setExpandedShared(null) } }}
+              className="px-3 py-1 text-xs font-medium"
+              style={{
+                background: active ? 'var(--color-accent, #3b82f6)' : 'transparent',
+                color: active ? 'white' : 'var(--color-text-secondary)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {m.label}
+            </button>
+          )
+        })}
+      </div>
       <div
         className="rounded-lg border p-3 flex items-center justify-between flex-wrap gap-2"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}
       >
         <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          Find up to 5 papers from Semantic Scholar that share the most references with this paper.
+          {mode === 'cites_refs'
+            ? "This paper's real citation neighbourhood from OpenAlex — the works it cites and the works that cite it."
+            : 'Find up to 5 papers from Semantic Scholar that share the most references with this paper.'}
         </div>
         <button
           onClick={load}
@@ -150,7 +218,7 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
         >
           {loading
             ? `Searching… ${elapsedSec}s`
-            : (loaded ? 'Refresh' : 'Find similar papers')}
+            : (loaded ? 'Refresh' : (mode === 'cites_refs' ? 'Find cites & refs' : 'Find similar papers'))}
         </button>
       </div>
 
@@ -227,12 +295,18 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
       )}
 
       <div className="space-y-2">
-        {candidates.map((c) => {
+        {candidates.map((c, idx) => {
           const url = c.semantic_scholar_url
           const arxivUrl = c.arxiv_id ? `https://arxiv.org/abs/${c.arxiv_id}` : null
           const doiUrl = c.doi ? `https://doi.org/${c.doi}` : null
+          // Cites/refs rows have no S2 paperId, so fall back to a stable
+          // composite key (openalex id / doi / index) to avoid React key
+          // collisions on the null paperId. (The shared-refs expand toggle
+          // only renders for similar-mode rows, which always carry a
+          // paperId, so its state key stays c.paperId below.)
+          const rowKey = c.paperId || c.openalex_id || c.doi || `row-${idx}`
           return (
-            <div key={c.paperId} className="rounded-lg border p-3"
+            <div key={rowKey} className="rounded-lg border p-3"
               style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div className="flex-1 min-w-0">
@@ -260,6 +334,28 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                         {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
                       </span>
                     ))}
+                    {/* Relation chip (#63): in cites_refs / both mode each
+                        candidate is tagged as a work the source paper
+                        cites (Reference) or one that cites it (Citation). */}
+                    {(c.relation === 'reference' || c.relation === 'citation') && (
+                      <span
+                        className="px-1.5 py-0.5 rounded"
+                        style={{
+                          background: c.relation === 'reference'
+                            ? 'rgba(139,92,246,0.12)' : 'rgba(234,179,8,0.14)',
+                          color: c.relation === 'reference'
+                            ? 'var(--color-accent, #8b5cf6)' : '#a16207',
+                          fontSize: '0.7rem',
+                          border: c.relation === 'reference'
+                            ? '1px solid rgba(139,92,246,0.35)' : '1px solid rgba(234,179,8,0.4)',
+                        }}
+                        title={c.relation === 'reference'
+                          ? 'This paper is cited BY the source paper (a reference).'
+                          : 'This paper CITES the source paper (a citation).'}
+                      >
+                        {c.relation === 'reference' ? 'Reference' : 'Citation'}
+                      </span>
+                    )}
                     {/* Reference-overlap chip — the user's primary signal.
                         Shows "85% shared refs (17/20)" when the candidate
                         cites 17 of the input's 20 references. */}
@@ -271,6 +367,10 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                           - candidate_ref_count = 0: "shared refs N/A" (couldn't fetch)
                        */}
                     {(() => {
+                      // Cites/refs candidates aren't scored for reference
+                      // overlap (that signal belongs to the Similar path),
+                      // so don't render the "shared refs N/A" noise for them.
+                      if (c.relation === 'reference' || c.relation === 'citation') return null
                       const sharedN = c.shared_refs_count || 0
                       const candRefs = c.candidate_ref_count || 0
                       if (sharedN > 0) {

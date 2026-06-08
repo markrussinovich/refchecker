@@ -157,8 +157,10 @@ export const getVenueProfile = ({ venue_id = null, issn = null, venue_name = nul
 // Similar-papers recommendations + co-citation tally — Semantic Scholar's
 // /recommendations endpoint is slow, so this can legitimately take longer
 // than the default 30s. Give it a 2-minute budget.
-export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5 }) =>
-  api.post('/papers/similar', { references, paper_title, paper_id, limit }, { timeout: 120000 })
+// `mode` (#63): 'similar' (default co-citation/overlap path), 'cites_refs'
+// (the source paper's real OpenAlex references + citations), or 'both'.
+export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5, mode = 'similar' }) =>
+  api.post('/papers/similar', { references, paper_title, paper_id, limit, mode }, { timeout: 120000 })
 
 // Real inter-reference citation graph via Semantic Scholar
 export const fetchCitationGraph = ({ references, paper_title, ai_detection = false }) =>
