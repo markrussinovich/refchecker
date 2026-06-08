@@ -46,5 +46,46 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(screen.getByRole('button', { name: '+ Add to Library' })).toBeInTheDocument()
     // No enrichment -> none of the info pills appear.
     expect(screen.queryByRole('button', { name: 'Abstract' })).toBeNull()
+    expect(screen.queryByText(/^Published /)).toBeNull()
+    expect(screen.queryByText(/^Topics:/)).toBeNull()
+  })
+
+  it('shows the Published badge only when enrichment.publication_date exists', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { publication_date: '2021-10-01' } }} />)
+    // Parsed locally (no timezone drift) -> month/day/year present.
+    expect(screen.getByText(/^Published .*2021/)).toBeInTheDocument()
+  })
+
+  it('omits the Published badge when there is no publication_date', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { abstract: 'x' } }} />)
+    expect(screen.queryByText(/^Published /)).toBeNull()
+  })
+
+  it('shows the Topics badge listing fields_of_study only when present', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { fields_of_study: ['Computer Science', 'Machine Learning'] } }} />)
+    expect(screen.getByText(/^Topics: Computer Science, Machine Learning/)).toBeInTheDocument()
+  })
+
+  it('omits the Topics badge when fields_of_study is empty or absent', () => {
+    const { rerender } = render(<AdditionalInfoBar reference={{ enrichment: { fields_of_study: [] } }} />)
+    expect(screen.queryByText(/^Topics:/)).toBeNull()
+    rerender(<AdditionalInfoBar reference={{ enrichment: { abstract: 'x' } }} />)
+    expect(screen.queryByText(/^Topics:/)).toBeNull()
+  })
+
+  it('shows a Checking… status pill only while the reference is checking', () => {
+    render(<AdditionalInfoBar reference={{ status: 'checking' }} />)
+    expect(screen.getByText('Checking…')).toBeInTheDocument()
+  })
+
+  it('shows a Pending status pill only while the reference is pending', () => {
+    render(<AdditionalInfoBar reference={{ status: 'pending' }} />)
+    expect(screen.getByText('Pending')).toBeInTheDocument()
+  })
+
+  it('omits the status pill for non-pending/checking statuses', () => {
+    render(<AdditionalInfoBar reference={{ status: 'verified', enrichment: { abstract: 'x' } }} />)
+    expect(screen.queryByText('Checking…')).toBeNull()
+    expect(screen.queryByText('Pending')).toBeNull()
   })
 })

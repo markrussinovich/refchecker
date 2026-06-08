@@ -28,6 +28,26 @@ function Pill({ onClick, href, title, color, children }) {
   return <button type="button" onClick={onClick} title={title} style={style}>{children}</button>
 }
 
+// Render an OpenAlex publication_date (an ISO "YYYY-MM-DD" string) as a
+// human-readable "Published Oct 1, 2021" without timezone drift. We parse the
+// parts directly instead of `new Date(str)` because the latter treats a bare
+// date as UTC midnight and can render the previous day in negative-offset
+// locales. Returns null when the value is absent or unparseable — never
+// fabricates a date.
+function formatPublicationDate(value) {
+  if (!value || typeof value !== 'string') return null
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) {
+    // Year-only or other shapes: surface a 4-digit year if present, else abstain.
+    const y = value.match(/^(\d{4})\b/)
+    return y ? y[1] : null
+  }
+  const [, y, mo, d] = m
+  const dt = new Date(Number(y), Number(mo) - 1, Number(d))
+  if (Number.isNaN(dt.getTime())) return null
+  return dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export default function AdditionalInfoBar({ reference, checkId }) {
   const e = (reference && reference.enrichment) || {}
   const [panel, setPanel] = useState(null)  // 'abstract' | 'tldr' | null
@@ -36,6 +56,23 @@ export default function AdditionalInfoBar({ reference, checkId }) {
 
   const oaUrl = e.oa_pdf_url || (e.links && e.links.oa_pdf) || null
   const toggle = (p) => setPanel((cur) => (cur === p ? null : p))
+
+  // Real OpenAlex signals for the new badges. publication_date is an ISO
+  // string; fields_of_study is an array of real OpenAlex concept names. Both
+  // omit entirely when absent — no placeholders, no fabricated "description".
+  const publishedLabel = formatPublicationDate(e.publication_date)
+  const topics = Array.isArray(e.fields_of_study)
+    ? e.fields_of_study.filter(t => typeof t === 'string' && t.trim())
+    : []
+
+  // Real verification state (not enrichment): show a live status pill only
+  // while this reference is actually queued or being checked.
+  const refStatus = reference && reference.status
+  const statusPill = refStatus === 'checking'
+    ? { label: 'Checking…', title: 'This reference is being verified', color: 'var(--color-accent)' }
+    : refStatus === 'pending'
+      ? { label: 'Pending', title: 'Waiting in the verification queue', color: 'var(--color-text-muted)' }
+      : null
 
   const canCache = !!(reference?.doi || reference?.verified_doi || reference?.arxiv_id || reference?.title)
   const addToLibrary = async () => {
@@ -51,9 +88,12 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   }
 
   const badges = []
+  if (statusPill) badges.push(<Pill key="st" title={statusPill.title} color={statusPill.color}>{statusPill.label}</Pill>)
   if (e.abstract) badges.push(<Pill key="ab" onClick={() => toggle('abstract')} title="Show the abstract">Abstract</Pill>)
   if (e.tldr) badges.push(<Pill key="cl" onClick={() => toggle('tldr')} title="One-line claim (Semantic Scholar TL;DR)" color="var(--color-warning)">Claim</Pill>)
   if (e.is_preprint) badges.push(<Pill key="pp" title="Preprint / posted content (not yet a journal article)" color="var(--color-warning)">Preprint</Pill>)
+  if (publishedLabel) badges.push(<Pill key="pd" title="Publication date (OpenAlex)">Published {publishedLabel}</Pill>)
+  if (topics.length > 0) badges.push(<Pill key="fos" title={`Fields of study (OpenAlex concepts): ${topics.join(', ')}`}>Topics: {topics.slice(0, 3).join(', ')}{topics.length > 3 ? ` +${topics.length - 3}` : ''}</Pill>)
 
   const actions = []
   if (oaUrl) actions.push(<Pill key="vp" href={oaUrl} title="Open the open-access full text / PDF" color="var(--color-accent)">View full text ↗</Pill>)
