@@ -890,18 +890,185 @@ def _progressive_needles(text):
     return cands
 
 
+def _norm_word(w):
+    """Lowercase a token and strip leading/trailing punctuation so hyphenation,
+    quotes and trailing periods don't defeat first/last-word anchoring."""
+    import re as _re
+    return _re.sub(r"^[^\w]+|[^\w]+$", "", (w or "").lower())
+
+
+def _token_anchored_span_on_page(page, text, max_rects=24, anchor_n=3):
+    """R13: token-anchored WHOLE-sentence span.
+
+    When ``page.search_for(full_needle)`` fails because the PDF text layer has a
+    soft line break / hyphenation that the extracted needle lacks, locate the
+    sentence by its endpoints instead of as one contiguous string:
+
+      1. ``page.get_text('words')`` → ordered (rect, word) tokens in reading order.
+      2. Fuzzy-align the first ``anchor_n`` normalized needle words to a START
+         token and the last ``anchor_n`` normalized needle words to an END token
+         that comes after START.
+      3. Union the rects of every word BETWEEN those anchors (inclusive),
+         grouped per text line, so the highlight covers the whole sentence —
+         not a 5-word prefix.
+
+    Returns a list of normalized 0..1 rects (one per covered line), or [] if the
+    endpoints can't be anchored (caller then degrades to the 5-word fallback).
+    Never fabricates a position.
+    """
+    needle_words = [_norm_word(w) for w in (text or "").split()]
+    needle_words = [w for w in needle_words if w]
+    if len(needle_words) < 4:
+        return []  # too short to anchor by endpoints — let the prefix fallback handle it
+
+    try:
+        raw = page.get_text("words")  # (x0, y0, x1, y1, word, block, line, word_no)
+    except Exception:
+        return []
+    if not raw:
+        return []
+
+    pw = float(page.rect.width) or 1.0
+    ph = float(page.rect.height) or 1.0
+
+    toks = []
+    for w in raw:
+        nw = _norm_word(w[4])
+        if not nw:
+            continue
+        toks.append((float(w[0]), float(w[1]), float(w[2]), float(w[3]),
+                     nw, int(w[5]), int(w[6])))
+    if not toks:
+        return []
+    page_words = [t[4] for t in toks]
+    n = len(page_words)
+
+    head = needle_words[:anchor_n]
+    tail = needle_words[-anchor_n:]
+
+    def _match_run(anchor, start_at):
+        """Index of the first token >= start_at where as many of ``anchor`` words
+        as possible align in order (tolerating a missing/hyphen-split word).
+        Requires at least the first anchor word to match exactly."""
+        a0 = anchor[0]
+        for i in range(start_at, n):
+            if page_words[i] != a0:
+                continue
+            ai, ti, miss = 1, i + 1, 0
+            while ai < len(anchor) and ti < n and miss <= 1:
+                if page_words[ti] == anchor[ai]:
+                    ai += 1
+                    ti += 1
+                else:
+                    miss += 1
+                    ti += 1
+            if ai >= 1:  # head word matched; trailing anchors are a bonus
+                return i
+        return -1
+
+    start_i = _match_run(head, 0)
+    if start_i < 0:
+        return []
+    # End anchor: the NEAREST occurrence of the tail's first word at/after
+    # start_i whose following tokens confirm the rest of the tail run (>=2 tail
+    # words aligned in order, tolerating one missing/hyphen-split word). Using
+    # the nearest *confirmed* run — rather than the LAST occurrence of the tail's
+    # first word — stops the union from over-running past the real sentence end
+    # when that word (often a stopword like "the"/"and") repeats later on the
+    # page. A single-word tail (anchor_n==1) has nothing to confirm, so it falls
+    # back to the first occurrence.
+    t0 = tail[0]
+    tail_needs_confirm = len(tail) >= 2
+
+    def _confirm_tail_at(i):
+        """If a tail run starts at token ``i``, return the index of its final
+        aligned tail token; else -1. Requires >=2 tail words to align (in order,
+        tolerating one miss) so a lone repeated first word can't anchor the end."""
+        last = i
+        matched = 1  # tail[0] already matched at i
+        ai, ti, miss = 1, i + 1, 0
+        while ai < len(tail) and ti < n and miss <= 1:
+            if page_words[ti] == tail[ai]:
+                last = ti
+                matched += 1
+                ai += 1
+                ti += 1
+            else:
+                miss += 1
+                ti += 1
+        if matched >= 2:
+            return last
+        return -1
+
+    end_first = -1
+    end_i = -1
+    for i in range(start_i, n):
+        if page_words[i] != t0:
+            continue
+        if not tail_needs_confirm:
+            end_first, end_i = i, i
+            break
+        last = _confirm_tail_at(i)
+        if last >= 0:
+            end_first, end_i = i, last
+            break
+    if end_first < 0:
+        return []
+    if end_i < start_i:
+        return []
+
+    # Guard against runaway spans (anchors that matched far-apart noise): the
+    # span shouldn't be wildly longer than the sentence itself.
+    if (end_i - start_i + 1) > len(needle_words) * 4 + 12:
+        return []
+
+    # Union the covered tokens per (block, line) into line rects.
+    by_line = {}
+    for t in toks[start_i:end_i + 1]:
+        key = (t[5], t[6])
+        x0, y0, x1, y1 = t[0], t[1], t[2], t[3]
+        if key in by_line:
+            bx0, by0, bx1, by1 = by_line[key]
+            by_line[key] = (min(bx0, x0), min(by0, y0), max(bx1, x1), max(by1, y1))
+        else:
+            by_line[key] = (x0, y0, x1, y1)
+
+    rects = []
+    for key in sorted(by_line):
+        x0, y0, x1, y1 = by_line[key]
+        rects.append([round(x0 / pw, 4), round(y0 / ph, 4),
+                      round(x1 / pw, 4), round(y1 / ph, 4)])
+        if len(rects) >= max_rects:
+            break
+    return rects
+
+
 def _search_pages_for_text(pages, text, max_rects=12):
-    """Return (page_index, [normalized rects]) for the first page on which any
-    progressive needle of ``text`` is found, else (None, []). Never fabricates a
-    position. Rects are 0..1 page-normalized so they overlay at any display size."""
+    """Return (page_index, [normalized rects]) for the first page on which the
+    text is found, else (None, []). Never fabricates a position. Rects are 0..1
+    page-normalized so they overlay at any display size.
+
+    Match order per page (R13):
+      1. ``search_for`` the full text / first sentence (contiguous match).
+      2. If that fails, a TOKEN-ANCHORED whole-sentence span (union of word
+         rects between the fuzzy-aligned first + last words) — so a sentence
+         broken by a soft line break / hyphenation is still highlighted whole.
+      3. Only if BOTH fail, the 5-word prefix needle (last resort)."""
     cands = _progressive_needles(text)
     if not cands:
         return None, []
+    # The contiguous needles to try first: everything EXCEPT the short 5-word
+    # prefix (index -1 when present), which is the explicit last-resort fallback.
+    words = (text or "").split()
+    has_prefix_fallback = len(words) > 5
+    contiguous = cands[:-1] if has_prefix_fallback else cands
+
     for pno, page in enumerate(pages):
         pw = float(page.rect.width) or 1.0
         ph = float(page.rect.height) or 1.0
         rects = []
-        for needle in cands:
+        # 1) contiguous search_for on the full text / first sentence.
+        for needle in contiguous:
             if len(needle) < 8:
                 continue
             try:
@@ -915,6 +1082,28 @@ def _search_pages_for_text(pages, text, max_rects=12):
                 break
         if rects:
             return pno, rects
+        # 2) token-anchored whole-sentence span (covers soft-break/hyphenation).
+        anchored = _token_anchored_span_on_page(page, text, max_rects=max_rects)
+        if anchored:
+            return pno, anchored
+
+    # 3) Last resort: the 5-word prefix needle (only when token-anchoring failed
+    #    on every page), so a short prefix highlight is better than nothing.
+    if has_prefix_fallback:
+        prefix = cands[-1]
+        for pno, page in enumerate(pages):
+            pw = float(page.rect.width) or 1.0
+            ph = float(page.rect.height) or 1.0
+            if len(prefix) < 8:
+                break
+            try:
+                hits = page.search_for(prefix)
+            except Exception:
+                hits = []
+            if hits:
+                return pno, [[round(r.x0 / pw, 4), round(r.y0 / ph, 4),
+                              round(r.x1 / pw, 4), round(r.y1 / ph, 4)]
+                             for r in hits[:max_rects]]
     return None, []
 
 

@@ -5,6 +5,7 @@ import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { useGesturePinchZoom } from '../../utils/useGesturePinchZoom'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import ShareModal from '../Modals/ShareModal'
 import DocumentViewer from './DocumentViewer'
@@ -83,6 +84,10 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
   const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
+  // R31: trackpad/touch pinch-to-zoom on the per-ref overlay page image, via the
+  // SAME shared hook the native DocumentViewer uses (ctrl+wheel + WebKit gesture
+  // events, non-passive so the browser's own page zoom never engages).
+  useGesturePinchZoom(scrollRef, setZoom, { min: ZOOM_MIN, max: ZOOM_MAX })
   // Image sizing: at 100% fit to viewport; when zoomed, grow past the
   // viewport and let the (now two-axis) scroll container pan.
   const imgStyle = zoom === 1

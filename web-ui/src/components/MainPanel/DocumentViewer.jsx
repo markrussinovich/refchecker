@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getPaperText } from '../../utils/api'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
 import { ZoomControls, FindBar } from '../common/ViewerControls'
+import { useGesturePinchZoom } from '../../utils/useGesturePinchZoom'
 import NativePdfViewer from './NativePdfViewer'
 
 /**
@@ -86,13 +87,21 @@ function mergeRanges(ranges) {
   return out
 }
 
+// R12: a citation/passage view always opens at this deterministic focus zoom
+// (a clear, readable "zoomed in to the cited sentence" level on top of the
+// fit-width base scale) — never inheriting a stale prior zoom. When the viewer
+// is opened with no focus target it opens at fit-width (1).
+const CITE_FOCUS_ZOOM = 1.5
+
 export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose, onJumpToReference }) {
   // Native PDF first; fall back to the extracted-text view when there's no
   // source PDF (pasted text / .bib / .tex) or pdf.js can't render it.
   const [mode, setMode] = useState('pdf') // 'pdf' | 'text'
   const [pdfLocated, setPdfLocated] = useState(0)
   const [state, setState] = useState({ loading: true, text: '', error: null, available: true, truncated: false })
-  const [zoom, setZoom] = useState(1)
+  // R12: start at the focus zoom whenever a citation/passage is focused so the
+  // first paint already lands at a clear, centered reading zoom.
+  const [zoom, setZoom] = useState(focusSpanIndex != null ? CITE_FOCUS_ZOOM : 1)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [currentMatch, setCurrentMatch] = useState(0)
@@ -102,49 +111,22 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   const ZOOM_MIN = 0.7, ZOOM_MAX = 2.2, ZOOM_STEP = 0.15
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
-  const clampZoom = (z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +z.toFixed(3)))
 
-  // Live zoom mirror so the once-bound gesture handler can read the current
-  // value as its pinch baseline without re-attaching the listener on each
-  // zoom change.
-  const zoomRef = useRef(zoom)
-  useEffect(() => { zoomRef.current = zoom }, [zoom])
+  // R31: trackpad/touch pinch-to-zoom via the shared hook (ctrl+wheel + WebKit
+  // gesture events), the same implementation the per-ref ThumbnailOverlay uses.
+  useGesturePinchZoom(scrollRef, setZoom, { min: ZOOM_MIN, max: ZOOM_MAX })
 
-  // Trackpad pinch-to-zoom over the document. On macOS a pinch arrives as a
-  // `wheel` event with ctrlKey=true (Safari/WebKit/Tauri additionally fire
-  // `gesturestart`/`gesturechange`/`gestureend`). We preventDefault those and
-  // map them onto the zoom state. A plain wheel (no ctrlKey) is left alone so
-  // normal vertical scrolling still works. Listeners are non-passive because we
-  // call preventDefault to stop the browser's own page zoom.
+  // R12: deterministically RESET to the focus zoom whenever the citation target
+  // changes — the viewer stays mounted while a user re-targets from card to
+  // card, so without this it would keep whatever zoom the user (or the prior
+  // citation) left behind. Keyed on the focused span's own text so re-targeting
+  // to a different citation always re-centers at the focus zoom, while a plain
+  // re-render (e.g. find-bar typing) does NOT yank the user's manual zoom.
+  const focusKey = focusSpanIndex != null ? (spans[focusSpanIndex]?.quote || focusSpanIndex) : null
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const onWheel = (e) => {
-      if (!e.ctrlKey) return // plain scroll — let it through
-      e.preventDefault()
-      // deltaY > 0 means pinch-in (zoom out). Scale the step by the magnitude
-      // for a smooth, proportional feel, then clamp.
-      const factor = Math.exp(-e.deltaY * 0.01)
-      setZoom((z) => clampZoom(z * factor))
-    }
-    let gestureBase = 1
-    const onGestureStart = (e) => { e.preventDefault(); gestureBase = zoomRef.current }
-    const onGestureChange = (e) => {
-      e.preventDefault()
-      setZoom(clampZoom(gestureBase * (e.scale || 1)))
-    }
-    const onGestureEnd = (e) => { e.preventDefault() }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    el.addEventListener('gesturestart', onGestureStart, { passive: false })
-    el.addEventListener('gesturechange', onGestureChange, { passive: false })
-    el.addEventListener('gestureend', onGestureEnd, { passive: false })
-    return () => {
-      el.removeEventListener('wheel', onWheel)
-      el.removeEventListener('gesturestart', onGestureStart)
-      el.removeEventListener('gesturechange', onGestureChange)
-      el.removeEventListener('gestureend', onGestureEnd)
-    }
-  }, [])
+    if (focusKey == null) return
+    setZoom(CITE_FOCUS_ZOOM)
+  }, [focusKey])
 
   // Back-link from a clicked PDF highlight to its reference card. NativePdfViewer
   // calls this with the span it drew. We dispatch the `refchecker:focus-reference`
@@ -157,6 +139,11 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   useEffect(() => { closeRef.current = onClose }, [onClose])
   const jumpToReference = (span) => {
     const refId = span?.refId != null ? span.refId : span?.refIndex
+    // R29: AI/flagged sentences use a self-referential `ai:<i>` id (so the hover
+    // bar + link engage for every span). They don't map to a reference card, so
+    // never switch tabs / tear down the viewer for them — NativePdfViewer
+    // re-centers on the span itself.
+    if (typeof refId === 'string' && refId.startsWith('ai:')) return
     if (onJumpToReference) {
       onJumpToReference(span)
     } else if (refId != null) {
@@ -443,3 +430,8 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     </div>
   )
 }
+
+// R12: exported for unit tests — the deterministic focus zoom a citation/passage
+// view opens (and re-targets) at. Co-located per the project's existing pattern.
+// eslint-disable-next-line react-refresh/only-export-components
+export { CITE_FOCUS_ZOOM }
