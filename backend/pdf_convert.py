@@ -101,3 +101,164 @@ def text_to_pdf(text: str, out_path: str, title: Optional[str] = None) -> str:
 
     doc.build(flow)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# R02 (O3) — non-PDF source → native PDF.
+#
+# So the SAME pdf.js viewer (with highlights + back-links) renders docx/html
+# sources too, we extract their real body text and reuse text_to_pdf. We keep
+# the dependency surface light: python-docx / BeautifulSoup are used when
+# present, but each has a pure-stdlib fallback so conversion still works (and
+# stays honest — only the document's own text is rendered, nothing invented).
+# ---------------------------------------------------------------------------
+
+
+def docx_to_text(path: str) -> str:
+    """Extract the body text of a .docx file as newline-separated paragraphs.
+
+    Uses python-docx when available; otherwise reads the OOXML directly with the
+    stdlib (zipfile + ElementTree). Returns "" when the file has no readable
+    text. Raises only on a genuinely unreadable/corrupt file.
+    """
+    # Preferred: python-docx (handles tables, sections, etc.).
+    try:
+        import docx  # type: ignore
+
+        document = docx.Document(path)
+        paras = [p.text for p in document.paragraphs]
+        # Include table cell text so tabular content isn't silently dropped.
+        for table in getattr(document, "tables", []):
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    paras.append("\t".join(cells))
+        return "\n".join(p for p in paras if p is not None).strip()
+    except ImportError:
+        pass
+
+    # Fallback: parse word/document.xml directly. Each <w:p> is a paragraph;
+    # text lives in <w:t> runs. Namespace-agnostic localname matching keeps this
+    # resilient to the OOXML namespace prefix.
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    with zipfile.ZipFile(path) as zf:
+        try:
+            xml_bytes = zf.read("word/document.xml")
+        except KeyError as exc:  # not a Word doc
+            raise ValueError("not a .docx file (no word/document.xml)") from exc
+
+    root = ET.fromstring(xml_bytes)
+    paragraphs = []
+    for para in root.iter():
+        if _local(para.tag) != "p":
+            continue
+        runs = [node.text or "" for node in para.iter() if _local(node.tag) == "t"]
+        text = "".join(runs).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs).strip()
+
+
+def html_to_text(html: str) -> str:
+    """Extract readable text from an HTML string (drops script/style/markup).
+
+    Uses BeautifulSoup when available; otherwise a small stdlib HTMLParser that
+    strips tags and skips <script>/<style> content. Block-level tags become line
+    breaks so the rendered PDF keeps a sensible paragraph structure.
+    """
+    if not html:
+        return ""
+
+    try:
+        from bs4 import BeautifulSoup  # type: ignore
+
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        # Newlines around block elements so paragraphs survive get_text.
+        for br in soup.find_all("br"):
+            br.replace_with("\n")
+        text = soup.get_text("\n")
+        # Collapse runs of blank lines but keep paragraph separation.
+        lines = [ln.strip() for ln in text.splitlines()]
+        return "\n".join(ln for ln in lines if ln).strip()
+    except ImportError:
+        pass
+
+    from html.parser import HTMLParser
+    import html as _htmllib
+
+    _BLOCK = {
+        "p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
+        "section", "article", "header", "footer", "ul", "ol", "table", "blockquote",
+    }
+
+    class _TextExtractor(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self._chunks: list[str] = []
+            self._skip = 0
+
+        def handle_starttag(self, tag, attrs):  # noqa: D401
+            if tag in ("script", "style", "noscript"):
+                self._skip += 1
+            elif tag in _BLOCK:
+                self._chunks.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style", "noscript") and self._skip:
+                self._skip -= 1
+            elif tag in _BLOCK:
+                self._chunks.append("\n")
+
+        def handle_data(self, data):
+            if not self._skip and data:
+                self._chunks.append(data)
+
+    parser = _TextExtractor()
+    parser.feed(_htmllib.unescape(html))
+    raw = "".join(parser._chunks)
+    lines = [ln.strip() for ln in raw.splitlines()]
+    return "\n".join(ln for ln in lines if ln).strip()
+
+
+def docx_to_pdf(src_path: str, out_path: str, title: Optional[str] = None) -> str:
+    """Convert a .docx file at ``src_path`` to a native PDF at ``out_path``."""
+    text = docx_to_text(src_path)
+    if not text.strip():
+        raise ValueError("no extractable text in .docx")
+    return text_to_pdf(text, out_path, title=title)
+
+
+def html_to_pdf(src_path: str, out_path: str, title: Optional[str] = None) -> str:
+    """Convert an .html/.htm file at ``src_path`` to a native PDF at ``out_path``."""
+    with open(src_path, "r", encoding="utf-8", errors="replace") as fh:
+        html = fh.read()
+    text = html_to_text(html)
+    if not text.strip():
+        raise ValueError("no extractable text in HTML")
+    return text_to_pdf(text, out_path, title=title)
+
+
+def convert_to_pdf(src_path: str, out_path: str, title: Optional[str] = None) -> str:
+    """Dispatch a non-PDF source file to a native PDF by extension.
+
+    Supports .docx and .html/.htm directly; .txt/.md/.tex/.bib (and unknown
+    text-like files) are read and rendered via text_to_pdf. Raises on an
+    unsupported binary type or when no text could be extracted, so the caller
+    can fall back to the extracted-text view.
+    """
+    ext = os.path.splitext(src_path)[1].lower()
+    if ext == ".docx":
+        return docx_to_pdf(src_path, out_path, title=title)
+    if ext in (".html", ".htm"):
+        return html_to_pdf(src_path, out_path, title=title)
+    if ext in (".txt", ".md", ".tex", ".bib", ".rst", ""):
+        with open(src_path, "r", encoding="utf-8", errors="replace") as fh:
+            return text_to_pdf(fh.read(), out_path, title=title)
+    raise ValueError(f"unsupported source type for PDF conversion: {ext or '<none>'}")

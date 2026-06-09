@@ -73,8 +73,33 @@ function SentenceDots({ band }) {
   )
 }
 
+// R02/R03 — a small "view in document" button rendered next to a sentence. It
+// routes through the pdf.js stack (DocumentViewer/NativePdfViewer) via the
+// parent's onViewSentence callback. Only rendered when canViewSentence(text) is
+// true, so it never appears as a dead button for an unlocatable sentence.
+function ViewSentenceButton({ text, onViewSentence, canViewSentence, color }) {
+  if (typeof onViewSentence !== 'function') return null
+  if (typeof canViewSentence === 'function' && !canViewSentence(text)) return null
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onViewSentence(text) }}
+      title="Show this sentence highlighted in the document"
+      aria-label="View this sentence in the document"
+      className="text-xs inline-flex items-center gap-1 flex-shrink-0 font-medium rounded px-1.5 py-0.5 transition-colors focus:outline-none focus:ring-2 hover:bg-[var(--color-bg-secondary)]"
+      style={{ color: color || 'var(--color-accent)', background: 'transparent', border: 'none', cursor: 'pointer', '--tw-ring-color': 'var(--color-accent)' }}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+      </svg>
+      View in document
+    </button>
+  )
+}
+
 // One page row: a band bar that expands to per-sentence dots for that page.
-function PageRow({ p }) {
+function PageRow({ p, onViewSentence, canViewSentence }) {
   const [open, setOpen] = useState(false)
   const sentences = Array.isArray(p.sentences) ? p.sentences : []
   const pct = Math.round((p.score || 0) * 100)
@@ -98,19 +123,28 @@ function PageRow({ p }) {
       </button>
       {open && sentences.length > 0 && (
         <div className="mt-1.5 mb-2 ml-6 space-y-1.5">
-          {sentences.map((s, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <SentenceDots band={s.band || (s.is_flagged ? 'high' : 'low')} />
-              <span style={{ color: 'var(--color-text-secondary)' }}>{s.text}</span>
-            </div>
-          ))}
+          {sentences.map((s, i) => {
+            const sBand = s.band || (s.is_flagged ? 'high' : 'low')
+            return (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <SentenceDots band={sBand} />
+                <span className="flex-1" style={{ color: 'var(--color-text-secondary)' }}>{s.text}</span>
+                <ViewSentenceButton
+                  text={s.text}
+                  onViewSentence={onViewSentence}
+                  canViewSentence={canViewSentence}
+                  color={BAND_COLOR[sBand] || 'var(--color-accent)'}
+                />
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-function SentenceList({ sentences, accent }) {
+function SentenceList({ sentences, accent, onViewSentence, canViewSentence }) {
   if (!sentences?.length) return <div className="text-xs px-1 py-2" style={{ color: 'var(--color-text-muted)' }}>No sentences to show.</div>
   return (
     <ul className="space-y-1.5">
@@ -119,13 +153,21 @@ function SentenceList({ sentences, accent }) {
         return (
           <li key={i} className="text-sm rounded px-2 py-1.5 flex items-start justify-between gap-2 border-l-2"
             style={{ borderColor: accent, backgroundColor: 'var(--color-bg-tertiary)' }}>
-            <span style={{ color: 'var(--color-text-primary)' }}>{s.text}</span>
-            {pct != null && (
-              <span className="text-xs font-semibold flex-shrink-0 px-1.5 rounded"
-                style={{ color: accent }} title="This sentence's own model score — not a probability a human wrote it">
-                {pct}
-              </span>
-            )}
+            <span className="flex-1" style={{ color: 'var(--color-text-primary)' }}>{s.text}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <ViewSentenceButton
+                text={s.text}
+                onViewSentence={onViewSentence}
+                canViewSentence={canViewSentence}
+                color={accent}
+              />
+              {pct != null && (
+                <span className="text-xs font-semibold px-1.5 rounded"
+                  style={{ color: accent }} title="This sentence's own model score — not a probability a human wrote it">
+                  {pct}
+                </span>
+              )}
+            </div>
           </li>
         )
       })}
@@ -133,7 +175,7 @@ function SentenceList({ sentences, accent }) {
   )
 }
 
-export default function AIDetectionVisuals({ detection }) {
+export default function AIDetectionVisuals({ detection, onViewSentence, canViewSentence }) {
   const [tab, setTab] = useState('ai') // 'ai' | 'human'
   const [showSentences, setShowSentences] = useState(false) // collapsed by default
   const dist = detection?.probability_distribution
@@ -166,7 +208,7 @@ export default function AIDetectionVisuals({ detection }) {
           </div>
           <div className="space-y-1">
             {pages.map((p) => (
-              <PageRow key={p.page} p={p} />
+              <PageRow key={p.page} p={p} onViewSentence={onViewSentence} canViewSentence={canViewSentence} />
             ))}
           </div>
         </div>
@@ -210,8 +252,8 @@ export default function AIDetectionVisuals({ detection }) {
             </button>
           </div>
           {tab === 'ai'
-            ? <SentenceList sentences={topAi} accent={SEG.AI} />
-            : <SentenceList sentences={topHuman} accent={SEG.Human} />}
+            ? <SentenceList sentences={topAi} accent={SEG.AI} onViewSentence={onViewSentence} canViewSentence={canViewSentence} />
+            : <SentenceList sentences={topHuman} accent={SEG.Human} onViewSentence={onViewSentence} canViewSentence={canViewSentence} />}
           </>
           )}
         </div>

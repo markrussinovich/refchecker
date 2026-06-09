@@ -7,6 +7,7 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import ShareModal from '../Modals/ShareModal'
+import DocumentViewer from './DocumentViewer'
 import { getStatusColors, normalizeStatus } from '../../utils/statusColors'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
@@ -935,16 +936,33 @@ export default function StatusSection() {
   const [previewUrl, setPreviewUrl] = useState(null)
   const [citationTarget, setCitationTarget] = useState(null)
 
-  // A ReferenceCard can request "show this citation context in the document".
-  // Open the native preview overlay and pass the target to locate + highlight.
+  // R02 (O3): a ReferenceCard can request "show this citation context in the
+  // document". Route it through the native pdf.js stack (DocumentViewer →
+  // NativePdfViewer) — NOT the raster ThumbnailOverlay — so the citation is
+  // located + flashed on the real PDF (or the converted-PDF / extracted-text
+  // fallback), color-coded by the reference's status (R14) and hyperlinked back
+  // to its reference entry via refId.
   const citationRequest = useDocViewerStore((s) => s.citation)
   const clearCitationRequest = useDocViewerStore((s) => s.clearCitation)
   useEffect(() => {
     if (citationRequest?.text) {
       setCitationTarget(citationRequest)
-      setShowThumbnailOverlay(true)
     }
   }, [citationRequest?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The single locatable span handed to DocumentViewer for the citation view.
+  // DocumentViewer/NativePdfViewer focus span 0 and color it by `status`, and
+  // clicking it dispatches `refchecker:focus-reference` for `refId`.
+  const citationSpans = citationTarget?.text
+    ? [{
+        quote: citationTarget.text,
+        status: citationTarget.status,
+        refId: citationTarget.refId,
+        refTitle: citationTarget.refTitle,
+        label: citationTarget.label,
+      }]
+    : []
+  const closeCitationViewer = () => { setCitationTarget(null); clearCitationRequest() }
 
   // Close thumbnail overlay on Escape key
   useEffect(() => {
@@ -1628,8 +1646,21 @@ export default function StatusSection() {
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
           aiDetection={selectedCheck?.ai_detection || (isCurrentSessionCheck ? checkStoreAiDetection : null)}
-          citationTarget={citationTarget}
-          onClose={() => { setShowThumbnailOverlay(false); setCitationTarget(null); clearCitationRequest() }}
+          citationTarget={null}
+          onClose={() => { setShowThumbnailOverlay(false) }}
+        />
+      )}
+
+      {/* R02 (O3) — per-ref "View in document" renders the NATIVE pdf.js viewer
+          (DocumentViewer → NativePdfViewer for PDF + converted-PDF sources;
+          extracted-text highlighter as a fallback), with the citation focused,
+          color-coded by status (R14) and linked back to its reference. */}
+      {citationTarget?.text && selectedCheckId != null && selectedCheckId !== -1 && (
+        <DocumentViewer
+          checkId={selectedCheckId}
+          spans={citationSpans}
+          focusSpanIndex={0}
+          onClose={closeCitationViewer}
         />
       )}
       {showShare && (
