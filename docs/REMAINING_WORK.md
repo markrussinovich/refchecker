@@ -599,3 +599,50 @@ A full sweep of every request across the chat (79 items) found 74 fully covered;
 ### R53 — ORCID link + visible number pair in the author popover *(extends R36)*
 - *Change:* in `AuthorChip` (`ReferenceCard.jsx` ~1605 / 1654-1661 / 1750-1772 / 1422) render an ORCID row: the iD logo linking to `https://orcid.org/<id>` AND the raw ORCID number as visible text, sourced from `profile?.orcid || e?.orcid`.
 - *Acceptance:* [ ] popover shows a clickable ORCID page link + the visible ORCID number when available; [ ] absent (no fabrication) when unresolved; [ ] vitest.
+
+---
+
+## 11. Batch 6 — regression introduced by R04 (R54)
+
+| ID | Area | Requirement | Current state (file ref) | Severity |
+|---|---|---|---|---|
+| **R54** | Resource leak | The per-request `ProgressRefChecker._ha_executor` (8-worker pool added in R04) must be shut down after each check; `close()` exists but is never called | `close()` at `refchecker_wrapper.py:1296` (`_ha_executor.shutdown(wait=False)`); the only construction site `main.py:2145` runs `await checker.check_paper(...)` (`:2174`) with NO try/finally → every request leaks 8 daemon threads | **P1 · BROKEN** |
+
+### R54 — Close the hallucination executor per request *(apply AFTER R05 commits main.py)*
+- *Change:* wrap the `checker = ProgressRefChecker(...)` / `await checker.check_paper(...)` block in `backend/main.py` (~`:2145`–`:2174`) in `try/finally`, calling `checker.close()` in the `finally` AFTER all progress/result emission, guarded best-effort (`fn = getattr(checker, 'close', None); fn and fn()`; `close()` is already idempotent via `getattr(self,'_ha_executor',None)`). Grep `ProgressRefChecker(` to confirm `main.py:2145` is the only construction site (it is) — if any other appears, give it the same treatment.
+- *Acceptance:* [ ] after a check completes, `_ha_executor` is shut down (submitting to it raises `RuntimeError`) or `close()` is provably invoked; [ ] no `ProgressRefChecker` construction path leaves the executor open; [ ] pytest under `tests/unit/` (extend `test_hallucination_timeout.py`) asserting shutdown-after-check; [ ] no regression to R04's timeout behavior.
+- *Status:* ✅ DONE — committed `b1ae210` (close() in the existing run_check `finally`, guarded via `locals().get('checker')`; 9/9 tests green).
+
+---
+
+## 12. Batch 7 — pre-existing lint latent bug (R55)
+
+| ID | Area | Requirement | Current state (file ref) | Severity |
+|---|---|---|---|---|
+| **R55** | Lint / hooks | Fix `react-hooks/immutability`: `jumpToPage` accessed before it is declared in `ThumbnailOverlay` | `StatusSection.jsx` — used in the Find-highlight `setTimeout` (line ~199) before its `const` declaration (line ~228); pre-existing on `main`, unrelated to S6/S7 | **P2 · BROKEN (lint)** |
+
+### R55 — Hoist `jumpToPage` above the Find-highlight effect *(apply AFTER the viewer workflow frees StatusSection.jsx; line numbers shift after S7)*
+- *Change:* in `web-ui/src/components/MainPanel/StatusSection.jsx` `ThumbnailOverlay`, hoist `jumpToPage` (and any helper it depends on) above the Find-highlight `useEffect` that references it, OR wrap it in a `useCallback` declared before that effect and add it to the effect's dependency array. No behavior change. Re-locate by symbol (not the stale line numbers) since S7 reflows the file.
+- *Verify:* `cd web-ui && npx eslint src/components/MainPanel/StatusSection.jsx` → 0 errors; `npx vitest run src/components/MainPanel/StatusSection.test.jsx` → green. (any pytest via `/opt/homebrew/bin/python3`.)
+- *Acceptance:* [ ] eslint reports 0 errors for StatusSection.jsx; [ ] StatusSection.test.jsx stays green; [ ] no unrelated behavior change. Fold into the S8 CI-gate finalization (the workflow's `npm run lint` will surface it).
+- *Status:* ✅ RESOLVED — S7's reflow now declares `jumpToPage` (line 181) before its use (line 206); `npx eslint src` reports **0 errors** and vitest is 199/199 (landed in `ea1b84d`).
+
+---
+
+## Progress log (branch `fix/remaining-p0-viewers`)
+
+P0 + the viewer stream are committed and the branch HEAD is CI-green (eslint 0 errors, vitest 199/199, build ok, pytest 1342 passed/1 skipped; `cargo` blocked only by a missing packaged sidecar binary — env/packaging prereq, no Rust source touched).
+
+| Item | Commit |
+|---|---|
+| R01 published-date honesty | `d2cb4d8` |
+| R04 LLM hang + R54 executor-leak | `da94935`, `b1ae210` |
+| R46 support mailto | `9e3715d` |
+| R05 share 500 | `c5ccf44` |
+| R14 status-color map | `98a1ec0` |
+| R02/R03 native-PDF view + AI-sentence buttons | `8e2df73` |
+| R28/R29/R30 in-PDF jump + opacity + refId | `303798b` |
+| R12/R13/R31 focus-zoom + sentence span + pinch | `e4dabd0` |
+| R55 lint (jumpToPage) + S8 cleanup | `ea1b84d` |
+
+**Remaining (next batches, serialized):** B = button spec R33/R52/R44; C = R06/R07, R16/R25, R20/R39/R08; D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; I = R40 full CI + release cut. (Each viewer item committed above closed its `BROKEN/PARTIAL` from §3.)
