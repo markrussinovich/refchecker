@@ -332,7 +332,7 @@ export default function CorrectionsView({ references, isCheckComplete = false })
         // upstream added selectCheck({force:true}) here, but that wipes the
         // _pre_correction optimistic snapshots and breaks Reset/Restore — kept
         // our optimistic-update-as-source-of-truth behaviour instead.
-      } catch (e) {
+      } catch {
         /* re-verify is best-effort; the optimistic update stands */
       }
       // The re-verify may have spent tokens — refresh the usage badge now.
@@ -371,7 +371,7 @@ export default function CorrectionsView({ references, isCheckComplete = false })
       await verifyReferenceInCheck(selectedCheckId, refIdStr, { overrides: snap })
       // (see applyAndReverify) keep our no-force-reload behaviour so the
       // optimistic Reset/Restore snapshots survive.
-    } catch (e) {
+    } catch {
       /* best-effort — the local decision flip already happened */
     }
     // Drop the snapshot so a subsequent Apply Fix captures a fresh one.

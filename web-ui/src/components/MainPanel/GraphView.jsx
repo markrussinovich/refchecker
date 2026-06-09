@@ -360,7 +360,7 @@ export default function GraphView({ references, paperTitle }) {
         const seen = new Set(prev.map(p => p.id))
         return [...prev, ...additions.filter(a => !seen.has(a.id))]
       })
-    } catch (e) {
+    } catch {
       // swallow — graph is best-effort
     } finally {
       setExpanding(null)

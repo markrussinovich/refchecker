@@ -1401,12 +1401,12 @@ export function saveCustomCitationStyle(style) {
   if (!style || !style.id || !style.template) return
   const all = listCustomCitationStyles().filter(s => s.id !== style.id)
   all.push(style)
-  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch { /* storage may be blocked; persistence is best-effort */ }
 }
 
 export function deleteCustomCitationStyle(id) {
   const all = listCustomCitationStyles().filter(s => s.id !== id)
-  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch { /* storage may be blocked; persistence is best-effort */ }
 }
 
 // Truncate an author list to N entries with "et al." suffix when there

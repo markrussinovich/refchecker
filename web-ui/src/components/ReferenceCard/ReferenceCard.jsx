@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import {
-  formatAuthors,
   normalizeAuthors,
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
@@ -67,7 +66,7 @@ function findCitationMarkerRange(sentence, marker) {
 
   const normalizedMarker = normalizeCitationMarkerText(marker)
   if (!normalizedMarker) return null
-  const markerCore = normalizedMarker.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
+  const markerCore = normalizedMarker.replace(/^\s*[[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
   const normalizedCore = markerCore || normalizedMarker
 
   const candidates = []
@@ -78,7 +77,7 @@ function findCitationMarkerRange(sentence, marker) {
     for (let end = start + 3; end <= windowEnd; end += 1) {
       const raw = sentence.slice(start, end)
       const normalized = normalizeCitationMarkerText(raw)
-      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
+      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
         candidates.push({ start, end, length: end - start })
       }
     }
@@ -758,7 +757,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             if (!stylePicked) return null
             const styleDefaults = CITATION_STYLE_DEFAULTS[activeFormat] || {}
             const effectiveOpts = { ...styleDefaults, ...(activeStyleOptions || {}) }
-            let rendered = ''
+            let rendered
             try { rendered = exportReferenceAsStyle(reference, activeFormat, index, effectiveOpts) } catch { return null }
             if (!rendered) return null
             // In styled mode the structured VenueLine isn't rendered, so surface
@@ -1517,7 +1516,7 @@ const _authorProfileCache = new Map()
 
 // Initials from a display name ("H.B. Guruprasad" -> "HG", "Jane Doe" -> "JD").
 function _authorInitials(name) {
-  const parts = String(name || '').replace(/[^A-Za-z\s.\-]/g, '').split(/[\s.\-]+/).filter(Boolean)
+  const parts = String(name || '').replace(/[^A-Za-z\s.-]/g, '').split(/[\s.-]+/).filter(Boolean)
   if (!parts.length) return '?'
   const first = parts[0][0] || ''
   const last = parts.length > 1 ? (parts[parts.length - 1][0] || '') : ''

@@ -176,6 +176,13 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
     setCurrentMatch(0)
   }, [findQuery, pageCount])
 
+  // Declared before the effects below that reference it (React Compiler flags
+  // use-before-declare even when the call only happens inside an async closure).
+  const jumpToPage = (n) => {
+    const el = pageRefs.current[n]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   // Show WHERE the query is on the page (not just which page): locate it on the
   // native pages via PyMuPDF search and highlight the rects (debounced).
   useEffect(() => {
@@ -198,7 +205,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
           setFindHl(byPage)
           if (firstPage !== null) setTimeout(() => jumpToPage(firstPage), 60)
         })
-        .catch(() => {})
+        .catch(() => { /* find-highlight is best-effort; ignore lookup errors */ })
     }, 350)
     return () => { alive = false; clearTimeout(t) }
   }, [findQuery, checkId, pageCount])
@@ -224,11 +231,6 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
     pageRefs.current.forEach((el) => el && observer.observe(el))
     return () => observer.disconnect()
   }, [pageCount])
-
-  const jumpToPage = (n) => {
-    const el = pageRefs.current[n]
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
 
   const gotoFind = (dir) => {
     if (!matches.length) return

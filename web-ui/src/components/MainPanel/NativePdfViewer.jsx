@@ -12,6 +12,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 // highlight; every status-bearing span is colored via the shared R14 map
 // (utils/statusColors) so this viewer agrees with StatusSection + ReferenceCard.
 const AI_COLORS = { fill: 'rgba(239,68,68,0.24)', stroke: 'rgba(239,68,68,0.8)' }
+// R28: the located reference-list ENTRY (the in-PDF jump target of an inline
+// citation) gets a distinct blue so it never reads as a verification verdict.
+const REF_ENTRY_COLORS = { fill: 'rgba(59,130,246,0.26)', stroke: 'rgba(37,99,235,0.85)' }
 
 const ESC = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const norm = (s) => (s || '').replace(/\s+/g, ' ').trim()
@@ -111,14 +114,36 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   // otherwise dispatch the same `refchecker:focus-reference` event the
   // ReferenceCard list listens for, wiring the back-link end-to-end without a
   // prop drill. (MainPanel switches to the References tab on this event.)
+  // Scroll a span's own highlight into view + briefly flash it (used for the
+  // in-PDF reference-list jump and the AI self-reference).
+  const flashSpanInDoc = useCallback((spanIndex) => {
+    const el = containerRef.current?.querySelector(`[data-span="${spanIndex}"]`)
+    if (!el) return false
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const prev = el.style.boxShadow
+    el.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.9)'
+    setTimeout(() => { el.style.boxShadow = prev }, 1500)
+    return true
+  }, [])
+
   const jumpToReference = useCallback((span) => {
-    if (onJumpToReference) { onJumpToReference(span); return }
+    // R28: an inline citation whose reference-list entry was located in this PDF
+    // scrolls + flashes that entry IN-DOCUMENT instead of switching a React tab.
+    if (span?.refEntryIndex != null && flashSpanInDoc(span.refEntryIndex)) return
     const refId = span?.refId != null ? span.refId : span?.refIndex
+    // R29: AI/flagged sentences carry a self-referential `ai:<i>` id so the hover
+    // bar + click work for every span. These don't map to a bibliography card, so
+    // re-center on the span's own highlight in-document rather than switch tabs.
+    if (typeof refId === 'string' && refId.startsWith('ai:')) {
+      flashSpanInDoc(span?._i)
+      return
+    }
+    if (onJumpToReference) { onJumpToReference(span); return }
     if (refId == null) return
     try {
       window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId } }))
     } catch { /* no-op */ }
-  }, [onJumpToReference])
+  }, [onJumpToReference, flashSpanInDoc])
 
   // Load the PDF + compute highlight geometry (independent of paint scale).
   useEffect(() => {
@@ -176,11 +201,14 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
             const boxes = items.filter((it) => it.end > qs && it.start < qe && it.w > 0)
             if (!boxes.length) return
             totalLocated += 1
-            // Status-bearing spans use the shared R14 map; status-less AI spans
-            // keep the dedicated red highlight.
-            const colors = sp.status
-              ? getStatusColors(sp.status)
-              : (sp.kind === 'ai' ? AI_COLORS : getStatusColors('default'))
+            // Status-bearing spans use the shared R14 map; the reference-list
+            // entry gets the distinct blue (R28); status-less AI spans keep the
+            // dedicated red highlight.
+            const colors = sp.kind === 'ref-entry'
+              ? REF_ENTRY_COLORS
+              : (sp.status
+                ? getStatusColors(sp.status)
+                : (sp.kind === 'ai' ? AI_COLORS : getStatusColors('default')))
             boxes.forEach((b, bi) => highlights.push({
               spanIndex: si, key: `${n}-${si}-${bi}`,
               x: b.x, y: b.y, w: b.w, h: b.h,
@@ -232,24 +260,54 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
     pages.forEach((p) => paintPage(p.pageNumber))
   }, [status, pages, paintPage])
 
-  // Scroll to + flash the focused passage's highlight once rendered.
+  // R12: deterministically scroll to + flash the focused passage's highlight,
+  // reliably centered. The highlight's geometry depends on the page canvas
+  // being laid out at the current SCALE, so we center across two paint frames
+  // via requestAnimationFrame (first frame: layout settles after the scale
+  // change; second frame: re-center so we land dead-centre) rather than racing
+  // a single fixed timeout. Re-runs on SCALE (zoom) change so re-centering
+  // tracks pinch / focus-zoom. No retry loop — one rAF pass is enough now that
+  // geometry is layout-driven, not image-load-driven.
   useEffect(() => {
-    if (status !== 'ready' || focusSpanIndex == null) return
-    const t = setTimeout(() => {
+    if (status !== 'ready' || focusSpanIndex == null) return undefined
+    let raf1 = 0
+    let raf2 = 0
+    let clearFlash = 0
+    const center = (smooth) => {
       const el = containerRef.current?.querySelector(`[data-span="${focusSpanIndex}"]`)
-      if (!el) return
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      const prev = el.style.boxShadow
-      el.style.boxShadow = '0 0 0 3px var(--color-accent, #3b82f6)'
-      setTimeout(() => { el.style.boxShadow = prev }, 1500)
-    }, 150)
-    return () => clearTimeout(t)
-  }, [status, focusSpanIndex, pages])
+      if (!el) return null
+      el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' })
+      return el
+    }
+    raf1 = requestAnimationFrame(() => {
+      // First pass (instant) once the post-scale layout has settled.
+      center(false)
+      raf2 = requestAnimationFrame(() => {
+        // Second pass (smooth) lands it dead-centre + flashes it.
+        const el = center(true)
+        if (!el) return
+        const prev = el.style.boxShadow
+        el.style.boxShadow = '0 0 0 3px var(--color-accent, #3b82f6)'
+        clearFlash = setTimeout(() => { el.style.boxShadow = prev }, 1500)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+      clearTimeout(clearFlash)
+    }
+  }, [status, focusSpanIndex, pages, SCALE])
 
   if (status === 'loading') {
     return <div style={{ color: 'var(--color-text-muted)', fontSize: 14, padding: 20 }}>Rendering PDF…</div>
   }
   if (status === 'error') return null // parent shows the text fallback
+
+  // Which span indices actually drew a highlight — so the in-PDF "jump to the
+  // reference-list entry" affordance only appears when that entry was located
+  // (otherwise the click honestly falls back to the React reference card).
+  const locatedSpanSet = new Set()
+  for (const p of pages) for (const h of p.highlights) locatedSpanSet.add(h.spanIndex)
 
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -259,14 +317,22 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
           <canvas ref={(el) => { canvasRefs.current[p.pageNumber] = el }}
             style={{ display: 'block', width: p.width, height: p.height }} />
           {p.highlights.map((h) => {
-            const hasRef = h.span.refId != null || h.span.refIndex != null
-            const clickable = hasRef
+            const refId = h.span.refId != null ? h.span.refId : h.span.refIndex
+            // The reference-list entry is a jump TARGET, not itself clickable.
+            const isRefEntry = h.span.kind === 'ref-entry'
+            // R28: a citation that resolved its reference-list entry in-PDF, or
+            // (R29) an `ai:<i>` self-reference, or any span with a real refId.
+            // Only advertise the in-PDF jump when the entry was actually located.
+            const canJumpInPdf = h.span.refEntryIndex != null && locatedSpanSet.has(h.span.refEntryIndex)
+            const isAiRef = typeof refId === 'string' && refId.startsWith('ai:')
+            const clickable = !isRefEntry && (canJumpInPdf || refId != null)
             return (
               <div
                 key={h.key}
                 data-span={h.spanIndex}
-                onClick={clickable ? (e) => { e.stopPropagation(); jumpToReference(h.span) } : undefined}
-                onMouseEnter={() => setHover({ pageNumber: p.pageNumber, x: h.x, y: h.y, h: h.h, span: h.span, stroke: h.stroke, clickable })}
+                data-ref={refId != null ? String(refId) : undefined}
+                onClick={clickable ? (e) => { e.stopPropagation(); jumpToReference({ ...h.span, _i: h.spanIndex }) } : undefined}
+                onMouseEnter={() => setHover({ pageNumber: p.pageNumber, x: h.x, y: h.y, h: h.h, span: h.span, stroke: h.stroke, clickable, isAiRef, canJumpInPdf })}
                 onMouseLeave={() => setHover((cur) => (cur && cur.span === h.span && cur.x === h.x ? null : cur))}
                 style={{
                   position: 'absolute', left: h.x, top: h.y, width: h.w, height: h.h,
@@ -312,7 +378,9 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
               )}
               {hover.clickable && (
                 <div style={{ marginTop: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-accent, #10a37f)' }}>
-                  Click to view this reference →
+                  {hover.canJumpInPdf
+                    ? 'Click to jump to the reference-list entry in this PDF ↓'
+                    : (hover.isAiRef ? 'Click to center this passage →' : 'Click to view this reference →')}
                 </div>
               )}
             </div>

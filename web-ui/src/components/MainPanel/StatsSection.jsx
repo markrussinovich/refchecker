@@ -10,7 +10,6 @@ import {
   exportResultsAsRIS,
   exportDiffAsMarkdown,
   exportDiffAsCsv,
-  exportCorrectedListAsStyle,
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
   filterIssuesForStyle,
@@ -154,8 +153,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   }
 
   const isFilterActive = statusFilter.length > 0
-  const activeFilterId = isFilterActive ? statusFilter[0] : null
-  const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
   // Style-aware summary counters. When the active citation style would
   // suppress an issue (style-conforming author count, NLM venue
@@ -247,7 +244,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const handleExport = (format) => {
     setShowExportMenu(false)
     const sortedRefs = sortReferencesForExport(references, sortMode)
-    const exportData = { paperTitle, paperSource, stats, references: sortedRefs }
 
     // 'diff' mode short-circuits format: there are only two file shapes
     // (markdown and csv) that make sense for a side-by-side report.

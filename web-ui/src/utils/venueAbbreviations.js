@@ -186,7 +186,7 @@ function normalizeVenue(v) {
   // v0.7.67: strip internal punctuation, hyphen-joiners, and leading "the"
   // so "Journal of Bone and Joint Surgery. British Volume" /
   // "Journal of Bone and Joint Surgery-british Volume" normalize equal.
-  s = s.replace(/[\.,]/g, ' ')
+  s = s.replace(/[.,]/g, ' ')
   s = s.replace(/[-‐‑–—]/g, ' ')
   s = s.replace(/^the\s+/, '')
   s = s.replace(/\s+/g, ' ')

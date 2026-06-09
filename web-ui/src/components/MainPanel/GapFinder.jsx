@@ -67,7 +67,7 @@ export default function GapFinder({ checkId, references }) {
       await useHistoryStore.getState().selectCheck?.(checkId, { force: true })
       setAdded((a) => ({ ...a, [k]: 'done' }))
       closePreview(k)
-    } catch (e) {
+    } catch {
       setAdded((a) => ({ ...a, [k]: 'error' }))
     }
   }

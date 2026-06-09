@@ -73,7 +73,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         .then((r) => setModelUpdate(r?.data || null))
         .catch(() => setModelUpdate(null))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsOpen, activeSection, aiDetection.modelStatus?.installed])
   
   // Semantic Scholar API key state
@@ -146,7 +145,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       // status so the user can distinguish that case from a genuine
       // "up to date" answer.
       const update = await invokeTauri('plugin:updater|check')
-      // eslint-disable-next-line no-console
       console.info('[updater] check response:', update)
       const noUpdate = !update || update.available === false ||
         (update.version && appVersion && update.version === appVersion)
@@ -290,7 +288,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         const res = await api.getDatabaseDownloadStatus()
         if (cancelled) return
         setDbBuildStatus(res.data.tasks || {})
-      } catch (e) {
+      } catch {
         // settings panel can stay open in multiuser mode where caller isn't admin
       }
     }
@@ -332,7 +330,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const handleDbBuildCancel = async (dbName) => {
     try {
       await api.cancelDatabaseDownload(dbName)
-    } catch (e) {
+    } catch {
       // ignore — UI will reflect the next poll
     }
   }
@@ -432,7 +430,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   if (!isSettingsOpen) return null
 
   const notifyApiKeyStatusChanged = () => {
-    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch { /* event dispatch is advisory; ignore failures */ }
   }
 
   const handleSettingChange = (key, value) => {
@@ -728,7 +726,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       await aiDetection.deleteModel()
                       await aiDetection.downloadModel()
                       setModelUpdate(null)
-                    } catch (e) { /* surfaced via aiDetection.modelError */ }
+                    } catch { /* surfaced via aiDetection.modelError */ }
                   }}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium"
                   style={{ backgroundColor: accent, color: 'white' }}

@@ -120,7 +120,13 @@ def test_clamp_only_lowers_severity():
     assert base.clamp_not_above("low", "medium") == "low"
 
 
-def test_local_backend_unavailable_without_model():
+def test_local_backend_unavailable_without_model(monkeypatch):
+    # Force the "no model" precondition so this tests the graceful-degradation
+    # contract on every host — including dev machines that happen to have the
+    # desklib weights cached under ~/.cache/refchecker (otherwise the backend
+    # would actually score the text and return a real band).
+    from refchecker.ai_detection import model_manager
+    monkeypatch.setattr(model_manager, "is_model_installed", lambda: False)
     r = run_detection(LONG_PROSE, title="t", backend="local")
     assert r.band == base.BAND_UNAVAILABLE
     assert r.abstain_reason in ("model_not_installed", "deps_not_installed")

@@ -132,22 +132,6 @@ export default function InputSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
-      setPendingAutoSubmit(false)
-      handleSubmit()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
-
-  useEffect(() => {
-    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
-      setPendingAutoSubmit(false)
-      handleSubmit()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
-
   const handleSubmit = async () => {
     // Validate input
     if (inputMode === 'url' && !inputValue.trim()) {
@@ -285,6 +269,25 @@ export default function InputSection() {
       setIsSubmitting(false)
     }
   }
+
+  // Auto-submit hooks live AFTER handleSubmit is declared so the effect
+  // closures don't reference it before its declaration (React Compiler flags
+  // use-before-declare even though the effect only fires post-mount).
+  useEffect(() => {
+    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
 
   const handleBulkSubmit = async () => {
     // Validate input

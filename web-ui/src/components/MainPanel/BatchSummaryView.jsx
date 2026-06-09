@@ -32,6 +32,31 @@ const STATUS_COLOR = {
   queued: '#94a3b8',
 }
 
+// Hoisted to module scope: a pure presentational chip that reads everything
+// from props (no closure over component state). Defining it inside the render
+// body re-creates the component type every render — which React Compiler flags
+// and which remounts the subtree on each render.
+function Chip({ label, value, color, active, onClick, title }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="px-3 py-1.5 rounded-md border text-xs transition-all"
+      style={{
+        borderColor: active ? color : 'var(--color-border)',
+        background: active ? `${color}22` : 'var(--color-bg-secondary)',
+        color: active ? color : 'var(--color-text-primary)',
+        cursor: onClick ? 'pointer' : 'default',
+        fontWeight: active ? 600 : 500,
+      }}
+    >
+      <span style={{ color }}>{label}</span>
+      <span className="ml-2 font-mono" style={{ color: active ? color : 'var(--color-text-primary)' }}>{value}</span>
+    </button>
+  )
+}
+
 function fmtUsd(n) {
   if (!n && n !== 0) return '$0.00'
   return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`
@@ -221,25 +246,6 @@ export default function BatchSummaryView() {
     )
   }
   if (!selectedBatch) return null
-
-  const Chip = ({ label, value, color, active, onClick, title }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className="px-3 py-1.5 rounded-md border text-xs transition-all"
-      style={{
-        borderColor: active ? color : 'var(--color-border)',
-        background: active ? `${color}22` : 'var(--color-bg-secondary)',
-        color: active ? color : 'var(--color-text-primary)',
-        cursor: onClick ? 'pointer' : 'default',
-        fontWeight: active ? 600 : 500,
-      }}
-    >
-      <span style={{ color }}>{label}</span>
-      <span className="ml-2 font-mono" style={{ color: active ? color : 'var(--color-text-primary)' }}>{value}</span>
-    </button>
-  )
 
   return (
     <div className="space-y-3">
