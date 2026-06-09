@@ -313,3 +313,38 @@ def test_hallucination_tasks_use_dedicated_executor():
     assert seen_executors, "hallucination task never dispatched to an executor"
     assert all(ex is ha_executor for ex in seen_executors), \
         "hallucination task ran on the shared default executor, not the dedicated pool"
+
+
+# ---------------------------------------------------------------------------
+# 3. R54 — the per-request hallucination executor must be closed (no thread leak)
+# ---------------------------------------------------------------------------
+
+def test_close_shuts_down_ha_executor():
+    """R54: ProgressRefChecker.close() shuts down the dedicated hallucination
+    executor so a per-request checker does not leak its worker threads. close()
+    must also be idempotent (it is called best-effort from a finally)."""
+    wrapper = _make_wrapper_for_timeout([], ha_timeout=30.0, sync_sleep=0.0)
+    ex = wrapper._ha_executor
+    assert ex is not None, "wrapper has no dedicated hallucination executor"
+
+    wrapper.close()
+    with pytest.raises(RuntimeError):
+        ex.submit(lambda: None)  # cannot schedule new futures after shutdown
+
+    # Idempotent: a second close() (e.g. double finally) must not raise.
+    wrapper.close()
+
+
+def test_run_check_finally_invokes_checker_close():
+    """R54 regression guard: the per-request checker constructed in
+    backend/main.run_check must be closed in a finally, so the executor is not
+    leaked. Guards against the regression where close() exists but is never
+    called from the request path."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "backend" / "main.py").read_text()
+    assert "checker = ProgressRefChecker(" in src
+    # After the (single) construction site there must be a finally that closes it.
+    tail = src[src.index("checker = ProgressRefChecker("):]
+    assert "finally:" in tail, "no finally after the checker is constructed"
+    assert ".close()" in tail, "checker is never closed after construction (thread leak)"

@@ -2337,6 +2337,17 @@ async def run_check(
             "check_id": check_id
         })
     finally:
+        # R54: release the per-request hallucination ThreadPoolExecutor (the
+        # 8-worker pool added in R04) so each check does not leak daemon threads.
+        # Best-effort + idempotent; runs after all progress/result emission, and
+        # `checker` may be unbound if construction failed early, so look it up
+        # defensively rather than assuming it exists.
+        _checker = locals().get('checker')
+        if _checker is not None:
+            try:
+                _checker.close()
+            except Exception:
+                pass
         active_checks.pop(session_id, None)
         await _release_user_check_slot(user_id)
 
@@ -3570,6 +3581,29 @@ async def get_paper_pdf(check_id: int, current_user: UserInfo = Depends(require_
 
     if pdf_path:
         return FileResponse(pdf_path, media_type="application/pdf", headers=_private_artifact_headers())
+
+    # 2b) R02 — uploaded non-PDF document (.docx / .html / .htm): convert the
+    #     real document text to a self-contained PDF so the SAME native pdf.js
+    #     viewer renders it (highlights + back-links included). Cached as
+    #     {check_id}.gen.pdf. Honesty: only the document's own text is rendered.
+    if (source_type == 'file' and paper_source and os.path.exists(paper_source)
+            and paper_source.lower().endswith(('.docx', '.html', '.htm'))):
+        try:
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                text_dir = os.path.join(str(cache_dir), "paper_text")
+                gen_path = os.path.join(text_dir, f"{check_id}.gen.pdf")
+                if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                    return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+                from backend.pdf_convert import convert_to_pdf
+                title = check.get('title') or check.get('paper_title') or None
+                os.makedirs(text_dir, exist_ok=True)
+                await asyncio.to_thread(convert_to_pdf, paper_source, gen_path, title)
+                if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                    return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+        except Exception as _e:  # noqa: BLE001
+            logger.debug("paper-pdf docx/html→PDF conversion failed: %s", _e)
+            # fall through to the extracted-text render below
 
     # 3) No original PDF (pasted text / .tex / .bib / .txt / .md) — render the
     #    extracted body text into a clean, self-contained PDF so the SAME native
