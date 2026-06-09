@@ -870,73 +870,120 @@ def cleanup_old_thumbnails(cache_dir: str, max_age_days: int = 30):
         logger.error(f"Error cleaning up thumbnails: {e}")
 
 
+def _progressive_needles(text):
+    """Progressively shorter needles (full text → first sentence → first N words)
+    to tolerate whitespace/hyphenation differences between extracted text and the
+    PDF."""
+    import re as _re
+    text = (text or "").strip()
+    if len(text) < 8:
+        return []
+    cands = [text]
+    first_sent = _re.split(r"(?<=[.!?])\s+", text)[0].strip()
+    if first_sent and first_sent != text and len(first_sent) >= 12:
+        cands.append(first_sent)
+    words = text.split()
+    if len(words) > 10:
+        cands.append(" ".join(words[:10]))
+    if len(words) > 5:
+        cands.append(" ".join(words[:5]))
+    return cands
+
+
+def _search_pages_for_text(pages, text, max_rects=12):
+    """Return (page_index, [normalized rects]) for the first page on which any
+    progressive needle of ``text`` is found, else (None, []). Never fabricates a
+    position. Rects are 0..1 page-normalized so they overlay at any display size."""
+    cands = _progressive_needles(text)
+    if not cands:
+        return None, []
+    for pno, page in enumerate(pages):
+        pw = float(page.rect.width) or 1.0
+        ph = float(page.rect.height) or 1.0
+        rects = []
+        for needle in cands:
+            if len(needle) < 8:
+                continue
+            try:
+                hits = page.search_for(needle)
+            except Exception:
+                hits = []
+            if hits:
+                for r in hits[:max_rects]:
+                    rects.append([round(r.x0 / pw, 4), round(r.y0 / ph, 4),
+                                  round(r.x1 / pw, 4), round(r.y1 / ph, 4)])
+                break
+        if rects:
+            return pno, rects
+    return None, []
+
+
 def locate_text_spans_in_pdf(pdf_path, targets, max_pages=80):
     """Locate target texts inside a PDF and return normalized rectangles.
 
-    For each target ({text, span_index, span_type, band, reason, model_score})
-    search the PDF with PyMuPDF, returning the page index and rect(s) in
-    normalized 0..1 page coordinates (render-independent, so the frontend can
-    overlay them on the page image at any display size). Uses progressively
-    shorter needles (full text, first sentence, first N words) to tolerate the
-    whitespace/hyphenation differences between extracted text and the PDF.
-    Never fabricates a position: a target that cannot be found returns found=False.
+    For each target ({text, span_index, span_type, band, reason, model_score,
+    ref_id, ref_text}) search the PDF with PyMuPDF, returning the page index and
+    rect(s) in normalized 0..1 page coordinates (render-independent, so the
+    frontend can overlay them on the page image at any display size). Uses
+    progressively shorter needles (full text, first sentence, first N words) to
+    tolerate the whitespace/hyphenation differences between extracted text and
+    the PDF.
+
+    R28/R29/R30: ``ref_id`` is echoed for EVERY span (including AI spans that
+    carry no ``ref_text``) so the frontend can branch uniformly over results.
+    When a span carries ``ref_text`` (the cited reference's title/text), the
+    matching reference-list ENTRY rect is also located inside the same PDF and
+    returned as ``ref_found``/``ref_page``/``ref_rects`` so an inline-citation
+    click can scroll + flash that entry in-document instead of switching tabs.
+
+    Never fabricates a position: a target that cannot be found returns
+    found=False; a reference entry that cannot be found returns ref_found=False.
     """
-    import re as _re
     out = []
+
+    def _empty(t):
+        return {
+            "span_index": t.get("span_index"),
+            "span_type": t.get("span_type"),
+            "ref_id": t.get("ref_id"),
+            "found": False, "page": None, "rects": [],
+            "ref_found": False, "ref_page": None, "ref_rects": [],
+        }
+
     try:
         import fitz  # PyMuPDF
     except Exception:
-        return [{"span_index": t.get("span_index"), "found": False, "page": None, "rects": []} for t in targets]
+        return [_empty(t) for t in targets]
     try:
         doc = fitz.open(pdf_path)
     except Exception:
-        return [{"span_index": t.get("span_index"), "found": False, "page": None, "rects": []} for t in targets]
+        return [_empty(t) for t in targets]
     try:
         npages = min(doc.page_count, max_pages)
         pages = [doc.load_page(p) for p in range(npages)]
         for t in targets:
             text = (t.get("text") or "").strip()
+            ref_text = (t.get("ref_text") or "").strip()
             res = {
                 "span_index": t.get("span_index"),
                 "span_type": t.get("span_type"),
                 "band": t.get("band"),
                 "reason": t.get("reason"),
                 "model_score": t.get("model_score"),
+                # ref_id is echoed for every span (incl. AI spans) — never dropped.
+                "ref_id": t.get("ref_id"),
                 "found": False, "page": None, "rects": [],
+                # reference-list entry rect (in-PDF jump target); never fabricated.
+                "ref_found": False, "ref_page": None, "ref_rects": [],
             }
-            if len(text) < 8:
-                out.append(res)
-                continue
-            cands = [text]
-            first_sent = _re.split(r"(?<=[.!?])\s+", text)[0].strip()
-            if first_sent and first_sent != text and len(first_sent) >= 12:
-                cands.append(first_sent)
-            words = text.split()
-            if len(words) > 10:
-                cands.append(" ".join(words[:10]))
-            if len(words) > 5:
-                cands.append(" ".join(words[:5]))
-            done = False
-            for pno, page in enumerate(pages):
-                pw = float(page.rect.width) or 1.0
-                ph = float(page.rect.height) or 1.0
-                rects = []
-                for needle in cands:
-                    if len(needle) < 8:
-                        continue
-                    try:
-                        hits = page.search_for(needle)
-                    except Exception:
-                        hits = []
-                    if hits:
-                        for r in hits[:12]:
-                            rects.append([round(r.x0 / pw, 4), round(r.y0 / ph, 4),
-                                          round(r.x1 / pw, 4), round(r.y1 / ph, 4)])
-                        break
+            if len(text) >= 8:
+                pno, rects = _search_pages_for_text(pages, text)
                 if rects:
                     res.update(found=True, page=pno, rects=rects)
-                    done = True
-                    break
+            if len(ref_text) >= 8:
+                rpno, rrects = _search_pages_for_text(pages, ref_text)
+                if rrects:
+                    res.update(ref_found=True, ref_page=rpno, ref_rects=rrects)
             out.append(res)
         return out
     finally:

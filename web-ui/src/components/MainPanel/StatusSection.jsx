@@ -8,7 +8,6 @@ import { logger } from '../../utils/logger'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import ShareModal from '../Modals/ShareModal'
 import DocumentViewer from './DocumentViewer'
-import { getStatusColors, normalizeStatus } from '../../utils/statusColors'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
@@ -29,22 +28,46 @@ const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight:
 const _BAND_HL = {
   high: 'rgba(239,68,68,0.30)', medium: 'rgba(245,158,11,0.30)', low: 'rgba(34,197,94,0.22)',
 }
-// Citation-context highlight fill (distinct blue) for citations WITHOUT a
-// resolved check status, so they never read as an AI flag.
-const _CITE_HL = 'rgba(59,130,246,0.32)'
-const _CITE_STROKE = 'rgba(37,99,235,0.6)'
-// Citation-context highlights with a known reference status are tinted via the
-// shared R14 status→color map (utils/statusColors), so this overlay agrees with
-// NativePdfViewer + ReferenceCard. `hallucinated` is normalized to
-// `hallucination` there.
 
-function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, citationTarget, onClose }) {
+// R28: build the locatable spans handed to the native document viewer for the
+// "view this citation in the document" flow.
+//   - Span 0 is the cited sentence (focused + colored by `status`).
+//   - When a reference title is known, span 1 is the reference-list ENTRY, and
+//     span 0 carries `refEntryIndex: 1` so clicking the inline citation scrolls +
+//     flashes that entry INSIDE the same PDF (hyperlinking to the reference list
+//     in-document) rather than switching a React tab.
+// Returns [] for no target so callers can render nothing without branching.
+function buildCitationViewerSpans(citationTarget) {
+  if (!citationTarget?.text) return []
+  const hasRefTitle = !!citationTarget.refTitle
+  const spans = [{
+    quote: citationTarget.text,
+    status: citationTarget.status,
+    refId: citationTarget.refId,
+    refTitle: citationTarget.refTitle,
+    label: citationTarget.label,
+    refEntryIndex: hasRefTitle ? 1 : undefined,
+  }]
+  if (hasRefTitle) {
+    spans.push({
+      quote: citationTarget.refTitle,
+      refId: citationTarget.refId,
+      refTitle: citationTarget.refTitle,
+      label: 'Reference-list entry',
+      kind: 'ref-entry',
+    })
+  }
+  return spans
+}
+
+// The raster page-image overlay used for the full-page thumbnail/preview modal.
+// It locates and highlights AI-flagged passages on the native pages and supports
+// Find. The inline-citation → reference-list jump (R28/R29/R30) lives in the
+// native pdf.js stack (DocumentViewer → NativePdfViewer), NOT here.
+function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onClose }) {
   const [pageCount, setPageCount] = useState(null)
   const [activePage, setActivePage] = useState(0)
   const [highlights, setHighlights] = useState({}) // pageIndex -> [{rects,band,score,reason,key}]
-  const [citeHl, setCiteHl] = useState({})         // pageIndex -> [{rects,label,key}]
-  const [citeStatus, setCiteStatus] = useState(null) // 'locating' | 'found' | 'missing' | null
-  const [citeFocus, setCiteFocus] = useState(null)   // { page, cx, cy } -> auto zoom + center
   const [findHl, setFindHl] = useState({})         // pageIndex -> [rects] for the query
   const [hoverHl, setHoverHl] = useState(null)
   const [zoom, setZoom] = useState(1)
@@ -56,10 +79,8 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
   const findInputRef = useRef(null)
   const scrollRef = useRef(null)
   const pageRefs = useRef([])
-  const citeFocusRef = useRef(null)              // invisible anchor at the focused citation rect
 
   const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
-  const CITE_FOCUS_ZOOM = 1.6                    // readable zoom when opening a citation
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
   // Image sizing: at 100% fit to viewport; when zoomed, grow past the
@@ -117,63 +138,6 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
       .catch(() => {})
     return () => { alive = false }
   }, [checkId, pageCount, aiDetection])
-
-  // Locate the requested citation context on the native pages and highlight it
-  // (distinct blue), reusing the same PyMuPDF search. Auto-jump to its page.
-  useEffect(() => {
-    let alive = true
-    setCiteHl({}); setCiteStatus(null); setCiteFocus(null)
-    const text = citationTarget?.text
-    if (!checkId || checkId === -1 || !pageCount || !text) return undefined
-    setCiteStatus('locating')
-    api.locatePdfSpans(checkId, [{ text, span_index: 0, span_type: 'citation', reason: citationTarget?.label }])
-      .then((res) => {
-        if (!alive) return
-        const byPage = {}
-        let firstPage = null
-        let firstRect = null
-        for (const r of (res.data?.results || [])) {
-          if (!r.found) continue
-          if (firstPage === null) {
-            firstPage = r.page
-            if (Array.isArray(r.rects) && r.rects.length) firstRect = r.rects[0]
-          }
-          ;(byPage[r.page] = byPage[r.page] || []).push({
-            rects: r.rects, label: citationTarget?.label || 'Citation context',
-            status: citationTarget?.status, refId: citationTarget?.refId, refTitle: citationTarget?.refTitle,
-            key: `cite-${r.span_index}`,
-          })
-        }
-        setCiteHl(byPage)
-        setCiteStatus(firstPage === null ? 'missing' : 'found')
-        if (firstPage !== null) {
-          // Zoom to a readable level and center the highlighted sentence in the
-          // viewport (not just jump to the page top), so the eye lands on it.
-          const [x0, y0, x1, y1] = firstRect || [0, 0, 1, 0]
-          setZoom((z) => (z < CITE_FOCUS_ZOOM ? CITE_FOCUS_ZOOM : z))
-          setCiteFocus({ page: firstPage, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 })
-        }
-      })
-      .catch(() => { if (alive) setCiteStatus('missing') })
-    return () => { alive = false }
-  }, [checkId, pageCount, citationTarget]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Smooth-scroll the focused citation rect to the viewport CENTER once it (and
-  // its lazily-loaded page image) have laid out. Retried briefly to survive the
-  // layout shift when the image finishes loading.
-  useEffect(() => {
-    if (!citeFocus) return undefined
-    let n = 0
-    let t = 0
-    const tick = () => {
-      const el = citeFocusRef.current
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
-      n += 1
-      if (n < 5) t = setTimeout(tick, 280)
-    }
-    t = setTimeout(tick, 180)
-    return () => clearTimeout(t)
-  }, [citeFocus, zoom])
 
   // Fetch the extracted body text once so Find can locate words. The pages are
   // rasterized images (no text layer), so we search the extracted text and jump
@@ -387,18 +351,6 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
         </button>
       )}
 
-      {/* Citation-locate status (honest: say when it can't be placed). */}
-      {citeStatus && citeStatus !== 'found' && (
-        <div
-          className="absolute top-16 left-1/2 z-30 px-3 py-1.5 rounded-full text-xs text-white"
-          style={{ transform: 'translateX(-50%)', background: citeStatus === 'missing' ? 'rgba(120,53,15,0.92)' : 'rgba(30,58,138,0.92)' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {citeStatus === 'locating' ? 'Locating citation context…'
-            : 'Citation context could not be located on the page (PDF layout differences).'}
-        </div>
-      )}
-
       {/* Pages */}
       <div
         ref={scrollRef}
@@ -420,13 +372,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                   loading="lazy"
                   style={{ display: 'block', width: '100%', height: 'auto' }}
                   className="rounded-lg shadow-2xl bg-white"
-                  onLoad={() => { if (citeFocus && citeFocus.page === i) citeFocusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }) }}
                 />
-                {/* Invisible anchor at the focused citation rect — scroll target. */}
-                {citeFocus && citeFocus.page === i && (
-                  <div ref={citeFocusRef} aria-hidden="true"
-                    style={{ position: 'absolute', left: `${citeFocus.cx * 100}%`, top: `${citeFocus.cy * 100}%`, width: 1, height: 1, pointerEvents: 'none' }} />
-                )}
                 {/* Native-page AI highlight overlay (normalized rects -> %). */}
                 {(highlights[i] || []).flatMap((hl) =>
                   (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
@@ -444,8 +390,10 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                     >
                       {hoverHl === hl && ri === 0 && (
                         <div style={{
+                          // R30: fully opaque so the banner is always legible over
+                          // any underlying page content.
                           position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
-                          background: 'rgba(17,24,39,0.96)', color: '#fff', fontSize: 11,
+                          background: 'rgb(17,24,39)', color: '#fff', fontSize: 11,
                           padding: '6px 8px', borderRadius: 6, width: 240, lineHeight: 1.4,
                           pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
                         }}>
@@ -457,52 +405,6 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, cita
                     </div>
                   ))
                 )}
-                {/* Citation-context highlight — tinted by the reference's CHECK
-                    STATUS, pulses on appear, and links back to the reference. */}
-                {(citeHl[i] || []).flatMap((hl) => {
-                  // Normalize via the shared R14 map (handles the `hallucinated`
-                  // alias). A citation with no resolved status keeps the distinct
-                  // blue so it never reads as a verification verdict.
-                  const st = normalizeStatus(hl.status)
-                  const hasStatus = st !== 'default'
-                  const statusColors = getStatusColors(hl.status)
-                  const fill = hasStatus ? statusColors.fill : _CITE_HL
-                  const stroke = hasStatus ? statusColors.stroke : _CITE_STROKE
-                  const clickable = !!hl.refId
-                  return (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
-                    <div
-                      key={`${hl.key}-${ri}`}
-                      className={ri === 0 ? 'rc-cite-pulse' : undefined}
-                      onMouseEnter={() => setHoverHl(hl)}
-                      onMouseLeave={() => setHoverHl((h) => (h === hl ? null : h))}
-                      onClick={clickable ? (e) => {
-                        e.stopPropagation()
-                        try { window.dispatchEvent(new CustomEvent('refchecker:focus-reference', { detail: { refId: hl.refId } })) } catch { /* no-op */ }
-                        onClose()
-                      } : undefined}
-                      title={hl.refTitle ? `Cited: ${hl.refTitle} — click to open this reference` : 'Citation context'}
-                      style={{
-                        position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
-                        width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
-                        background: fill, borderRadius: 2, cursor: clickable ? 'pointer' : 'help',
-                        mixBlendMode: 'multiply', boxShadow: `0 0 0 1.5px ${stroke}`,
-                      }}
-                    >
-                      {hoverHl === hl && ri === 0 && (
-                        <div style={{
-                          position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
-                          background: 'rgba(17,24,39,0.96)', color: '#fff', fontSize: 11,
-                          padding: '6px 8px', borderRadius: 6, width: 250, lineHeight: 1.4,
-                          pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
-                        }}>
-                          <strong style={{ color: '#fff' }}>Citation context{hasStatus ? ` · ${st}` : ''}</strong>
-                          {hl.refTitle ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>{hl.refTitle.slice(0, 90)}</div> : null}
-                          {clickable ? <div style={{ color: '#93c5fd', marginTop: 3 }}>Click to open this reference ↗</div> : null}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                })}
                 {/* Find-query highlight overlay (yellow) — shows where it is. */}
                 {(findHl[i] || []).map(([x0, y0, x1, y1], ri) => (
                   <div key={`find-${ri}`} title="Search match"
@@ -950,18 +852,8 @@ export default function StatusSection() {
     }
   }, [citationRequest?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The single locatable span handed to DocumentViewer for the citation view.
-  // DocumentViewer/NativePdfViewer focus span 0 and color it by `status`, and
-  // clicking it dispatches `refchecker:focus-reference` for `refId`.
-  const citationSpans = citationTarget?.text
-    ? [{
-        quote: citationTarget.text,
-        status: citationTarget.status,
-        refId: citationTarget.refId,
-        refTitle: citationTarget.refTitle,
-        label: citationTarget.label,
-      }]
-    : []
+  // The locatable spans handed to DocumentViewer for the citation view.
+  const citationSpans = buildCitationViewerSpans(citationTarget)
   const closeCitationViewer = () => { setCitationTarget(null); clearCitationRequest() }
 
   // Close thumbnail overlay on Escape key
@@ -1646,7 +1538,6 @@ export default function StatusSection() {
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
           aiDetection={selectedCheck?.ai_detection || (isCurrentSessionCheck ? checkStoreAiDetection : null)}
-          citationTarget={null}
           onClose={() => { setShowThumbnailOverlay(false) }}
         />
       )}
@@ -1673,3 +1564,8 @@ export default function StatusSection() {
     </div>
   )
 }
+
+// Exported for unit tests (R28). Co-located with the component per the project's
+// existing pattern (see ExploreGraphView).
+// eslint-disable-next-line react-refresh/only-export-components
+export { buildCitationViewerSpans }

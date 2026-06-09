@@ -28,9 +28,19 @@ const normSentence = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase()
 // buttons already reference those), and each unique sentence is appended after.
 // A sentence already contained in a corroborated span reuses that span's index
 // instead of duplicating a highlight.
+// R29: every span handed to the viewer must carry a `refId` so the on-hover bar
+// + in-document link work for ALL spans, not just citation spans. AI/flagged
+// sentences don't map to a bibliography entry, so we give each a stable
+// self-referential id (`ai:<index>`) keyed to its position in the located-span
+// list — the viewer focuses that span's own highlight when it's followed.
+function withSpanRefId(span, idx) {
+  if (span && span.refId != null) return span
+  return { ...span, refId: `ai:${idx}`, kind: span?.kind || 'ai' }
+}
+
 function buildViewerSpans(detection) {
   const baseSpans = Array.isArray(detection?.spans) ? detection.spans : []
-  const viewerSpans = [...baseSpans]
+  const viewerSpans = baseSpans.map((sp, i) => withSpanRefId(sp, i))
   const indexByText = new Map()
 
   // A sentence drawn from a window may be a substring of a corroborated span's
@@ -48,10 +58,12 @@ function buildViewerSpans(detection) {
     if (indexByText.has(norm)) return
     const reuse = findInBase(norm)
     if (reuse >= 0) { indexByText.set(norm, reuse); return }
-    indexByText.set(norm, viewerSpans.length)
+    const idx = viewerSpans.length
+    indexByText.set(norm, idx)
     // Carry the sentence's real per-sentence model score so the located passage
     // keeps its own number (no fabricated value when the score is absent).
-    const span = { quote: text, confidence: 'medium' }
+    // R29: a stable self-referential refId so the hover bar + link work here too.
+    const span = { quote: text, confidence: 'medium', refId: `ai:${idx}`, kind: 'ai' }
     if (typeof sentence?.score === 'number') span.model_score = sentence.score
     viewerSpans.push(span)
   }
@@ -335,3 +347,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
     </div>
   )
 }
+
+// Exported for unit tests (R29). Co-located with the component per the project's
+// existing pattern (see ExploreGraphView).
+// eslint-disable-next-line react-refresh/only-export-components
+export { buildViewerSpans }
