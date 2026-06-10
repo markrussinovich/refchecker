@@ -648,12 +648,15 @@ P0, the viewer stream, AND the button spec are committed; branch HEAD CI-green (
 | R55 lint (jumpToPage) + S8 cleanup | `ea1b84d` |
 | R33/R52 unified button system + click-state stability | `ee29ed6` |
 | R44 distinct "Remove from library" | `85a35e6` |
+| R06/R07 AS-CITED DOI in suggested correction | `7ace2fa` |
+| R16/R25 Summary badges agree + similar-papers isolation | `1a1b00d` |
+| R20/R39/R08 gap-finder/similar verify + provenance + common-cites viz | `4de6f78` |
 
-**⏳ IN PROGRESS — Batch C (running):** R06/R07 (DOI corrections), R16 (badge agreement), R25 (similar-papers isolation), R20 (gap-finder/similar verification + provenance), R39 (friendly 404), R08 (common-cites/refs viz).
+Batch-C gate `fd4464d`: lint 0 errors, vitest **243** passed, build ok, pytest **1351** passed/1 skipped.
 
 **⬜ QUEUED (serialized):** D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
 
-**Tally:** 23 of the R01–R55 items DONE (18 of the original R01–R41 + R44/R46/R52/R54/R55); 6 in progress (Batch C); the rest queued in D–K.
+**Tally:** 25 of the R01–R55 items DONE (R01–R08, R12–R14, R16, R20, R25, R28–R31, R33, R39, R44, R46, R52, R54, R55); the rest queued in D–K.
 
 ---
 
