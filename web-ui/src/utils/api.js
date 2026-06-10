@@ -226,9 +226,16 @@ export const exportCheckHtml = (checkId) =>
   api.get(`/export/${checkId}/html`, { responseType: 'blob', timeout: 30000 })
 // Multi-format export: fmt ∈ html|pdf|md|docx; corrections toggles suggested
 // fixes; include = array of sections (summary,ai,issues,references) to keep.
-const _exportParams = ({ fmt = 'html', corrections = false, include } = {}) => {
+// summary (R48) = the FE's canonical buildReferenceSummary result; passing it
+// makes the exported counts + citation-health byte-identical to the in-app
+// Summary badge / report card (the server otherwise recomputes them and a
+// style-suppressed warning could drift the verified/warning boundary).
+const _exportParams = ({ fmt = 'html', corrections = false, include, summary } = {}) => {
   const p = new URLSearchParams({ fmt, corrections: corrections ? 'true' : 'false' })
   if (Array.isArray(include) && include.length) p.set('include', include.join(','))
+  if (summary && typeof summary === 'object') {
+    try { p.set('summary', JSON.stringify(summary)) } catch { /* skip on cycles */ }
+  }
   return p.toString()
 }
 export const exportCheckFile = (checkId, opts = {}) =>

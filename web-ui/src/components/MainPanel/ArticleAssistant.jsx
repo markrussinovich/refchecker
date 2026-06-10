@@ -249,6 +249,10 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
       setSum({ loading: false, data: res.data, error: null })
     } catch (e) {
       setSum({ loading: false, data: null, error: e?.response?.data?.detail || e?.message || 'Summarize failed' })
+    } finally {
+      // Summarize spends LLM tokens — nudge the live LLM usage badge to refresh
+      // immediately instead of waiting for its next poll (R47).
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
 
@@ -277,6 +281,10 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
       setChat({ loading: false, error: null })
     } catch (e) {
       setChat({ loading: false, error: e?.response?.data?.detail || e?.message || 'Chat failed' })
+    } finally {
+      // Chat spends LLM tokens — refresh the live LLM usage badge right away
+      // so the per-flow breakdown ticks up during follow-ups (R47).
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
 

@@ -3,7 +3,9 @@ import { exportCheckFile, exportBatchFile, publishCheck } from '../../utils/api'
 import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useStyleStore } from '../../stores/useStyleStore'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
+import { filterIssuesForStyle } from '../../utils/formatters'
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
@@ -73,13 +75,29 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
   // separate, looser recompute. `errors` groups errors + hallucinations so the
   // gauge/chips line up with the "problem" references the user sees — identical
   // to the in-app walkthrough (StatsSection).
+  //
+  // R48: the canonical summary is STYLE-AWARE (matching StatsSection/HealthBadge):
+  // the active citation style can suppress style-conforming warnings, which moves
+  // the verified/warning boundary. We replicate StatsSection's filterIssuesForStyle
+  // pass so the summary passed to the export is identical to the report card the
+  // user is looking at — that is what removes the export's verified/warning
+  // off-by-one (30/8/82% badge vs 29/9/80% export).
+  const styleFormat = useStyleStore((s) => s.format)
   const summary = useMemo(() => {
-    const refs = selectedCheck?.references || checkStore.references || []
+    const rawRefs = selectedCheck?.references || checkStore.references || []
     const ai = selectedCheck?.ai_detection || checkStore.aiDetection || null
     // The share dialog only opens on a finished check, so treat it as complete
     // (respect an explicit status if one is present on the selected check).
     const rawStatus = (selectedCheck?.status || '').toLowerCase()
     const isComplete = rawStatus ? !['in_progress', 'pending', 'checking', 'queued', 'processing', 'started'].includes(rawStatus) : true
+    // Style-filter each ref's issues exactly as StatsSection does before counting.
+    const refs = (Array.isArray(rawRefs) ? rawRefs : []).map((r) => {
+      if (!r) return r
+      const fe = filterIssuesForStyle(r.errors, r, styleFormat)
+      const fw = filterIssuesForStyle(r.warnings, r, styleFormat)
+      if (fe === r.errors && fw === r.warnings) return r
+      return { ...r, errors: fe, warnings: fw }
+    })
     // Pull whatever aggregate stats the surface already has so progress totals
     // are honoured; reference buckets are recomputed from the refs themselves.
     const aggregate = selectedCheck || checkStore.stats || {}
@@ -91,8 +109,11 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
       errors: s.references.errors + s.references.hallucinated,
     }
     const aiOn = isBatch || (!!ai && ai.band !== 'unavailable' && ai.band !== 'inconclusive')
-    return { refs, ai, stats, aiOn }
-  }, [selectedCheck, checkStore.references, checkStore.aiDetection, checkStore.stats, isBatch])
+    // `canonical` is the full style-aware buildReferenceSummary result handed to
+    // the export so the file shows the SAME counts + citation-health % the user
+    // sees in the badge / report card.
+    return { refs, ai, stats, aiOn, canonical: s }
+  }, [selectedCheck, checkStore.references, checkStore.aiDetection, checkStore.stats, isBatch, styleFormat])
 
   // Section include/exclude checkboxes (the export "what to include" controls).
   const [sections, setSections] = useState({ summary: true, ai: true, issues: true, references: true })
@@ -111,7 +132,13 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
     const minShow = new Promise((r) => setTimeout(r, 1800))
     try {
       const opts = { fmt, corrections, include: includeList.length ? includeList : undefined }
-      const req = isBatch ? exportBatchFile(batchId, opts) : exportCheckFile(checkId, opts)
+      // R48: hand the FE's canonical (style-aware) summary to the single-check
+      // export so its counts + citation-health match the badge / report card.
+      // Batch exports aggregate many checks server-side, so they keep the
+      // server computation.
+      const req = isBatch
+        ? exportBatchFile(batchId, opts)
+        : exportCheckFile(checkId, { ...opts, summary: summary.canonical })
       const [res] = await Promise.all([req, minShow])
       const ext = FORMATS.find((f) => f.id === fmt)?.ext || 'html'
       downloadBlob(res.data, `${safeName(title || (isBatch ? 'batch-report' : 'report'))}.${ext}`)
