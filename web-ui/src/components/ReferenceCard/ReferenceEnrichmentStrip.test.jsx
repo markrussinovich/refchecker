@@ -65,3 +65,56 @@ describe('ReferenceEnrichmentStrip — published-date honesty (R01/K2)', () => {
     expect(screen.getByText('Oct 1, 2021')).toBeInTheDocument()
   })
 })
+
+describe('ReferenceEnrichmentStrip — clickable count tiles (R35/M5)', () => {
+  it('renders Citations + Reference Count as OpenAlex drill-down links when openalex_id is present', () => {
+    render(
+      <ReferenceEnrichmentStrip
+        enrichment={{ cited_by_count: 182, reference_count: 51, openalex_id: 'W123' }}
+      />
+    )
+    // Citations value links to the works that cite this paper.
+    const citationsLink = screen.getByRole('link', { name: '182' })
+    expect(citationsLink).toHaveAttribute('href', 'https://openalex.org/works?filter=cites:W123')
+    // Reference Count value links to this work's OpenAlex page.
+    const refsLink = screen.getByRole('link', { name: '51' })
+    expect(refsLink).toHaveAttribute('href', 'https://openalex.org/W123')
+  })
+
+  it('renders the count values as plain text (no link) when openalex_id is absent', () => {
+    render(
+      <ReferenceEnrichmentStrip
+        enrichment={{ cited_by_count: 182, reference_count: 51 }}
+      />
+    )
+    // No dead links: with no OpenAlex id the numbers are plain text.
+    expect(screen.queryByRole('link', { name: '182' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '51' })).toBeNull()
+    // The numbers still render.
+    expect(screen.getByText('182')).toBeInTheDocument()
+    expect(screen.getByText('51')).toBeInTheDocument()
+  })
+
+  it('gives every count tile a title for parity (no inert, unexplained numbers)', () => {
+    render(
+      <ReferenceEnrichmentStrip
+        enrichment={{ cited_by_count: 5, reference_count: 8, citing_patents_count: 2 }}
+      />
+    )
+    // Each tile's wrapping span carries a title (Citing Patents, Citations, Reference Count).
+    expect(screen.getByText(/Citing Patents:/).closest('[title]')).toHaveAttribute('title')
+    expect(screen.getByText(/Citations:/).closest('[title]')).toHaveAttribute('title')
+    expect(screen.getByText(/Reference Count:/).closest('[title]')).toHaveAttribute('title')
+  })
+
+  it('keeps Citing Patents informational (never a link) even with openalex_id', () => {
+    render(
+      <ReferenceEnrichmentStrip
+        enrichment={{ citing_patents_count: 3, openalex_id: 'W999' }}
+      />
+    )
+    // There is no per-patent drill-down, so Citing Patents stays plain text.
+    expect(screen.queryByRole('link', { name: '3' })).toBeNull()
+    expect(screen.getByText('3')).toBeInTheDocument()
+  })
+})

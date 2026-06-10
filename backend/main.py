@@ -6582,7 +6582,13 @@ async def verify_single_reference(
         # count, Field of Study, per-author ORCID/OpenAlex IDs, etc.
         # Pulled by the References tab to render the metadata strip.
         try:
-            from refchecker.utils.enrichment import build_enrichment
+            from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
+            # Cross-source backfill (R21/R22) for the add-ref verify path:
+            # backfill missing-only counts / abstract / tldr / funding by DOI
+            # from OpenAlex / Crossref / S2 before projecting. Never overwrites
+            # a real value, never fabricates, soft-fails, bounded.
+            if isinstance(verified_data, dict):
+                backfill_enrichment(verified_data, target)
             enrichment = build_enrichment(verified_data)
             if enrichment:
                 updated["enrichment"] = enrichment

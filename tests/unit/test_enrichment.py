@@ -159,3 +159,178 @@ def test_build_enrichment_tldr_accepts_plain_string():
     assert build_enrichment({"tldr": {"text": "Nested claim."}})["tldr"] == "Nested claim."
     # Empty/blank string -> key absent.
     assert "tldr" not in build_enrichment({"tldr": "   "})
+
+
+# --------------------------------------------------------------------------- #
+# Cross-source backfill (R21 / R22) — backfill_enrichment                       #
+#                                                                             #
+# All tests are network-free: the per-DOI gather is stubbed, so no real HTTP   #
+# is issued. They lock the never-overwrite / never-fabricate / soft-fail       #
+# contract and the "skip when already rich" short-circuit.                     #
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+
+backfill_enrichment = _mod.backfill_enrichment
+
+
+@pytest.fixture(autouse=True)
+def _clear_backfill_cache():
+    """Each backfill test starts with an empty per-DOI cache."""
+    _mod._BACKFILL_CACHE.clear()
+    yield
+    _mod._BACKFILL_CACHE.clear()
+
+
+def _stub_gather(monkeypatch, fields):
+    """Make _gather_backfill_fields return `fields` for any DOI without
+    touching the network (so no real OpenAlex/Crossref/S2 call fires)."""
+    calls = {"n": 0}
+
+    def fake_gather(doi):
+        calls["n"] += 1
+        return dict(fields)
+
+    monkeypatch.setattr(_mod, "_gather_backfill_fields", fake_gather)
+    return calls
+
+
+def test_backfill_non_dict_input_returned_unchanged(monkeypatch):
+    _stub_gather(monkeypatch, {"cited_by_count": 5})
+    assert backfill_enrichment(None) is None
+    assert backfill_enrichment("nope") == "nope"
+
+
+def test_backfill_merges_only_when_missing(monkeypatch):
+    # A non-S2 winner (DBLP-shaped) with a DOI but no counts/abstract/tldr.
+    vd = {"doi": "10.1109/ABC.2021.12345", "source": "DBLP", "title": "Paper"}
+    _stub_gather(monkeypatch, {
+        "cited_by_count": 182,
+        "referenced_works": ["W1", "W2", "W3"],
+        "abstract": "A real abstract.",
+        "tldr": {"text": "A real claim."},
+        "grants": [{"funder_display_name": "NIH"}],
+    })
+    out = backfill_enrichment(vd, {"doi": "10.1109/ABC.2021.12345"})
+    # Mutated in place AND returned (caller convenience).
+    assert out is vd
+    e = build_enrichment(out)
+    assert e["cited_by_count"] == 182
+    assert e["reference_count"] == 3
+    assert e["abstract"] == "A real abstract."
+    assert e["tldr"] == "A real claim."
+    assert e["has_funding"] is True and e["funders"] == ["NIH"]
+
+
+def test_backfill_never_overwrites_existing_real_values(monkeypatch):
+    # Winner carries a real count but NO rich field (so backfill DOES run — the
+    # rich family is empty). The backfill source returns a DIFFERENT count plus
+    # a genuinely-missing referenceCount + abstract: the existing real count
+    # must survive untouched, the missing fields must be filled.
+    vd = {
+        "doi": "10.1/x",
+        "cited_by_count": 10,   # real existing count — must NOT be overwritten
+    }
+    _stub_gather(monkeypatch, {
+        "cited_by_count": 999,            # different value — must be ignored
+        "abstract": "Backfilled abstract.",  # missing → should be added
+        "referenceCount": 42,             # missing → should be added
+    })
+    backfill_enrichment(vd)
+    assert vd["cited_by_count"] == 10               # not overwritten
+    assert vd["abstract"] == "Backfilled abstract."  # missing → backfilled
+    assert vd["referenceCount"] == 42              # missing → backfilled
+    e = build_enrichment(vd)
+    assert e["cited_by_count"] == 10
+    assert e["reference_count"] == 42
+    assert e["abstract"] == "Backfilled abstract."
+
+
+def test_backfill_does_not_overwrite_existing_rich_when_count_missing(monkeypatch):
+    # Symmetric guard: a winner with a real abstract/tldr but no count. Backfill
+    # runs (count family empty) and must NOT clobber the existing rich values.
+    vd = {
+        "doi": "10.1/y",
+        "abstract": "Original abstract.",
+        "tldr": "Original claim.",
+    }
+    _stub_gather(monkeypatch, {
+        "cited_by_count": 77,                 # missing → should be added
+        "abstract": "Backfilled abstract.",   # existing → must be ignored
+        "tldr": {"text": "Backfilled claim."},  # existing → must be ignored
+    })
+    backfill_enrichment(vd)
+    assert vd["cited_by_count"] == 77             # missing → backfilled
+    assert vd["abstract"] == "Original abstract."  # not overwritten
+    assert vd["tldr"] == "Original claim."        # not overwritten
+
+
+def test_backfill_skips_network_when_already_rich(monkeypatch):
+    # Payload already has BOTH a count AND a rich field → no DOI lookup at all.
+    calls = _stub_gather(monkeypatch, {"cited_by_count": 5})
+    vd = {"doi": "10.1/x", "citationCount": 7, "abstract": "Has one."}
+    backfill_enrichment(vd)
+    assert calls["n"] == 0          # gather never called
+    assert vd["citationCount"] == 7  # untouched
+
+
+def test_backfill_no_doi_does_nothing(monkeypatch):
+    calls = _stub_gather(monkeypatch, {"cited_by_count": 5})
+    vd = {"source": "DBLP", "title": "No DOI here"}
+    backfill_enrichment(vd, {"title": "No DOI here"})
+    assert calls["n"] == 0
+    assert "cited_by_count" not in vd
+
+
+def test_backfill_resolves_doi_from_reference_when_winner_lacks_it(monkeypatch):
+    calls = _stub_gather(monkeypatch, {"cited_by_count": 11})
+    vd = {"source": "ACL", "title": "Paper"}  # no DOI in the winner
+    backfill_enrichment(vd, {"doi": "https://doi.org/10.18653/v1/2020.acl-main.1"})
+    assert calls["n"] == 1
+    assert vd["cited_by_count"] == 11
+
+
+def test_backfill_soft_fails_on_gather_exception(monkeypatch):
+    def boom(doi):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(_mod, "_gather_backfill_fields", boom)
+    vd = {"doi": "10.1/x", "source": "DBLP", "title": "Paper"}
+    # Must NOT raise — soft-fail — and must leave the payload intact.
+    out = backfill_enrichment(vd)
+    assert out is vd
+    assert "cited_by_count" not in vd
+
+
+def test_backfill_clean_doi_rejects_non_doi():
+    # Guard: a bogus / non-DOI-shaped string never resolves to a lookup target.
+    assert _mod._clean_doi("not-a-doi") is None
+    assert _mod._clean_doi("12345") is None
+    assert _mod._clean_doi("") is None
+    assert _mod._clean_doi(None) is None
+    # Real DOIs normalise to the bare lowercased form regardless of resolver prefix.
+    assert _mod._clean_doi("https://doi.org/10.1109/ABC.2021") == "10.1109/abc.2021"
+    assert _mod._clean_doi("doi:10.5555/3295222.3295349") == "10.5555/3295222.3295349"
+
+
+def test_backfill_per_doi_cache_dedupes(monkeypatch):
+    # _gather_backfill_fields caches per DOI; calling backfill twice for the
+    # same DOI hits the underlying fetchers once. We stub at the fetcher layer
+    # so the real cache logic in _gather_backfill_fields is exercised.
+    fetch_calls = {"n": 0}
+
+    def fake_openalex(doi):
+        fetch_calls["n"] += 1
+        return {"cited_by_count": 50}
+
+    monkeypatch.setattr(_mod, "_fetch_openalex_by_doi", fake_openalex)
+    monkeypatch.setattr(_mod, "_fetch_crossref_by_doi", lambda doi: {})
+    monkeypatch.setattr(_mod, "_fetch_s2_by_doi", lambda doi: {})
+
+    vd1 = {"doi": "10.1/same", "source": "DBLP", "title": "A"}
+    vd2 = {"doi": "10.1/same", "source": "DBLP", "title": "B"}
+    backfill_enrichment(vd1)
+    backfill_enrichment(vd2)
+    assert vd1["cited_by_count"] == 50
+    assert vd2["cited_by_count"] == 50
+    assert fetch_calls["n"] == 1  # second call served from the per-DOI cache

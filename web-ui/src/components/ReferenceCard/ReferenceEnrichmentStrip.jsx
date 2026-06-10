@@ -108,16 +108,39 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
   }
   const metaLine = bibBits.join(', ')
 
-  // Row-2 counters (inline text, not chips — matches the target screenshot)
+  // Row-2 counters (inline text, not chips — matches the target screenshot).
+  // R35: when an OpenAlex Work id is present the count tiles become real
+  // drill-down links (Citations → the works citing this one; Reference Count
+  // → this work's OpenAlex page). With no id they stay plain text — but EVERY
+  // tile now carries a title for parity with Citations (no inert, unexplained
+  // numbers). Citing Patents is always informational (no per-patent list).
   const counters = []
   if (typeof citing_patents_count === 'number') {
-    counters.push({ label: 'Citing Patents', value: citing_patents_count.toLocaleString() })
+    counters.push({
+      label: 'Citing Patents',
+      value: citing_patents_count.toLocaleString(),
+      title: 'Patents that cite this work (OpenAlex). Informational — not a drill-down.',
+    })
   }
   if (typeof cited_by_count === 'number') {
-    counters.push({ label: 'Citations', value: cited_by_count.toLocaleString(), title: 'Times this work is cited by other scholarly works (OpenAlex / Semantic Scholar / Crossref)' })
+    counters.push({
+      label: 'Citations',
+      value: cited_by_count.toLocaleString(),
+      title: 'Times this work is cited by other scholarly works (OpenAlex / Semantic Scholar / Crossref)',
+      href: openalex_id
+        ? `https://openalex.org/works?filter=cites:${openalex_id}`
+        : null,
+      linkTitle: 'See the works citing this paper on OpenAlex',
+    })
   }
   if (typeof reference_count === 'number') {
-    counters.push({ label: 'Reference Count', value: reference_count.toLocaleString() })
+    counters.push({
+      label: 'Reference Count',
+      value: reference_count.toLocaleString(),
+      title: 'References this work itself cites',
+      href: openalex_id ? `https://openalex.org/${openalex_id}` : null,
+      linkTitle: 'Open this work on OpenAlex to see its reference list',
+    })
   }
 
   // DOI excluded — rendered above by the Verification block; pills row
@@ -165,14 +188,17 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         </div>
       )}
 
-      {/* Row 2: inline counters */}
+      {/* Row 2: inline counters. Each tile carries a title (R35 parity); when
+          an OpenAlex id is present, Citations / Reference Count become real
+          drill-down links rendered via CountValue (an <a> in Tauri-safe form),
+          otherwise the value stays plain <strong> text. */}
       {counters.length > 0 && (
         <div className="flex flex-wrap items-center" style={{ color: 'var(--color-text-muted)' }}>
           {counters.map((c, i) => (
             <span key={c.label} className="flex items-center" title={c.title || undefined}>
               {i > 0 && <span className="mx-2">·</span>}
               <span>{c.label}: </span>
-              <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{c.value}</strong>
+              <CountValue value={c.value} href={c.href} linkTitle={c.linkTitle} />
             </span>
           ))}
         </div>
@@ -275,6 +301,39 @@ function PubTypeChip({ children }) {
     >
       {children}
     </span>
+  )
+}
+
+/**
+ * Row-2 count value (R35). When `href` is supplied the number is a real
+ * drill-down link to OpenAlex; otherwise it's plain bold text. The link is
+ * Tauri-safe — in the desktop shell a left-click is intercepted and routed
+ * through `openExternal` so it opens in the system browser, not the webview.
+ * No href ⇒ no <a>, so a count with no OpenAlex id is never a dead link.
+ */
+function CountValue({ value, href, linkTitle }) {
+  if (!href) {
+    return (
+      <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{value}</strong>
+    )
+  }
+  const handleClick = (e) => {
+    if (!isTauri()) return
+    e.preventDefault()
+    try { openExternal(href) } catch { /* fall through to default nav */ }
+  }
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={linkTitle || ''}
+      className="ml-1 font-semibold hover:underline"
+      style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'none' }}
+    >
+      {value}
+    </a>
   )
 }
 

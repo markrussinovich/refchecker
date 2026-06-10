@@ -33,8 +33,13 @@ Anything we can't extract is left out of the dict — the UI treats
 missing fields as "no signal" rather than zero.
 """
 
+import logging
+import threading
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_get(d: Dict[str, Any], *path: str, default: Any = None) -> Any:
@@ -625,3 +630,285 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         enrichment['verified_by'] = [enrichment['source_label']]
 
     return enrichment
+
+
+# --------------------------------------------------------------------------- #
+# Cross-source backfill (R21 / R22)                                            #
+#                                                                             #
+# When a non-Semantic-Scholar source (DBLP, ACL Anthology, arXiv, Crossref,   #
+# …) wins the verification race, the winning `verified_data` payload often     #
+# lacks the richest display signals — citation/reference COUNTS, the abstract, #
+# the S2 machine TL;DR ("claim"), and funding. `build_enrichment` already      #
+# coalesces ACROSS every variant present in ONE payload, but it cannot         #
+# surface a signal no source put in the payload. `backfill_enrichment` closes  #
+# that gap: given a winning payload + the cited reference, it resolves the      #
+# canonical DOI and pulls the missing-only fields from OpenAlex / Crossref /    #
+# Semantic Scholar by DOI, then merges them into the SAME `verified_data` dict  #
+# so the existing `build_enrichment` projection surfaces them — with NO        #
+# frontend change.                                                             #
+#                                                                             #
+# Contract (mirrors `_enrich_matched_paper` in semantic_scholar.py:380-388):   #
+#   * NEVER overwrite a real existing value — merge only into keys the payload  #
+#     lacks or whose value is empty (None / '' / [] / {}).                      #
+#   * NEVER fabricate — only real provider-returned values are merged; a        #
+#     source that errors/times-out/returns nothing simply contributes nothing.  #
+#   * SOFT-FAIL — any exception (network, parse, timeout) is swallowed; the     #
+#     verification result is never broken by a display nicety.                  #
+#   * BOUNDED — per-DOI TTL cache + 1 retry + short timeout per source + a      #
+#     global concurrency cap, so a 30+ ref bibliography never stalls.           #
+# --------------------------------------------------------------------------- #
+
+# Keys we attempt to backfill, grouped by where build_enrichment reads them.
+# These are the SOURCE-SHAPED keys (what each provider returns), NOT the
+# build_enrichment output keys — we write them into verified_data so the
+# existing coalescing logic in build_enrichment picks the richest value.
+_BACKFILL_COUNT_KEYS = (
+    'cited_by_count', 'citationCount', 'is-referenced-by-count',
+    'referenced_works', 'referenceCount', 'references-count',
+)
+_BACKFILL_RICH_KEYS = (
+    'abstract', 'abstract_inverted_index', 'tldr', 'grants', 'funder', 'funders',
+)
+
+# Per-DOI TTL cache of merged-back fields. Mirrors _AUTHOR_PROFILE_CACHE in
+# backend/main.py: {doi: (monotonic_ts, {field: value})}. A 30-ref
+# bibliography that cites the same work twice fetches it once; a re-opened
+# check served within the TTL re-uses the cached fields with no network.
+_BACKFILL_CACHE: Dict[str, "tuple"] = {}
+_BACKFILL_TTL_SECONDS = 6 * 60 * 60  # 6 hours
+_BACKFILL_CACHE_LOCK = threading.Lock()
+
+# Concurrency cap so a big bibliography doesn't open dozens of simultaneous
+# outbound connections (and so a slow provider can't fan out into a stall).
+# Acquired around the *network* portion only; cache hits never touch it.
+_BACKFILL_TIMEOUT_SECONDS = 6.0
+_BACKFILL_MAX_CONCURRENCY = 6
+_BACKFILL_SEMAPHORE = threading.BoundedSemaphore(_BACKFILL_MAX_CONCURRENCY)
+
+
+def _is_empty_value(v: Any) -> bool:
+    """Treat None / '' (after strip) / [] / {} as "no signal" — same emptiness
+    test build_enrichment and _enrich_matched_paper use to decide a field is
+    missing. A real 0, a real False, or a non-empty container are NOT empty."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return v.strip() == ''
+    if isinstance(v, (list, dict)):
+        return len(v) == 0
+    return False
+
+
+def _clean_doi(raw: Any) -> Optional[str]:
+    """Normalise to a bare lowercased DOI (10.xxxx/…). Strips resolver
+    prefixes and a trailing slash; rejects anything that isn't DOI-shaped so
+    we never issue a bogus /works/doi: lookup. Returns None on no real DOI."""
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    for prefix in ('https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/',
+                   'http://dx.doi.org/', 'doi:'):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+            break
+    s = s.strip().rstrip('/')
+    low = s.lower()
+    # DOI-shape guard: must start with the "10." registrant prefix and contain
+    # the '/' separator. Anything else is not a DOI we can resolve.
+    if not low.startswith('10.') or '/' not in low:
+        return None
+    return low
+
+
+def _canonical_doi_for_backfill(verified_data: Dict[str, Any],
+                                reference: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Resolve the canonical DOI to backfill against — winning payload first,
+    cited reference last. Mirrors the cleaning at enhanced_hybrid_checker.py."""
+    candidates = [
+        verified_data.get('doi'),
+        verified_data.get('DOI'),
+        (verified_data.get('ids') or {}).get('doi') if isinstance(verified_data.get('ids'), dict) else None,
+        (verified_data.get('externalIds') or {}).get('DOI') if isinstance(verified_data.get('externalIds'), dict) else None,
+        (reference or {}).get('doi'),
+    ]
+    for c in candidates:
+        cleaned = _clean_doi(c)
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _http_get_json(url: str, *, params: Optional[Dict[str, Any]] = None,
+                   headers: Optional[Dict[str, str]] = None,
+                   timeout: float = _BACKFILL_TIMEOUT_SECONDS) -> Optional[Dict[str, Any]]:
+    """GET → parsed JSON dict, with exactly ONE retry and a short timeout.
+    Returns None on any failure (network / non-200 / non-dict body) — the
+    caller soft-fails. Bounded by the module concurrency semaphore so a wide
+    bibliography can't fan out into a stall."""
+    try:
+        import requests  # local import: keeps module import pure-stdlib for the test harness
+    except Exception:  # pragma: no cover - requests is a hard dep in the app
+        return None
+    last_exc: Optional[Exception] = None
+    for attempt in range(2):  # 1 try + 1 retry
+        acquired = _BACKFILL_SEMAPHORE.acquire(timeout=timeout)
+        if not acquired:
+            return None
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
+        except Exception as exc:  # network / timeout
+            last_exc = exc
+            resp = None
+        finally:
+            _BACKFILL_SEMAPHORE.release()
+        if resp is not None:
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except ValueError as exc:
+                    last_exc = exc
+                    data = None
+                if isinstance(data, dict):
+                    return data
+                return None
+            # 404 / 410 are definitive "no such record" — don't retry.
+            if resp.status_code in (404, 410):
+                return None
+    if last_exc is not None:
+        logger.debug("backfill GET failed for %s: %s", url, last_exc)
+    return None
+
+
+def _fetch_openalex_by_doi(doi: str) -> Dict[str, Any]:
+    """OpenAlex /works/doi:{doi} → the source-shaped fields build_enrichment
+    reads: cited_by_count, referenced_works (length), abstract_inverted_index,
+    grants[]. Real values only; missing fields are simply omitted."""
+    data = _http_get_json(f"https://api.openalex.org/works/doi:{quote(doi, safe='')}")
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for k in ('cited_by_count', 'referenced_works', 'abstract_inverted_index', 'grants'):
+        v = data.get(k)
+        if not _is_empty_value(v):
+            out[k] = v
+    return out
+
+
+def _fetch_crossref_by_doi(doi: str) -> Dict[str, Any]:
+    """Crossref /works/{doi} → is-referenced-by-count, references-count, JATS
+    abstract, funder[]. Crossref wraps the record in a `message` envelope."""
+    data = _http_get_json(
+        f"https://api.crossref.org/works/{quote(doi, safe='')}",
+        headers={'User-Agent': 'refchecker/enrichment-backfill (mailto:support@refchecker.app)'},
+    )
+    msg = (data or {}).get('message') if isinstance(data, dict) else None
+    if not isinstance(msg, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for k in ('is-referenced-by-count', 'references-count', 'abstract', 'funder'):
+        v = msg.get(k)
+        if not _is_empty_value(v):
+            out[k] = v
+    return out
+
+
+def _fetch_s2_by_doi(doi: str) -> Dict[str, Any]:
+    """Semantic Scholar /paper/DOI:{doi} → citationCount, referenceCount, tldr,
+    abstract. tldr comes back nested as {model, text}; build_enrichment already
+    accepts that shape."""
+    data = _http_get_json(
+        f"https://api.semanticscholar.org/graph/v1/paper/DOI:{quote(doi, safe='')}",
+        params={'fields': 'citationCount,referenceCount,tldr,abstract'},
+    )
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for k in ('citationCount', 'referenceCount', 'tldr', 'abstract'):
+        v = data.get(k)
+        if not _is_empty_value(v):
+            out[k] = v
+    return out
+
+
+def _gather_backfill_fields(doi: str) -> Dict[str, Any]:
+    """Fetch the union of missing-able fields for a DOI across all three
+    sources, cached per-DOI with a TTL. Soft-fails per source. The merged dict
+    keeps the FIRST real value seen for each source-shaped key (OpenAlex →
+    Crossref → S2 order), but build_enrichment's own coalescing picks the
+    richest value across whatever lands, so source order is not load-bearing
+    for the displayed number."""
+    now = time.monotonic()
+    with _BACKFILL_CACHE_LOCK:
+        cached = _BACKFILL_CACHE.get(doi)
+        if cached and (now - cached[0]) < _BACKFILL_TTL_SECONDS:
+            return dict(cached[1])
+
+    merged: Dict[str, Any] = {}
+    for fetcher in (_fetch_openalex_by_doi, _fetch_crossref_by_doi, _fetch_s2_by_doi):
+        try:
+            got = fetcher(doi)
+        except Exception as exc:  # belt-and-braces: a fetcher must never raise
+            logger.debug("backfill fetcher %s failed for %s: %s", getattr(fetcher, '__name__', '?'), doi, exc)
+            got = {}
+        for k, v in (got or {}).items():
+            if k not in merged and not _is_empty_value(v):
+                merged[k] = v
+
+    with _BACKFILL_CACHE_LOCK:
+        _BACKFILL_CACHE[doi] = (now, dict(merged))
+    return merged
+
+
+def _wants_backfill(verified_data: Dict[str, Any]) -> bool:
+    """True only when at least one backfill-able display signal is genuinely
+    missing — so a payload that already carries counts + abstract + tldr +
+    funding makes ZERO network calls. Keeps a rich-source winner free."""
+    has_count = any(not _is_empty_value(verified_data.get(k)) for k in _BACKFILL_COUNT_KEYS)
+    has_rich = any(not _is_empty_value(verified_data.get(k)) for k in _BACKFILL_RICH_KEYS)
+    # Want backfill if EITHER the count family OR the rich family is empty.
+    return (not has_count) or (not has_rich)
+
+
+def backfill_enrichment(verified_data: Optional[Dict[str, Any]],
+                        reference: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Backfill missing count / abstract / tldr / funding signals into
+    `verified_data` by DOI from OpenAlex / Crossref / Semantic Scholar, then
+    return the (mutated, for caller convenience) dict.
+
+    Never overwrites a real value, never fabricates, soft-fails on any error,
+    and is bounded (per-DOI TTL cache + 1 retry + short timeout + concurrency
+    cap). Call this right before `build_enrichment` so the projection surfaces
+    the enriched values with no frontend change.
+
+    Returns the same dict it was given (mutated in place) so callers can write
+    `verified_data = backfill_enrichment(verified_data, reference)`. Returns a
+    non-dict input unchanged.
+    """
+    if not isinstance(verified_data, dict):
+        return verified_data  # type: ignore[return-value]
+
+    try:
+        # Skip entirely when the winning payload is already rich — no DOI
+        # lookup, no network. The common S2/OpenAlex-winner case costs nothing.
+        if not _wants_backfill(verified_data):
+            return verified_data
+
+        doi = _canonical_doi_for_backfill(verified_data, reference)
+        if not doi:
+            # No DOI to resolve against — nothing we can honestly backfill.
+            return verified_data
+
+        fields = _gather_backfill_fields(doi)
+        for key, value in fields.items():
+            # NEVER overwrite a real existing value — merge only into keys the
+            # payload lacks or whose value is empty. Mirrors _enrich_matched_paper.
+            if _is_empty_value(value):
+                continue
+            if _is_empty_value(verified_data.get(key)):
+                verified_data[key] = value
+    except Exception as exc:  # soft-fail: a display nicety must never break verification
+        logger.debug("backfill_enrichment soft-failed: %s", exc)
+
+    return verified_data

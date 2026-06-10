@@ -1546,7 +1546,16 @@ class ProgressRefChecker:
         # must not break the verification result.
         enrichment_payload: Dict[str, Any] = {}
         try:
-            from refchecker.utils.enrichment import build_enrichment
+            from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
+            # Cross-source backfill (R21/R22): when a non-S2 source won the
+            # verification race, its payload often lacks counts / abstract /
+            # tldr / funding. Backfill the MISSING-ONLY signals by DOI from
+            # OpenAlex / Crossref / S2 before projecting — never overwrites a
+            # real value, never fabricates, soft-fails, and is bounded
+            # (per-DOI TTL cache + 1 retry + short timeout + concurrency cap)
+            # so a 30+ ref bibliography doesn't stall.
+            if isinstance(verified_data, dict):
+                backfill_enrichment(verified_data, reference)
             enrichment_payload = build_enrichment(verified_data) or {}
         except Exception as e:
             logger.debug("enrichment build failed: %s", e)
