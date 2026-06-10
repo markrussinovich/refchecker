@@ -654,12 +654,13 @@ P0, the viewer stream, AND the button spec are committed; branch HEAD CI-green (
 | R09/R41/R11/R36/R53/R37 author popover: et-al expand, pin/scroll, ORCID link+number, badge | `ef28b08` |
 | R10 ID-less author name/title resolution (non-fabricating) | `8dccf8b` |
 | R15 inline parser: alphabetic + first/last-mentioned schemes | `d8dd25f` |
+| R17/R18/R19 add-to-list: dedup guard → renumbered list → tracked PDF/export diff | `2cd160c`,`a9285ac`,`e17efcb` |
 
-Batch-D gate green: lint 0 errors, vitest **264** passed, build ok, pytest green.
+Batch-E gate green: lint 0 errors, vitest **272** passed, build ok, pytest **1402** passed/1 skipped (also fixed a pre-existing network flake in `test_error_utils.py`).
 
-**⬜ QUEUED (serialized):** E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
+**⬜ QUEUED (serialized):** F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
 
-**Tally:** 33 of the R01–R55 items DONE (R01–R16, R20, R25, R28–R33, R36, R37, R39, R41, R44, R46, R52–R55); remaining: R17/R18/R19 (E), R21–R24/R35/R45/R47/R48/R49/R50/R51 + R26/R27/R32/R34/R38/R42/R43 (F–H), R40 (CI), R56–R60 (J/K).
+**Tally:** 36 of the R01–R55 items DONE (R01–R20, R25, R28–R33, R36, R37, R39, R41, R44, R46, R52–R55); remaining: R21–R24/R35/R45/R47/R48/R49/R50/R51 + R26/R27/R32/R34/R38/R42/R43 (F–H), R40 (CI), R56–R60 (J/K).
 
 ---
 
