@@ -24,13 +24,28 @@ const CHEVRON_ICON = (
  * works OpenAlex resolves to a real title are shown. Framed as a discovery aid,
  * never as "required" citations.
  */
+// R17 (G3) — client-side DOI normalization mirroring backend.retraction.normalize_doi:
+// lowercase, strip the resolver prefix, keep the bare 10.xxxx/yyyy core. Used to
+// cross-check gap suggestions against references already in the bibliography
+// (including DOI-only matches OpenAlex couldn't resolve to a title).
+const normalizeDoi = (raw) => {
+  if (!raw) return null
+  let s = String(raw).trim().toLowerCase()
+  for (const pre of ['https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/', 'doi:']) {
+    if (s.startsWith(pre)) { s = s.slice(pre.length); break }
+  }
+  const m = s.match(/10\.\d{4,9}\/[^\s]+/)
+  if (!m) return null
+  return m[0].replace(/[.,;)]+$/, '')
+}
+
 export default function GapFinder({ checkId, references }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
   // All hooks declared BEFORE the early return so the hook count is stable when
   // `hasDoi` flips (e.g. removing the last DOI-bearing reference) — otherwise
   // React #310 crashes the page. (rules-of-hooks)
-  const [added, setAdded] = useState({})       // key -> 'adding'|'done'|'error'
-  const [info, setInfo] = useState({})         // key -> { insertedIndex }
+  const [added, setAdded] = useState({})       // key -> 'adding'|'done'|'error'|'duplicate'
+  const [info, setInfo] = useState({})         // key -> { insertedIndex } | { existingIndex }
   const [preview, setPreview] = useState({})   // key -> { open, loading, data, error }
   const [diffOpen, setDiffOpen] = useState({}) // key -> bool: per-preview "show renumbering" detail toggle
   const [collapsed, setCollapsed] = useState(false) // collapse the results panel
@@ -89,7 +104,16 @@ export default function GapFinder({ checkId, references }) {
       await useHistoryStore.getState().selectCheck?.(checkId, { force: true })
       setAdded((a) => ({ ...a, [k]: 'done' }))
       closePreview(k)
-    } catch {
+    } catch (e) {
+      // R17 (G3) — the backend rejects a duplicate with 409 + the existing
+      // index. Surface "already reference [N]" rather than a generic failure.
+      const r = e?.response
+      if (r?.status === 409 && r?.data?.duplicate) {
+        setInfo((m) => ({ ...m, [k]: { existingIndex: r.data.existing_index } }))
+        setAdded((a) => ({ ...a, [k]: 'duplicate' }))
+        closePreview(k)
+        return
+      }
       setAdded((a) => ({ ...a, [k]: 'error' }))
     }
   }
@@ -97,6 +121,23 @@ export default function GapFinder({ checkId, references }) {
   const d = state.data
   const suggestions = Array.isArray(d?.suggestions) ? d.suggestions : []
   const doiLink = (doi) => `https://doi.org/${doi}`
+
+  // R17 (G3) — the set of DOIs already in the bibliography (cited or verified),
+  // normalized so a suggestion that's already present (incl. a DOI-only match
+  // OpenAlex couldn't title-resolve) gets grayed out instead of offered to add.
+  const presentDois = new Set(
+    (Array.isArray(references) ? references : [])
+      .map((r) => normalizeDoi(r?.doi || r?.verified_doi))
+      .filter(Boolean),
+  )
+  const alreadyPresent = (s) => {
+    const nd = normalizeDoi(s?.doi)
+    return !!(nd && presentDois.has(nd))
+  }
+  // Validity guard: only offer to add a suggestion with a non-empty title OR a
+  // resolvable DOI. A candidate with neither can't be a real reference, so we
+  // never expose an Add control for it (no fabricated/empty rows).
+  const isAddable = (s) => !!((s?.title && String(s.title).trim()) || normalizeDoi(s?.doi))
 
   // Render a marker string with the digit runs that actually changed (>= the
   // insertion number) tinted in the accent colour, so the eye lands on the part
@@ -148,8 +189,12 @@ export default function GapFinder({ checkId, references }) {
           <div className={`rc-collapse${collapsed ? ' rc-collapsed' : ''}`}>
           <div className="rc-collapse-inner">
           <ul className="mt-1.5 space-y-1.5">
-            {suggestions.map((s, i) => (
-              <li key={`${s.openalex_id}-${i}`} style={{ color: 'var(--color-text-primary)' }}>
+            {suggestions.map((s, i) => {
+              // R17 (G3) — dim rows that are already in the bibliography or
+              // can't be added, so the eye skips them.
+              const dimmed = alreadyPresent(s) || !isAddable(s)
+              return (
+              <li key={`${s.openalex_id}-${i}`} style={{ color: 'var(--color-text-primary)', opacity: dimmed ? 0.55 : 1 }}>
                 <span>{s.title}</span>
                 <span className="ml-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {s.year ? `${s.year} · ` : ''}co-cited by {s.co_citations} of your refs
@@ -172,7 +217,24 @@ export default function GapFinder({ checkId, references }) {
                     const n = info[k]?.insertedIndex
                     return <span className="ml-1.5 text-xs font-medium" style={{ color: 'var(--color-success)' }}>✓ Added{n ? ` as [${n}]` : ''}</span>
                   }
+                  // R17 (G3) — a suggestion whose DOI is already in the
+                  // bibliography (or the backend rejected as a duplicate) is
+                  // labelled "already in list" and offers no Add control.
+                  const dupIndex = st === 'duplicate' ? info[k]?.existingIndex : undefined
+                  if (st === 'duplicate' || alreadyPresent(s)) {
+                    return (
+                      <span className="ml-1.5 text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}
+                        title="This work is already in your reference list">
+                        already in list{dupIndex ? ` (reference [${dupIndex}])` : ''}
+                      </span>
+                    )
+                  }
                   if (st === 'error') return <span className="ml-1.5 text-xs" style={{ color: 'var(--color-error)' }}>add failed</span>
+                  // Validity guard: no title and no resolvable DOI ⇒ not a real
+                  // reference, so never expose an Add control for it.
+                  if (!isAddable(s)) {
+                    return <span className="ml-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }} title="Not enough metadata to add (needs a title or resolvable DOI)">can’t add (no title/DOI)</span>
+                  }
                   return (
                     <>
                       {!(pv && pv.open) && (
@@ -266,7 +328,8 @@ export default function GapFinder({ checkId, references }) {
                   )
                 })()}
               </li>
-            ))}
+              )
+            })}
           </ul>
           <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
             Advisory only (OpenAlex co-citation). Each is a real OpenAlex-resolved work cited by your own references — not AI-generated. Judge relevance yourself.

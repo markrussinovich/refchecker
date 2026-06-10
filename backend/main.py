@@ -5977,6 +5977,59 @@ async def add_reference_to_check(
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
 
+    # R17 (G3) — reject duplicates before inserting. Normalize the incoming
+    # identity (DOI via the same `normalize_doi` the retraction/gap-finder
+    # paths use; arXiv id and title lowercased) and compare it against every
+    # existing reference's cited AND verified identity. A match returns 409
+    # so the UI can say "already reference [N]" instead of silently creating
+    # a duplicate row that pollutes the renumbering map and the export list.
+    from backend.retraction import normalize_doi as _normalize_doi
+
+    def _norm_arxiv(v: Any) -> Optional[str]:
+        s = (str(v).strip().lower() if v else "")
+        # Strip a leading "arxiv:" scheme and any version suffix (v1/v2…)
+        # so "arXiv:2106.01345v2" and "2106.01345" compare equal.
+        if s.startswith("arxiv:"):
+            s = s[len("arxiv:"):]
+        s = re.sub(r"v\d+$", "", s)
+        return s or None
+
+    def _norm_title(v: Any) -> Optional[str]:
+        # Collapse whitespace + lowercase so trivial spacing/case differences
+        # don't slip a duplicate through.
+        s = " ".join(str(v).split()).strip().lower() if v else ""
+        return s or None
+
+    incoming_doi = _normalize_doi(payload.doi)
+    incoming_arxiv = _norm_arxiv(payload.arxiv_id)
+    incoming_title = _norm_title(payload.title)
+    if incoming_doi or incoming_arxiv or incoming_title:
+        for r in refs:
+            if not isinstance(r, dict):
+                continue
+            existing_doi = _normalize_doi(r.get("doi") or r.get("verified_doi"))
+            existing_arxiv = _norm_arxiv(r.get("arxiv_id") or r.get("verified_arxiv_id"))
+            existing_title = _norm_title(r.get("title") or r.get("verified_title"))
+            is_dup = (
+                (incoming_doi and existing_doi and incoming_doi == existing_doi)
+                or (incoming_arxiv and existing_arxiv and incoming_arxiv == existing_arxiv)
+                or (incoming_title and existing_title and incoming_title == existing_title)
+            )
+            if is_dup:
+                # Return the duplicate envelope at the top level (not wrapped
+                # in `detail`) so the FE can read `data.duplicate` /
+                # `data.existing_index` directly and render "already reference
+                # [N]". A bare HTTPException would bury it under `detail`.
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "duplicate": True,
+                        "existing_index": r.get("index"),
+                        "message": f"Already reference [{r.get('index')}] in this check.",
+                    },
+                )
+
     title = payload.title
     authors = payload.authors
     year = payload.year
