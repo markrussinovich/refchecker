@@ -171,7 +171,7 @@ export default function AdditionalInfoBar({ reference, checkId }) {
           ? 'Removing…'
           : rem === 'error'
             ? 'Remove failed'
-            : 'Remove'
+            : 'Remove from library'
         const remTitle = rem === 'error'
           ? 'Could not remove this reference from the library — it may already be gone, or the request failed. Try again.'
           : 'Remove this reference from your Seen-References library.'

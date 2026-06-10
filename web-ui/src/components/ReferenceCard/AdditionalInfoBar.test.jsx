@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-// Mock the API + Tauri bridge so the bar renders in isolation. The bar only
-// calls addSeenReference on click; mounting must never hit the network.
+// Mock the API + Tauri bridge so the bar renders in isolation. The bar calls
+// addSeenReference (confirm) and removeSeenReference (remove-from-library) on
+// click; mounting must never hit the network.
 const addSeenReference = vi.hoisted(() => vi.fn())
-vi.mock('../../utils/api', () => ({ addSeenReference }))
+const removeSeenReference = vi.hoisted(() => vi.fn(() => Promise.resolve({})))
+vi.mock('../../utils/api', () => ({ addSeenReference, removeSeenReference }))
 vi.mock('../../utils/tauriBridge', () => ({ openExternal: vi.fn(), isTauri: () => false }))
 
 import AdditionalInfoBar from './AdditionalInfoBar'
@@ -118,5 +120,18 @@ describe('AdditionalInfoBar real-data gating', () => {
       expect(pill.style.borderRadius).toBe('var(--control-radius)')
       expect(pill.style.borderRadius).not.toBe('9999px')
     }
+  })
+
+  it('R44: the in-library remove is clearly "Remove from library" and calls the library handler (not the list/check remove)', async () => {
+    render(<AdditionalInfoBar reference={{ title: 'A real paper' }} />)
+    // Clear, distinct label so it is never confused with the reference-list
+    // "Remove" (which removes the ref from the check, a different handler).
+    const removeBtn = screen.getByRole('button', { name: 'Remove from library' })
+    expect(removeBtn).toBeInTheDocument()
+    fireEvent.click(removeBtn)
+    expect(removeSeenReference).toHaveBeenCalledTimes(1)
+    expect(addSeenReference).not.toHaveBeenCalled()
+    // State settles to the honest "Removed" pill (no stale "✓ In Library").
+    await screen.findByText('Removed')
   })
 })
