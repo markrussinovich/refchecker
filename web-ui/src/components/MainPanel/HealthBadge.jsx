@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import anime from 'animejs'
 import { filterIssuesForStyle } from '../../utils/formatters'
 import { useStyleStore } from '../../stores/useStyleStore'
-import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -25,54 +25,36 @@ function computeScore(references, style) {
   const total = list.length
   if (total === 0) return { score: null, total: 0 }
 
-  let verified = 0
-  let halluc = 0
-  let errors = 0
-  let warnings = 0
-  for (const r of list) {
-    // Style-filter errors/warnings first, then derive the effective
-    // status from the filtered view — this matches what
-    // StatsSection's Summary chips show. Counting `verified` off the
-    // RAW r.status would diverge from the chips: a ref whose only
-    // warning is a style-suppressed venue mismatch reads as
-    // "verified" in the chips (effective status) but as "warning" in
-    // raw status, which is why the badge sat at 92% while the chips
-    // showed 9/0/0.
-    const styleFilteredErrors = filterIssuesForStyle(r?.errors, r, style)
-    const styleFilteredWarnings = filterIssuesForStyle(r?.warnings, r, style)
-    const filteredRef = (styleFilteredErrors === r?.errors && styleFilteredWarnings === r?.warnings)
-      ? r
-      : { ...r, errors: styleFilteredErrors, warnings: styleFilteredWarnings }
-    const effective = getEffectiveReferenceStatus(filteredRef, true)
-    if (effective === 'verified') verified += 1
-    if (effective === 'hallucination' || effective === 'hallucinated' ||
-        r?.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
-      halluc += 1
-    }
-    // Bucket on the SAME effective status StatsSection's chips derive
-    // (`computeReferenceStats` increments `withErrors`/`withWarnings` off
-    // `getEffectiveReferenceStatus`, not off raw `.errors`/`.warnings`).
-    // Two divergences this fixes vs. the old raw-length bucketing:
-    //   1. unverified-only refs ({error_type:'unverified'}) are NOT errors —
-    //      effective status is 'unverified', so the chip excludes them; the
-    //      old `.length > 0` test counted them as errors (off-by-N).
-    //   2. hallucinated refs carry error entries as evidence; the chip
-    //      suppresses those and counts the ref only in the hallucination
-    //      bucket. Effective status 'hallucination' keeps them out of
-    //      errors/warnings here too. The old block ran unconditionally and
-    //      double-counted them as BOTH halluc and error.
-    // A ref with both errors and warnings resolves to 'error' (precedence in
-    // getEffectiveReferenceStatus), so it's an error ref only — never also a
-    // warning ref. This makes HealthBadge counts == StatsSection chip counts.
-    if (effective === 'error') errors += 1
-    else if (effective === 'warning') warnings += 1
-  }
+  // R48 / R16: the badge MUST count from the one canonical, style-aware summary
+  // (buildReferenceSummary) — the SAME source StatsSection's report card and the
+  // backend export consume — so the badge, the report card and the exported file
+  // can never disagree. Style-filter each ref's issues first (a style-suppressed
+  // venue/author warning reads as "verified", not "warning"), then let
+  // buildReferenceSummary bucket them with the shared getEffectiveReferenceStatus
+  // precedence (a ref with both an error and a warning is an error ref only;
+  // unverified-only and hallucinated refs are excluded from errors/warnings).
+  const styleFiltered = list.map((r) => {
+    if (!r) return r
+    const fe = filterIssuesForStyle(r?.errors, r, style)
+    const fw = filterIssuesForStyle(r?.warnings, r, style)
+    if (fe === r?.errors && fw === r?.warnings) return r
+    return { ...r, errors: fe, warnings: fw }
+  })
+  const refSummary = buildReferenceSummary({ references: styleFiltered, isComplete: true }).references
+  // verified already folds suggestion-only refs in (matches the "Verified" chip).
+  const verified = refSummary.verified
+  const halluc = refSummary.hallucinated
+  const errors = refSummary.errors
+  const warnings = refSummary.warnings
+
   // Score weights: verified contributes 70, clean contributes 30 — sums
   // to 100 when every ref is verified + clean (was 70+25=95, capping
   // the badge at 95% even with zero issues). Warnings shave up to 5
-  // off, hallucinations get a steeper penalty.
+  // off, hallucinations get a steeper penalty. Formula + the clean-ratio
+  // clamp are kept identical to backend/export.compute_health so the in-app
+  // badge and the exported badge produce the same %.
   const verifyRatio = verified / total
-  const cleanRatio = (total - errors - halluc) / total
+  const cleanRatio = Math.max(0, (total - errors - halluc) / total)
   const raw = verifyRatio * 70 + cleanRatio * 30 - (warnings / total) * 5
   const penalty = halluc > 0 ? Math.min(20, 8 + halluc * 4) : 0
   const score = Math.max(0, Math.min(100, Math.round(raw - penalty)))

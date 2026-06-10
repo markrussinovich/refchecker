@@ -2801,9 +2801,26 @@ def _export_filename(title: str, check_id: int, ext: str) -> str:
     return f"{safe}.{ext}"
 
 
+def _parse_summary_param(summary: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Decode the FE's canonical ``buildReferenceSummary`` result from a query
+    param (URL-encoded JSON). R48: when the FE passes this through, the export's
+    headline counts + citation health are rendered IDENTICAL to the in-app
+    Summary badge / report card. Returns None for absent/garbage input so the
+    server-side computation is used as the fallback — never a 500."""
+    if not summary:
+        return None
+    try:
+        data = json.loads(summary)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        logger.debug("export: ignoring unparseable summary param")
+        return None
+
+
 @app.get("/api/export/{check_id}/file")
 async def export_check_file(check_id: int, fmt: str = "html", corrections: bool = False,
                             include: Optional[str] = None, download: bool = True,
+                            summary: Optional[str] = None,
                             current_user: UserInfo = Depends(require_user)):
     """Multi-format export of one check: html | md | pdf | docx.
 
@@ -2812,6 +2829,10 @@ async def export_check_file(check_id: int, fmt: str = "html", corrections: bool 
       * corrections  — include the stored corrected-reference suggestions.
       * include      — comma list of sections to keep (summary,ai,issues,references).
       * download     — attach a Content-Disposition filename.
+      * summary      — (R48) URL-encoded JSON of the FE's canonical
+                       buildReferenceSummary so the exported counts + citation
+                       health match the in-app Summary badge / report card
+                       exactly; falls back to server-side counts when absent.
     """
     try:
         user_id = get_user_id_filter(current_user)
@@ -2819,9 +2840,11 @@ async def export_check_file(check_id: int, fmt: str = "html", corrections: bool 
         if not check:
             raise HTTPException(status_code=404, detail="Check not found")
         from backend import export as _export
+        canonical_summary = _parse_summary_param(summary)
         try:
             content, media_type, ext = _export.render_export(
-                check, fmt, corrections=corrections, include=include)
+                check, fmt, corrections=corrections, include=include,
+                summary=canonical_summary)
         except _export.PdfEngineUnavailableError as e:
             raise HTTPException(status_code=501, detail=str(e))
         title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"

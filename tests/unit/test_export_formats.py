@@ -355,3 +355,160 @@ def test_render_export_dispatch(fmt, head):
     data = content.encode("utf-8") if isinstance(content, str) else content
     assert data[:len(head)] == head
     assert ext in ("html", "md", "pdf", "docx")
+
+
+# --------------------------------------------------------------------------- #
+# R48 — ONE canonical count/health across badge + report card + export.
+#
+# The Summary badge and report card both consume the FE's buildReferenceSummary
+# (web-ui/src/utils/referenceStatus.js). When that canonical, style-aware summary
+# is passed through to the export, the exported verified/warning/error/unverified
+# counts AND citation-health % must match it EXACTLY — no off-by-one at the
+# verified-vs-warning boundary (the reported 30/8/82% badge vs 29/9/80% export).
+# --------------------------------------------------------------------------- #
+
+def _canonical(*, total, verified, warnings, errors, unverified=0, hallucinated=0, suggestions=0):
+    """A buildReferenceSummary-shaped dict (the FE canonical summary)."""
+    return {
+        "totalRefs": total,
+        "processedRefs": total,
+        "references": {
+            "verified": verified, "warnings": warnings, "errors": errors,
+            "unverified": unverified, "hallucinated": hallucinated,
+            "suggestions": suggestions,
+        },
+        "issues": {
+            "errors": errors, "warnings": warnings, "suggestions": suggestions,
+            "unverified": unverified, "hallucinated": hallucinated,
+        },
+    }
+
+
+def _boundary_check():
+    """A check the SERVER alone scores as 1 verified + 1 warning — the warning
+    being a style-conforming venue note the FE suppresses (-> verified). This is
+    the exact verified-vs-warning boundary that produced the export off-by-one."""
+    return {
+        "paper_title": "Boundary",
+        "results": [
+            {"index": 1, "title": "Clean", "status": "verified", "errors": [], "warnings": []},
+            {"index": 2, "title": "StyleWarn", "status": "warning", "errors": [],
+             "warnings": [{"warning_type": "venue", "warning_details": "J. ML vs Journal of ML"}]},
+        ],
+    }
+
+
+def test_export_counts_equal_canonical_summary():
+    chk = _boundary_check()
+    # FE canonical summary: the venue warning is style-suppressed -> 2 verified.
+    canonical = _canonical(total=2, verified=2, warnings=0, errors=0)
+    m = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS), summary=canonical)
+    s = m["stats"]
+    ref = canonical["references"]
+    # Every headline bucket equals the canonical summary, exactly.
+    assert s["total"] == canonical["totalRefs"]
+    assert s["verified"] == ref["verified"]
+    assert s["warning"] == ref["warnings"]
+    assert s["error"] == ref["errors"]
+    assert s["unverified"] == ref["unverified"]
+    assert s["hallucinated"] == ref["hallucinated"]
+
+
+def test_export_resolves_verified_vs_warning_off_by_one():
+    chk = _boundary_check()
+    # Server-only computation sees the raw warning: 1 verified, 1 warning.
+    server = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS))
+    assert (server["stats"]["verified"], server["stats"]["warning"]) == (1, 1)
+    # With the canonical FE summary passed through, the boundary moves to match
+    # the badge/report card: 2 verified, 0 warning. No more off-by-one.
+    canonical = _canonical(total=2, verified=2, warnings=0, errors=0)
+    fe = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS), summary=canonical)
+    assert (fe["stats"]["verified"], fe["stats"]["warning"]) == (2, 0)
+
+
+def test_export_health_matches_canonical_summary_formula():
+    chk = _boundary_check()
+    canonical = _canonical(total=2, verified=2, warnings=0, errors=0)
+    m = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS), summary=canonical)
+    # Health is computed from the canonical buckets with the SAME formula the
+    # in-app HealthBadge uses (verified*70 + clean*30 - warn*5 - halluc penalty).
+    expected = export.compute_health(total=2, verified=2, refs_err=0, refs_warn=0, halluc=0)
+    assert m["health"]["score"] == expected["score"] == 100
+    # And it differs from the un-passed server computation (1 verified, 1 warn).
+    assert export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS))["health"]["score"] != 100
+
+
+def test_canonical_summary_visible_in_rendered_counts_all_formats():
+    chk = _boundary_check()
+    canonical = _canonical(total=2, verified=2, warnings=0, errors=0)
+    html = export.serialize_check_to_html(chk, summary=canonical)
+    md = export.serialize_check_to_markdown(chk, summary=canonical)
+    # HTML stat cards: 2 verified, 0 warnings.
+    cards = html.split('class="stats"')[1].split("</div></div></div>")[0]
+    assert ">2</div><div class=\"lbl\">verified" in cards
+    assert ">0</div><div class=\"lbl\">warnings" in cards
+    # Markdown summary table: Verified | 2 and Warnings | 0.
+    assert "| Verified | 2 |" in md
+    assert "| Warnings | 0 |" in md
+
+
+def test_render_export_threads_summary_through():
+    chk = _boundary_check()
+    canonical = _canonical(total=2, verified=2, warnings=0, errors=0)
+    content, _media, _ext = export.render_export(chk, "md", summary=canonical)
+    assert "| Verified | 2 |" in content
+    assert "| Warnings | 0 |" in content
+
+
+@pytest.mark.parametrize("bad_summary", [None, "", "not-json", "[1,2,3]", "42", {"references": "nope"}, {}])
+def test_garbage_summary_falls_back_to_server_counts(bad_summary):
+    # A malformed/absent summary must NOT crash and must fall back to the
+    # server-side computation (1 verified, 1 warning for the boundary check).
+    coerced = export._coerce_canonical_summary(bad_summary)
+    assert coerced is None
+    chk = _boundary_check()
+    m = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS), summary=bad_summary)
+    assert (m["stats"]["verified"], m["stats"]["warning"]) == (1, 1)
+
+
+def test_parse_summary_param_in_main_decodes_and_softfails():
+    import importlib
+    main = importlib.import_module("backend.main")
+    good = '{"totalRefs":2,"references":{"verified":2,"warnings":0,"errors":0}}'
+    assert main._parse_summary_param(good) == {
+        "totalRefs": 2, "references": {"verified": 2, "warnings": 0, "errors": 0}}
+    # Absent / unparseable -> None (server-side fallback, never a 500).
+    assert main._parse_summary_param(None) is None
+    assert main._parse_summary_param("") is None
+    assert main._parse_summary_param("{not json") is None
+    assert main._parse_summary_param("[1,2]") is None
+
+
+# --------------------------------------------------------------------------- #
+# R48 — the RefChecker logo/wordmark must render in EVERY export format
+# (the "disrupted logo" report). HTML carries an explicit accent fill so the
+# mark is never blank in a renderer that can't resolve currentColor / CSS vars;
+# Markdown always carries the wordmark line even with no timestamp.
+# --------------------------------------------------------------------------- #
+
+def test_logo_renders_in_html_with_explicit_accent_fallback():
+    html = export.serialize_check_to_html(_check())
+    assert 'class="brand"' in html
+    assert "Ref" in html and "Checker" in html
+    # The wordmark SVG must hard-code the accent hex (not rely solely on a CSS
+    # var / currentColor) so it never renders blank in exports.
+    assert "#10a37f" in export._WORDMARK_SVG
+
+
+def test_logo_wordmark_always_present_in_markdown_even_without_timestamp():
+    chk = {"paper_title": "No TS", "results": [{"index": 1, "title": "A", "status": "verified"}]}
+    md = export.serialize_check_to_markdown(chk)
+    assert "RefChecker" in md.splitlines()[1]
+
+
+def test_logo_present_in_pdf_html_and_docx():
+    chk = _check()
+    m = export._model(chk, corrections=False, sections=set(export.ALL_SECTIONS))
+    assert "Ref</font>" in export._pdf_html_for_model(m)  # PDF wordmark
+    doc = zipfile.ZipFile(io.BytesIO(export.render_check_to_docx(chk))).read("word/document.xml").decode("utf-8")
+    assert "RefChecker" in doc

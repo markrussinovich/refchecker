@@ -233,6 +233,75 @@ describe('HealthBadge counts agree with StatsSection chip counts (R16)', () => {
   })
 })
 
+// R48: ONE canonical count/health across the Summary badge AND the report card.
+// Both surfaces must read the same buildReferenceSummary buckets so a check can
+// never show e.g. badge 30 verified / 8 warn while the report card shows 29 / 9.
+// This pins the badge<->report-card agreement (extends R16) including the
+// verified-vs-warning boundary that produced the off-by-one.
+describe('HealthBadge and StatsSection share one canonical summary (R48)', () => {
+  // 2 verified + 1 warning-only + 1 error-with-also-a-warning. Canonical buckets
+  // (getEffectiveReferenceStatus precedence): verified 2, warnings 1, errors 1.
+  const references = [
+    makeRef('verified'),
+    makeRef('verified'),
+    makeRef('warning', { warnings: [{ message: 'venue differs' }] }),
+    makeRef('error', {
+      errors: [{ error_type: 'title', message: 'title mismatch' }],
+      warnings: [{ message: 'also a warning' }],
+    }),
+  ]
+
+  it('badge tooltip counts equal the report-card chip counts', () => {
+    const { container, unmount } = render(<HealthBadge references={references} />)
+    const tooltip = container.querySelector('span[title]').getAttribute('title')
+    const verFromBadge = Number(/(\d+)\s+verified/.exec(tooltip)?.[1])
+    const warnFromBadge = Number(/(\d+)\s+warning/.exec(tooltip)?.[1])
+    const errFromBadge = Number(/(\d+)\s+error/.exec(tooltip)?.[1])
+    unmount()
+
+    // Canonical: verified 2, warnings 1 (the error+warning ref is an error ref
+    // only), errors 1.
+    expect(verFromBadge).toBe(2)
+    expect(warnFromBadge).toBe(1)
+    expect(errFromBadge).toBe(1)
+
+    render(
+      <StatsSection
+        stats={{ total_refs: 4, processed_refs: 4 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Canonical Paper"
+        paperSource="https://example.com/canonical"
+      />
+    )
+    // Report-card chips read the same canonical buckets.
+    const verChip = screen.getByTitle(/references? fully verified/i)
+    const warnChip = screen.getByTitle(/references? with warnings only/i)
+    const errChips = screen.getAllByTitle(/references? with errors/i)
+    expect(within(verChip).getByText(String(verFromBadge))).toBeTruthy()
+    expect(within(warnChip).getByText(String(warnFromBadge))).toBeTruthy()
+    expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
+  })
+
+  it('renders one citation-health % for the whole report (badge inside the card)', () => {
+    // The badge passed in as the StatsSection healthBadge prop is the SAME
+    // component instance the standalone badge renders — one source, one %.
+    render(
+      <StatsSection
+        stats={{ total_refs: 4, processed_refs: 4 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Canonical Paper"
+        paperSource="https://example.com/canonical"
+        healthBadge={<HealthBadge references={references} />}
+      />
+    )
+    const health = screen.getByTitle(/verified .* warning .* error/i)
+    expect(health.textContent).toMatch(/Citation health/)
+    expect(health.textContent).toMatch(/%/)
+  })
+})
+
 describe('StatsSection hallucination count', () => {
   it('uses backend processed_refs instead of deriving progress from status buckets', () => {
     const references = [

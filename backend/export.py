@@ -639,12 +639,61 @@ def _effective_status(ref: Dict[str, Any]) -> str:
 # Shared report model
 # --------------------------------------------------------------------------- #
 
-def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[str]]) -> Dict[str, Any]:
+def _int(value: Any, default: int = 0) -> int:
+    """Coerce a JSON value to a non-negative int (the FE summary ships numbers)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return n if n >= 0 else default
+
+
+def _coerce_canonical_summary(summary: Any) -> Optional[Dict[str, int]]:
+    """Normalise the FE ``buildReferenceSummary`` result
+    (web-ui/src/utils/referenceStatus.js) into the export's headline-count shape.
+
+    R48: the Summary badge, the StatsSection report card and this export must
+    show IDENTICAL verified / warning / error / unverified counts + citation
+    health. The FE result is style-aware (it suppresses style-conforming
+    warnings before bucketing), which the server cannot reproduce without the
+    active citation style. So when the FE passes its already-computed canonical
+    summary through, we honour it verbatim for the headline counts + health —
+    that is what removes the verified-vs-warning off-by-one (30/8/82% on the
+    badge vs 29/9/80% in the export). Returns None for any non-summary shape so
+    history / batch / server-only exports fall back to the local computation.
+    """
+    if not isinstance(summary, dict):
+        return None
+    refs = summary.get("references")
+    if not isinstance(refs, dict):
+        return None
+    verified = _int(refs.get("verified"))
+    warning = _int(refs.get("warnings"))
+    error = _int(refs.get("errors"))
+    unverified = _int(refs.get("unverified"))
+    hallucinated = _int(refs.get("hallucinated"))
+    suggestion = _int(refs.get("suggestions"))
+    total = _int(summary.get("totalRefs"),
+                 verified + warning + error + unverified + hallucinated + suggestion)
+    return {
+        "verified": verified,      # already folds suggestions in on the FE
+        "warning": warning,
+        "error": error,
+        "unverified": unverified,
+        "hallucinated": hallucinated,
+        "suggestion": suggestion,
+        "total": total,
+    }
+
+
+def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[str]],
+           summary: Any = None) -> Dict[str, Any]:
     sections = sections if sections else set(ALL_SECTIONS)
     title = check.get("paper_title") or check.get("custom_label") or "RefChecker results"
     refs = _as_list(check.get("results")) or _as_list(check.get("references"))
     ai = _as_dict(check.get("ai_detection"))
     ts = check.get("timestamp") or ""
+    canonical = _coerce_canonical_summary(summary)
 
     # Per-reference status buckets — counted with the SAME authoritative
     # precedence as the in-app Summary bar (web-ui/src/utils/referenceStatus.js).
@@ -698,10 +747,38 @@ def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[s
     # Fold suggestion-only refs into the headline "verified" count so the
     # summary cards match the app's "Verified" chip (which includes suggestions).
     verified_display = counts["verified"] + counts["suggestion"]
-    stats = {"total": len(refs), "warning_major": warning_major,
-             "orphans": len(orphans), **counts, "verified": verified_display}
+
+    if canonical is not None:
+        # R48: honour the FE's canonical, style-aware summary so the exported
+        # headline counts + health are byte-identical to the badge and the
+        # report card. The per-row statuses above still drive the references
+        # LIST rendering (each row shows its own status); only the aggregate
+        # surfaces are taken from the canonical numbers. `verified` already
+        # folds suggestions in on the FE, mirroring verified_display.
+        total_refs = canonical["total"] or len(refs)
+        verified_display = canonical["verified"]
+        health_err = canonical["error"]
+        health_warn = canonical["warning"]
+        health_halluc = canonical["hallucinated"]
+        stats = {
+            "total": total_refs, "warning_major": warning_major,
+            "orphans": len(orphans),
+            "verified": verified_display,
+            "warning": canonical["warning"],
+            "error": canonical["error"],
+            "unverified": canonical["unverified"],
+            "hallucinated": canonical["hallucinated"],
+            "suggestion": canonical["suggestion"],
+        }
+    else:
+        total_refs = len(refs)
+        health_err = refs_err
+        health_warn = refs_warn
+        health_halluc = counts["hallucinated"]
+        stats = {"total": total_refs, "warning_major": warning_major,
+                 "orphans": len(orphans), **counts, "verified": verified_display}
     headline, severity = _verdict(stats, ai)
-    health = compute_health(len(refs), verified_display, refs_err, refs_warn, counts["hallucinated"])
+    health = compute_health(total_refs, verified_display, health_err, health_warn, health_halluc)
     return {
         "title": title, "ts": ts, "ai": ai, "rows": rows, "stats": stats,
         "sections": sections, "corrections": corrections,
@@ -895,8 +972,8 @@ def _ref_row_html(r: Dict[str, Any]) -> str:
 
 
 def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
-                            sections: Optional[Set[str]] = None) -> str:
-    m = _model(check, corrections=corrections, sections=sections)
+                            sections: Optional[Set[str]] = None, summary: Any = None) -> str:
+    m = _model(check, corrections=corrections, sections=sections, summary=summary)
     sec = m["sections"]
     s = m["stats"]
     cards = "".join(
@@ -947,10 +1024,19 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
 # via fill-opacity so it reads as the app's soft-accent badge.
 _WORDMARK_SVG = (
     '<svg class="logo" width="22" height="22" viewBox="0 0 24 24" '
-    'style="color:var(--accent)" aria-hidden="true">'
+    'preserveAspectRatio="xMidYMid meet" '
+    'style="color:var(--accent);flex:none;display:block" aria-hidden="true">'
+    # Belt-and-braces colour: the accent custom property (var(--accent)) gives
+    # the themed tint in browsers/webviews that resolve CSS vars on `color`; the
+    # `fill`/`stroke` *presentation attributes* hard-code the same accent hex so
+    # the mark is NEVER blank in a renderer that can't resolve currentColor / a
+    # CSS variable (the "disrupted / missing logo in exports" report — fitz HTML,
+    # htmlpreview, and bare e-mail clients all fall into this bucket). The inline
+    # `style` (currentColor) wins where supported, the attribute is the fallback.
     '<rect x="2" y="2" width="20" height="20" rx="6" '
-    'fill="currentColor" fill-opacity="0.14"/>'
-    '<path d="M7 12.4l3.1 3.1L17 8.6" fill="none" stroke="currentColor" '
+    'fill="#10a37f" fill-opacity="0.14" style="fill:currentColor"/>'
+    '<path d="M7 12.4l3.1 3.1L17 8.6" fill="none" stroke="#10a37f" '
+    'style="stroke:currentColor" '
     'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 )
 
@@ -1065,8 +1151,8 @@ def _html_doc(title: str, inner: str) -> str:
 # --------------------------------------------------------------------------- #
 
 def serialize_check_to_markdown(check: Dict[str, Any], *, corrections: bool = False,
-                                sections: Optional[Set[str]] = None) -> str:
-    m = _model(check, corrections=corrections, sections=sections)
+                                sections: Optional[Set[str]] = None, summary: Any = None) -> str:
+    m = _model(check, corrections=corrections, sections=sections, summary=summary)
     return _md_for_model(m, level=1)
 
 
@@ -1075,8 +1161,15 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
     sec = m["sections"]
     s = m["stats"]
     out: List[str] = [f"{h} {m['title']}"]
+    # RefChecker wordmark line — always present so the brand reads in every
+    # Markdown export (R48: "logo renders correctly in every export format").
+    # ✓ RefChecker is the same accent-check + word the HTML/PDF wordmarks use,
+    # in the only "logo" Markdown can carry (a glyph + bold word). The timestamp
+    # rides along when present but no longer gates the brand line.
+    brand = "✓ **RefChecker** · reference verification report"
     if m["ts"]:
-        out.append(f"_RefChecker reference verification report · {m['ts']}_")
+        brand += f" · {m['ts']}"
+    out.append(f"_{brand}_")
     out.append("")
     out.append(f"**Verdict:** {m['headline']}")
     if m["health"].get("score") is not None:
@@ -1293,8 +1386,8 @@ def _render_pdf_from_html(html_str: str) -> bytes:
 
 
 def render_check_to_pdf(check: Dict[str, Any], *, corrections: bool = False,
-                        sections: Optional[Set[str]] = None) -> bytes:
-    m = _model(check, corrections=corrections, sections=sections)
+                        sections: Optional[Set[str]] = None, summary: Any = None) -> bytes:
+    m = _model(check, corrections=corrections, sections=sections, summary=summary)
     return _render_pdf_from_html(_pdf_html_for_model(m))
 
 
@@ -1423,8 +1516,8 @@ def _docx_zip(blocks: List[str]) -> bytes:
 
 
 def render_check_to_docx(check: Dict[str, Any], *, corrections: bool = False,
-                         sections: Optional[Set[str]] = None) -> bytes:
-    m = _model(check, corrections=corrections, sections=sections)
+                         sections: Optional[Set[str]] = None, summary: Any = None) -> bytes:
+    m = _model(check, corrections=corrections, sections=sections, summary=summary)
     return _docx_zip(_docx_blocks_for_model(m))
 
 
@@ -1578,17 +1671,23 @@ def parse_sections(include: Optional[str]) -> Set[str]:
 
 
 def render_export(check: Dict[str, Any], fmt: str, *, corrections: bool = False,
-                  include: Optional[str] = None) -> Tuple[Any, str, str]:
-    """Return (content, media_type, ext) for a single check in the given format."""
+                  include: Optional[str] = None, summary: Any = None) -> Tuple[Any, str, str]:
+    """Return (content, media_type, ext) for a single check in the given format.
+
+    *summary* (optional) is the FE's canonical ``buildReferenceSummary`` result.
+    When supplied (R48), the exported headline counts + citation-health match the
+    in-app Summary badge / report card exactly; when omitted the counts are
+    computed server-side from the stored references.
+    """
     fmt = (fmt or "html").lower()
     sections = parse_sections(include)
     if fmt in ("md", "markdown"):
-        return serialize_check_to_markdown(check, corrections=corrections, sections=sections), *_MEDIA["md"]
+        return serialize_check_to_markdown(check, corrections=corrections, sections=sections, summary=summary), *_MEDIA["md"]
     if fmt == "pdf":
-        return render_check_to_pdf(check, corrections=corrections, sections=sections), *_MEDIA["pdf"]
+        return render_check_to_pdf(check, corrections=corrections, sections=sections, summary=summary), *_MEDIA["pdf"]
     if fmt == "docx":
-        return render_check_to_docx(check, corrections=corrections, sections=sections), *_MEDIA["docx"]
-    return serialize_check_to_html(check, corrections=corrections, sections=sections), *_MEDIA["html"]
+        return render_check_to_docx(check, corrections=corrections, sections=sections, summary=summary), *_MEDIA["docx"]
+    return serialize_check_to_html(check, corrections=corrections, sections=sections, summary=summary), *_MEDIA["html"]
 
 
 def render_batch_export(checks: Sequence[Dict[str, Any]], fmt: str, *, corrections: bool = False,
