@@ -4,6 +4,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { getPaperPdf } from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { getStatusColors } from '../../utils/statusColors'
+import { usePdfFind } from '../../utils/usePdfFind'
 
 // Vite resolves `?url` to the emitted worker asset; pdfjs needs it set once.
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -15,6 +16,12 @@ const AI_COLORS = { fill: 'rgba(239,68,68,0.24)', stroke: 'rgba(239,68,68,0.8)' 
 // R28: the located reference-list ENTRY (the in-PDF jump target of an inline
 // citation) gets a distinct blue so it never reads as a verification verdict.
 const REF_ENTRY_COLORS = { fill: 'rgba(59,130,246,0.26)', stroke: 'rgba(37,99,235,0.85)' }
+// R42: find-in-PDF matches are YELLOW; the active match is the accent/blue.
+// Deliberately outside the R14 status palette (green/red/amber/violet/orange/
+// slate) so a search highlight never reads as a verification verdict, and the
+// active match stands out from the rest of the hits.
+const FIND_COLORS = { fill: 'rgba(250,204,21,0.45)', stroke: 'rgba(202,138,4,0.95)' }
+const FIND_CURRENT_COLORS = { fill: 'rgba(59,130,246,0.55)', stroke: 'rgba(37,99,235,1)' }
 
 const ESC = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const norm = (s) => (s || '').replace(/\s+/g, ' ').trim()
@@ -55,8 +62,8 @@ const FIT_MIN = 0.5, FIT_MAX = 3
 // first open. The ResizeObserver/measure effect replaces this immediately.
 const FIT_FALLBACK = 0.85
 
-export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = null, zoom = 1, onJumpToReference, onUnavailable, onLocated }) {
-  const [pages, setPages] = useState([])      // [{ pageNumber, width, height, highlights }]
+export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = null, zoom = 1, onJumpToReference, onUnavailable, onLocated, onFindController }) {
+  const [pages, setPages] = useState([])      // [{ pageNumber, width, height, highlights, items, pageText }]
   const [status, setStatus] = useState('loading') // loading | ready | error
   const docRef = useRef(null)
   const canvasRefs = useRef({})               // pageNumber -> canvas el
@@ -72,6 +79,26 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   // page wrapper. Null when nothing is hovered. Rendered as a solid opaque card
   // (not the browser's native, easy-to-miss title tooltip).
   const [hover, setHover] = useState(null)
+
+  // R42: find-in-PDF controller over the rendered text-layer geometry. The query
+  // + current-match index live here (where the geometry is); the FindBar UI lives
+  // in the parent (DocumentViewer), wired through `onFindController` so a single
+  // bar drives every native PDF view.
+  const find = usePdfFind(pages)
+  const { matchCount, current: findCurrent, currentMatch, next: findNext, prev: findPrev,
+    setQuery: setFindQuery, clear: clearFind, isMatchCurrent } = find
+
+  // Hand the controller up so the parent can render the shared FindBar + drive
+  // the same keyboard shortcuts. Re-published whenever count/index changes so the
+  // bar's "N/M" counter and prev/next stay live.
+  useEffect(() => {
+    if (!onFindController) return
+    onFindController({
+      setQuery: setFindQuery, clear: clearFind,
+      next: findNext, prev: findPrev,
+      matchCount, current: findCurrent,
+    })
+  }, [onFindController, setFindQuery, clearFind, findNext, findPrev, matchCount, findCurrent])
 
   // Measure the available width (the scroll container that wraps us) and derive
   // a fit-width base scale from the PDF's intrinsic page width. Re-measures on
@@ -216,7 +243,10 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
               span: sp,
             }))
           })
-          out.push({ pageNumber: n, width: vp.width, height: vp.height, highlights })
+          // Keep the per-item geometry + concatenated page text so the find
+          // controller (usePdfFind) can reuse the EXACT same coordinates the
+          // highlight overlays use — no second text extraction, no drift.
+          out.push({ pageNumber: n, width: vp.width, height: vp.height, highlights, items, pageText })
         }
         if (cancelled) return
         setPages(out)
@@ -298,6 +328,19 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
     }
   }, [status, focusSpanIndex, pages, SCALE])
 
+  // R42: scroll the ACTIVE find match into view whenever the current index (or
+  // the match set) changes. Each match overlay carries `data-find` = its global
+  // match index; the active one is centered. rAF lets the new overlays lay out
+  // before we measure/scroll.
+  useEffect(() => {
+    if (status !== 'ready' || !currentMatch) return undefined
+    const raf = requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(`[data-find="${findCurrent}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [status, currentMatch, findCurrent])
+
   if (status === 'loading') {
     return <div style={{ color: 'var(--color-text-muted)', fontSize: 14, padding: 20 }}>Rendering PDF…</div>
   }
@@ -308,6 +351,15 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   // (otherwise the click honestly falls back to the React reference card).
   const locatedSpanSet = new Set()
   for (const p of pages) for (const h of p.highlights) locatedSpanSet.add(h.spanIndex)
+
+  // R42: group find matches by page so each page draws only its own match rects.
+  // Each match keeps its GLOBAL index so the active match (currentMatch) and the
+  // `data-find` scroll anchor stay in sync with the FindBar's "N/M" counter.
+  const findByPage = new Map()
+  for (const m of find.matches) {
+    if (!findByPage.has(m.pageNumber)) findByPage.set(m.pageNumber, [])
+    findByPage.get(m.pageNumber).push(m)
+  }
 
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -342,6 +394,29 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
                 }}
               />
             )
+          })}
+          {/* R42: find-in-PDF match overlays. Drawn ABOVE the status/citation
+              highlights (later in DOM order) but never clickable (pointer-events
+              off) so they don't steal the status-highlight hover/click. The
+              active match uses the accent/blue + a soft ring; the rest are
+              yellow. Colors sit outside the R14 status palette so a search hit
+              never reads as a verification verdict. */}
+          {(findByPage.get(p.pageNumber) || []).map((m) => {
+            const active = isMatchCurrent(m)
+            const c = active ? FIND_CURRENT_COLORS : FIND_COLORS
+            return m.rects.map((r, ri) => (
+              <div
+                key={`find-${m.matchIndex}-${ri}`}
+                data-find={ri === 0 ? m.matchIndex : undefined}
+                style={{
+                  position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h,
+                  background: c.fill, border: `1px solid ${c.stroke}`, borderRadius: 2,
+                  pointerEvents: 'none', mixBlendMode: 'multiply',
+                  boxShadow: active ? '0 0 0 2px rgba(37,99,235,0.55)' : 'none',
+                  zIndex: 2,
+                }}
+              />
+            ))
           })}
           {/* Solid, opaque hover card describing the cited/flagged passage.
               Positioned above the hovered highlight; uses themed surface +

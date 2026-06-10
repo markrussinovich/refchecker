@@ -107,6 +107,11 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
   const [currentMatch, setCurrentMatch] = useState(0)
   const scrollRef = useRef(null)
   const findInputRef = useRef(null)
+  // R42: the native PDF view owns its own find controller (the geometry lives in
+  // NativePdfViewer); it publishes count/index + next/prev/setQuery/clear here so
+  // the SAME shared FindBar drives find-in-PDF for the per-ref context view and
+  // the AI-detection viewer alike. Null until the PDF view mounts + reports up.
+  const [pdfFind, setPdfFind] = useState(null)
 
   const ZOOM_MIN = 0.7, ZOOM_MAX = 2.2, ZOOM_STEP = 0.15
   const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
@@ -278,14 +283,28 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     setCurrentMatch((c) => (c + dir + findCount) % findCount)
   }
 
-  // Ctrl/Cmd+F opens the find bar; Esc closes it (or the viewer).
+  // R42: a single close-and-clear that resets WHICHEVER find is active — the
+  // text-mode query or the native-PDF controller — so Esc / the × always wipe
+  // the highlights regardless of view.
+  const closeFind = () => {
+    setFindOpen(false)
+    setFindQuery('')
+    pdfFind?.clear?.()
+  }
+
+  // Ctrl/Cmd+F opens the find bar (works in BOTH the native PDF view and the
+  // text fallback); Esc closes+clears it. Enter/Shift+Enter next/prev are handled
+  // inside the FindBar input. The find bar is available in PDF mode unconditionally
+  // and in text mode only once the extracted text is available.
+  const findAvailable = mode === 'pdf' || (!state.loading && state.available)
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        if (!findAvailable) return
         e.preventDefault(); setFindOpen(true)
         setTimeout(() => findInputRef.current?.focus(), 0)
       } else if (e.key === 'Escape' && findOpen) {
-        e.preventDefault(); setFindOpen(false); setFindQuery('')
+        e.preventDefault(); closeFind()
       } else if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault(); zoomIn()
       } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
@@ -294,7 +313,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [findOpen])
+  }, [findOpen, findAvailable]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const markEls = () => Array.from(scrollRef.current?.querySelectorAll('mark') || [])
   const gotoMark = (dir) => {
@@ -347,16 +366,22 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {mode === 'text' && !state.loading && state.available && (
+            {/* R42: ONE Find affordance for both views. In native-PDF mode it
+                drives the NativePdfViewer find controller (text-layer search);
+                in the text fallback it drives the extracted-text find. */}
+            {findAvailable && (
               findOpen ? (
                 <FindBar
                   value={findQuery}
-                  onChange={setFindQuery}
-                  matchCount={findCount}
-                  currentMatch={currentMatch}
-                  onPrev={() => gotoFind(-1)}
-                  onNext={() => gotoFind(1)}
-                  onClose={() => { setFindOpen(false); setFindQuery('') }}
+                  onChange={(v) => {
+                    setFindQuery(v)
+                    if (mode === 'pdf') pdfFind?.setQuery?.(v)
+                  }}
+                  matchCount={mode === 'pdf' ? (pdfFind?.matchCount || 0) : findCount}
+                  currentMatch={mode === 'pdf' ? (pdfFind?.current || 0) : currentMatch}
+                  onPrev={() => (mode === 'pdf' ? pdfFind?.prev?.() : gotoFind(-1))}
+                  onNext={() => (mode === 'pdf' ? pdfFind?.next?.() : gotoFind(1))}
+                  onClose={closeFind}
                   inputRef={findInputRef}
                 />
               ) : (
@@ -384,6 +409,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
               checkId={checkId} spans={spans} focusSpanIndex={focusSpanIndex} zoom={zoom}
               onJumpToReference={jumpToReference}
               onUnavailable={() => setMode('text')} onLocated={setPdfLocated}
+              onFindController={setPdfFind}
             />
           )}
           {mode === 'text' && (<>
