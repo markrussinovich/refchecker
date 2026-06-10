@@ -104,4 +104,19 @@ describe('AdditionalInfoBar real-data gating', () => {
     expect(screen.queryByText('Checking…')).toBeNull()
     expect(screen.queryByText('Pending')).toBeNull()
   })
+
+  it('R33: every pill uses the shared 8px control radius (the ONE radius decision), never 9999px', () => {
+    // The Pill is the most-seen pill in the app; BUTTON_DESIGN §1.0/§4.7 makes it
+    // 8px (--control-radius) so it reads as part of the action-control family.
+    render(<AdditionalInfoBar reference={{ enrichment: { abstract: 'An abstract.', tldr: 'A claim.', is_preprint: true } }} />)
+    const pills = [
+      screen.getByRole('button', { name: 'Abstract' }),
+      screen.getByRole('button', { name: 'Claim' }),
+      screen.getByText('Preprint'),
+    ]
+    for (const pill of pills) {
+      expect(pill.style.borderRadius).toBe('var(--control-radius)')
+      expect(pill.style.borderRadius).not.toBe('9999px')
+    }
+  })
 })

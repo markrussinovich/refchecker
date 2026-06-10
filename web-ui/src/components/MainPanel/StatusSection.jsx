@@ -7,6 +7,7 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { useGesturePinchZoom } from '../../utils/useGesturePinchZoom'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
+import Button from '../common/Button'
 import ShareModal from '../Modals/ShareModal'
 import DocumentViewer from './DocumentViewer'
 
@@ -1465,7 +1466,13 @@ export default function StatusSection() {
           </p>
         </div>
         {canCancel && (
-          <button
+          /* In-progress Cancel control — shared pill primitive (BUTTON_DESIGN
+             §4.6 contract). variant="outline" so it matches the action family;
+             error-tinted text/border keep the "cancel" affordance honest. */
+          <Button
+            size="pill"
+            variant="outline"
+            style={{ color: 'var(--color-error)', border: '1px solid var(--color-error)' }}
             onClick={async () => {
               if (!viewedCheckSessionId) return
               try {
@@ -1491,22 +1498,9 @@ export default function StatusSection() {
                 setError(error.response?.data?.detail || error.message || 'Failed to cancel')
               }
             }}
-            className="px-3 py-2 text-sm font-medium rounded transition-colors cursor-pointer hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-error-bg)',
-              color: 'var(--color-error)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-error)'
-              e.currentTarget.style.color = 'white'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
-              e.currentTarget.style.color = 'var(--color-error)'
-            }}
           >
             Cancel
-          </button>
+          </Button>
         )}
       </div>
 

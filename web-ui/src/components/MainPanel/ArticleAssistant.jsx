@@ -2,6 +2,37 @@ import { useState } from 'react'
 import { getArticleSummary, postArticleChat } from '../../utils/api'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
+import Button from '../common/Button'
+import IconButton from '../common/IconButton'
+import LabelSizer from '../common/LabelSizer'
+
+const CHAT_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+)
+const CLOSE_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+)
+
+// macOS-native segmented tab with the MANDATED hidden-bold sizer
+// (BUTTON_DESIGN §3.4b): a hidden 600-weight copy reserves the active width so
+// switching Summarize↔Chat (which changes the weight) can never reflow a tab.
+function SegmentedTab({ label, active, onClick }) {
+  return (
+    <button type="button" role="tab" aria-selected={active} onClick={onClick}
+      className="rc-segment rc-control">
+      <span aria-hidden="true"
+        style={{ fontWeight: 600, visibility: 'hidden', display: 'block', height: 0, overflow: 'hidden', padding: '0 10px' }}>
+        {label}
+      </span>
+      <span style={{
+        fontWeight: active ? 600 : 500, position: 'absolute', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {label}
+      </span>
+    </button>
+  )
+}
 
 /**
  * Grounded Chat-with-PDF + Summarize (EPIC-D). Two tabs:
@@ -88,8 +119,12 @@ function SourceBadge({ source }) {
   const color = source === 'pdf' ? 'var(--color-success)'
     : isAbstract ? 'var(--color-warning)' : 'var(--color-text-muted)'
   return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-      style={{ color, background: 'var(--color-bg-tertiary)', border: `1px solid ${color}` }}
+    <span className="inline-flex items-center text-xs font-semibold"
+      style={{
+        color, background: 'var(--color-bg-tertiary)', border: `1px solid ${color}`,
+        borderRadius: 'var(--control-radius)', padding: '0 var(--control-pad-x-sm)',
+        height: 'var(--control-h-sm)', boxSizing: 'border-box',
+      }}
       title="Where the answer is grounded">
       grounded: {SOURCE_LABEL[source] || source}
     </span>
@@ -249,35 +284,28 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   const summaryNone = summary && summary.source === 'none'
 
   return (
-    <div className="mb-3">
+    <div>
       {!open ? (
-        <button type="button" onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
-          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}
+        <Button size="pill" variant="outline" onClick={() => setOpen(true)} icon={CHAT_ICON}
           title={isRefMode
             ? 'Chat about this reference or summarize it, grounded only in the reference’s available text'
             : 'Summarize this article or ask questions, answered only from the article’s own text'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
           {label || (isRefMode ? 'Chat about this reference' : 'Chat & Summarize')}
-        </button>
+        </Button>
       ) : (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {/* Tabs */}
-          <div className="flex items-center gap-1 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
-            {['summarize', 'chat'].map(t => (
-              <button key={t} type="button" onClick={() => setTab(t)}
-                className="px-3 py-1.5 text-xs font-medium -mb-px border-b-2"
-                style={{
-                  color: tab === t ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-                  borderColor: tab === t ? 'var(--color-accent)' : 'transparent',
-                }}>
-                {t === 'summarize' ? 'Summarize' : 'Chat'}
-              </button>
-            ))}
-            <div className="ml-auto">
-              <button type="button" onClick={() => setOpen(false)}
-                className="px-2 py-1 text-xs" style={{ color: 'var(--color-text-muted)' }} title="Close">✕</button>
+          {/* macOS-native segmented control — active state is a filled segment
+              (a moving background), never an added border, so Summarize↔Chat
+              never reflows (BUTTON_DESIGN §3.4b). */}
+          <div className="flex items-center gap-2 mb-3" role="tablist">
+            <div className="rc-segmented">
+              <SegmentedTab label="Summarize" active={tab === 'summarize'} onClick={() => setTab('summarize')} />
+              <SegmentedTab label="Chat" active={tab === 'chat'} onClick={() => setTab('chat')} />
             </div>
+            <IconButton onClick={() => setOpen(false)} title="Close" className="ml-auto"
+              style={{ color: 'var(--color-text-muted)' }}>
+              {CLOSE_ICON}
+            </IconButton>
           </div>
 
           {tab === 'summarize' ? (
@@ -285,11 +313,14 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
               {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} />}
               {!hasChatModel && <NoModelEmptyState verb="summarize" />}
               {hasChatModel && !summary && (
-                <button type="button" onClick={runSummary} disabled={sum.loading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
-                  style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: sum.loading ? 0.6 : 1 }}>
-                  {sum.loading ? 'Summarizing…' : (isRefMode ? 'Summarize this reference' : 'Summarize this article')}
-                </button>
+                <Button size="pill" variant="outline" onClick={runSummary} loading={sum.loading}>
+                  <LabelSizer candidates={[
+                    'Summarizing…',
+                    isRefMode ? 'Summarize this reference' : 'Summarize this article',
+                  ]}>
+                    {sum.loading ? 'Summarizing…' : (isRefMode ? 'Summarize this reference' : 'Summarize this article')}
+                  </LabelSizer>
+                </Button>
               )}
               {sum.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{sum.error}</div>}
               {summaryNone && (
@@ -349,21 +380,32 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
                 )}
               </div>
               {chat.error && <div className="text-xs mb-1" style={{ color: 'var(--color-error)' }}>{chat.error}</div>}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center" style={{ gap: 8 }}>
                 <input
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }}
                   placeholder={hasChatModel ? (isRefMode ? 'Ask about this reference…' : 'Ask about the article…') : 'Configure a model in Settings to chat'}
-                  className="flex-1 px-2.5 py-1.5 rounded-md text-sm border"
-                  style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }}
+                  className="flex-1 text-sm"
+                  style={{
+                    // box-sizing:border-box is REQUIRED (BUTTON_DESIGN §3.4d): without
+                    // it the bordered input renders 30px and is 2px taller than the
+                    // 28px Send button on a row whose whole goal is alignment.
+                    height: 'var(--control-h)', padding: '0 10px',
+                    borderRadius: 'var(--control-radius)', border: 'var(--control-border)',
+                    background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)',
+                    boxSizing: 'border-box',
+                  }}
                   disabled={chat.loading || !hasChatModel}
                 />
-                <button type="button" onClick={sendChat} disabled={chat.loading || !input.trim() || !hasChatModel}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium border"
-                  style={{ background: 'var(--color-accent)', color: 'white', borderColor: 'var(--color-accent)', opacity: (chat.loading || !input.trim() || !hasChatModel) ? 0.6 : 1 }}>
-                  Send
-                </button>
+                {/* Fixed minWidth so the disabled↔enabled↔sending states never
+                    resize Send; the spinner shows in its icon slot while sending,
+                    and the label width is reserved (BUTTON_DESIGN §3.4d). */}
+                <Button size="pill" variant="primary" onClick={sendChat} loading={chat.loading}
+                  disabled={!input.trim() || !hasChatModel}
+                  style={{ minWidth: 64 }}>
+                  <LabelSizer candidates={['Send', 'Sending…']}>{chat.loading ? 'Sending…' : 'Send'}</LabelSizer>
+                </Button>
               </div>
             </div>
           )}

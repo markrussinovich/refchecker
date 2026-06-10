@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import DocumentViewer from './DocumentViewer'
 import AIDetectionVisuals from './AIDetectionVisuals'
+import Button from '../common/Button'
+import IconButton from '../common/IconButton'
+import LabelSizer from '../common/LabelSizer'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
 
 // Derive a citation link for the local detection model from its version
@@ -92,10 +95,14 @@ function buildViewerSpans(detection) {
 // Semantic theme tokens (flip correctly between light/dark) — high reuses the
 // error palette, medium the warning palette, low the success palette, and the
 // abstain states the neutral surfaces, matching every other status surface.
+// BUTTON_DESIGN §4.5: the band fills are repointed from the opaque themed *-bg
+// tokens (the brown/red-block look §1.1 warns about) to the new translucent
+// --status-*-fill tokens, so the AI dense pill matches the re-check pills
+// exactly. fg/dot stay as-is; the abstain bands keep the neutral surface.
 const BAND_STYLES = {
-  high:   { label: 'AI-likelihood: High',   bg: 'var(--color-error-bg)',   fg: 'var(--color-error)',   dot: 'var(--color-error)' },
-  medium: { label: 'AI-likelihood: Medium', bg: 'var(--color-warning-bg)', fg: 'var(--color-warning)', dot: 'var(--color-warning)' },
-  low:    { label: 'AI-likelihood: Low',    bg: 'var(--color-success-bg)', fg: 'var(--color-success)', dot: 'var(--color-success)' },
+  high:   { label: 'AI-likelihood: High',   bg: 'var(--status-error-fill)',   fg: 'var(--color-error)',   dot: 'var(--color-error)' },
+  medium: { label: 'AI-likelihood: Medium', bg: 'var(--status-warning-fill)', fg: 'var(--color-warning)', dot: 'var(--color-warning)' },
+  low:    { label: 'AI-likelihood: Low',    bg: 'var(--status-success-fill)', fg: 'var(--color-success)', dot: 'var(--color-success)' },
   inconclusive: { label: 'Inconclusive', bg: 'var(--color-bg-tertiary)', fg: 'var(--color-text-muted)', dot: 'var(--color-text-muted)' },
   unavailable:  { label: 'Not analyzed',  bg: 'var(--color-bg-tertiary)', fg: 'var(--color-text-muted)', dot: 'var(--color-text-muted)' },
 }
@@ -163,26 +170,38 @@ export default function AIDetectionPanel({ detection, checkId }) {
     >
       <div className="flex items-center justify-between gap-2 px-3 py-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
+          {/* Collapse chevron — shared IconButton sm (22×22), rotation only, no
+              reflow (BUTTON_DESIGN §4.5 / §3.5). Down when expanded, up rotated. */}
+          <IconButton
+            size="sm"
+            chevron
+            rotated={!collapsed}
             onClick={() => setCollapsed(c => !c)}
             aria-expanded={!collapsed}
             title={collapsed ? 'Expand AI-text detection' : 'Collapse AI-text detection'}
-            className="p-0.5 -ml-1 rounded hover:bg-[var(--color-bg-tertiary)]"
+            className="-ml-1"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 160ms ease' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 12 15 18 9" />
             </svg>
-          </button>
+          </IconButton>
+          {/* Dense status pill (BUTTON_DESIGN §3.5): 22px tall, 8px radius (same
+              family), filled by --status-*-fill. min-width holds the widest band
+              label so changing band (high/medium/low) never resizes it. */}
           <span
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
             onClick={() => setCollapsed(c => !c)}
-            style={{ backgroundColor: style.bg, color: style.fg }}
+            style={{
+              backgroundColor: style.bg, color: style.fg,
+              height: 'var(--control-h-sm)', padding: '0 var(--control-pad-x-sm)',
+              borderRadius: 'var(--control-radius)', boxSizing: 'border-box',
+            }}
           >
-            <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: style.dot }} />
-            {style.label}
+            <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: style.dot, flex: 'none' }} />
+            <LabelSizer candidates={['AI-likelihood: High', 'AI-likelihood: Medium', 'AI-likelihood: Low', 'Inconclusive', 'Not analyzed']}>
+              {style.label}
+            </LabelSizer>
           </span>
           {!isAbstain && scorePct != null && (
             <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}
@@ -199,30 +218,34 @@ export default function AIDetectionPanel({ detection, checkId }) {
         {spans.length > 0 && !isAbstain && !collapsed && (
           <div className="flex items-center gap-3">
             {checkId != null && (
-              <button
-                type="button"
+              <Button
+                size="pill"
+                variant="primary"
                 onClick={() => setViewerOpen(true)}
-                className="text-xs px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 font-medium transition-colors focus:outline-none focus:ring-2"
-                style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', '--tw-ring-color': 'var(--color-accent)' }}
+                icon={(
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                )}
                 title="Show the flagged passages highlighted in the document text"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
                 View in document
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            {/* Sizer-grid holds both Hide↔Show candidates so toggling doesn't jump
+                the button width (BUTTON_DESIGN §3.5 / §3.1). */}
+            <Button
+              size="pill"
+              variant="outline"
               onClick={() => setOpen(o => !o)}
               aria-expanded={open}
               aria-controls="ai-detection-spans"
-              className="text-xs px-2.5 py-1 rounded-md border inline-flex items-center gap-1 transition-colors focus:outline-none focus:ring-2 hover:bg-[var(--color-bg-tertiary)]"
-              style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', '--tw-ring-color': 'var(--color-accent)' }}
             >
-              {open ? 'Hide' : `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`}
-            </button>
+              <LabelSizer candidates={['Hide', `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`]}>
+                {open ? 'Hide' : `Show ${spans.length} flagged passage${spans.length === 1 ? '' : 's'}`}
+              </LabelSizer>
+            </Button>
           </div>
         )}
       </div>
@@ -282,7 +305,7 @@ export default function AIDetectionPanel({ detection, checkId }) {
                   <div style={{ color: 'var(--color-text-primary)' }}>“{sp.quote}”</div>
                   {pct != null && (
                     <span
-                      className="text-xs font-semibold flex-shrink-0 px-1.5 rounded"
+                      className="text-xs font-semibold flex-shrink-0 px-1.5 rounded-[8px]"
                       style={{ color: style.fg, backgroundColor: style.bg }}
                       title="This passage's own model score — not a probability that a human wrote it"
                     >

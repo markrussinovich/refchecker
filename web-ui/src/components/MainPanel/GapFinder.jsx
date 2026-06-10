@@ -2,6 +2,20 @@ import { useState } from 'react'
 import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import Button from '../common/Button'
+import IconButton from '../common/IconButton'
+import LabelSizer from '../common/LabelSizer'
+
+// Pre-run trigger labels — longest reserves the width so the analyzing swap
+// doesn't jump (BUTTON_DESIGN §3.1).
+const GAP_LABELS = ['Did you miss these?', 'Analyzing co-citations…']
+
+const SEARCH_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
+)
+const CHEVRON_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+)
 
 /**
  * "Did you miss these?" — advisory gap-finder. Surfaces works frequently
@@ -94,26 +108,37 @@ export default function GapFinder({ checkId, references }) {
   }
 
   return (
-    <div className="mb-3">
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
       {!d && (
-        <button type="button" onClick={run} disabled={state.loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
-          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)', opacity: state.loading ? 0.6 : 1 }}
-          title="Find works frequently co-cited by your references but missing from your bibliography">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
-          {state.loading ? 'Analyzing co-citations…' : 'Did you miss these?'}
-        </button>
+        <div>
+          <Button size="pill" variant="outline" onClick={run} loading={state.loading} icon={SEARCH_ICON}
+            title="Find works frequently co-cited by your references but missing from your bibliography">
+            <LabelSizer candidates={GAP_LABELS}>{state.loading ? 'Analyzing co-citations…' : 'Did you miss these?'}</LabelSizer>
+          </Button>
+        </div>
       )}
-      {state.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
+      {state.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
       {d && suggestions.length > 0 && (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <button type="button" onClick={() => setCollapsed((c) => !c)}
-            className="w-full flex items-center justify-between gap-2 text-left"
-            style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
-            <span>{suggestions.length} work{suggestions.length === 1 ? '' : 's'} your references cite that you might add</span>
-            <span className="text-xs font-normal" style={{ color: 'var(--color-text-muted)' }}>{collapsed ? '▸ show' : '▾ hide'}</span>
-          </button>
-          {!collapsed && (<>
+          {/* Fixed-height (28px) header row: only the chevron rotates, the title
+              text is constant — no ▸ show/▾ hide text reflow (BUTTON_DESIGN §3.3). */}
+          <div className="flex items-center justify-between gap-2" style={{ height: 'var(--control-h)' }}>
+            <button type="button" onClick={() => setCollapsed((c) => !c)}
+              className="flex-1 flex items-center text-left rc-control"
+              style={{ fontWeight: 700, color: 'var(--color-text-primary)', background: 'transparent', border: 'none' }}
+              aria-expanded={!collapsed}>
+              <span>{suggestions.length} work{suggestions.length === 1 ? '' : 's'} your references cite that you might add</span>
+            </button>
+            <IconButton chevron rotated={!collapsed} onClick={() => setCollapsed((c) => !c)}
+              aria-expanded={!collapsed} title={collapsed ? 'Show' : 'Hide'}
+              style={{ color: 'var(--color-text-muted)' }}>
+              {CHEVRON_ICON}
+            </IconButton>
+          </div>
+          {/* Non-reflowing grid-row expand: the header above stays put while the
+              list reveals (BUTTON_DESIGN §3.3). */}
+          <div className={`rc-collapse${collapsed ? ' rc-collapsed' : ''}`}>
+          <div className="rc-collapse-inner">
           <ul className="mt-1.5 space-y-1.5">
             {suggestions.map((s, i) => (
               <li key={`${s.openalex_id}-${i}`} style={{ color: 'var(--color-text-primary)' }}>
@@ -218,10 +243,10 @@ export default function GapFinder({ checkId, references }) {
                                 Your document/PDF is not edited — only the reference list is updated. Add the inline citation in your manuscript yourself.
                               </div>
                               <div className="mt-1.5 flex items-center gap-2">
-                                <button type="button" onClick={() => addToRefs(s, i)} disabled={st === 'adding'}
-                                  className="px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'var(--color-accent)', color: '#fff', opacity: st === 'adding' ? 0.6 : 1 }}>
-                                  {st === 'adding' ? 'Adding…' : 'Confirm add'}
-                                </button>
+                                <Button size="pill" variant="primary" onClick={() => addToRefs(s, i)}
+                                  loading={st === 'adding'} disabled={st === 'adding'}>
+                                  <LabelSizer candidates={['Confirm add', 'Adding…']}>{st === 'adding' ? 'Adding…' : 'Confirm add'}</LabelSizer>
+                                </Button>
                                 <button type="button" onClick={() => closePreview(k)} className="text-xs underline" style={{ color: 'var(--color-text-muted)' }}>Cancel</button>
                               </div>
                             </div>
@@ -238,7 +263,8 @@ export default function GapFinder({ checkId, references }) {
           <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
             Advisory only (OpenAlex co-citation). Each is a real OpenAlex-resolved work cited by your own references — not AI-generated. Judge relevance yourself.
           </div>
-          </>)}
+          </div>
+          </div>
         </div>
       )}
       {d && suggestions.length === 0 && (

@@ -13,9 +13,12 @@ import { addSeenReference, removeSeenReference } from '../../utils/api'
  * ReferenceEnrichmentStrip, so they are intentionally NOT duplicated here.
  */
 function Pill({ onClick, href, title, color, children }) {
+  // 8px radius (BUTTON_DESIGN §1.0 / §4.7) — the ONE radius decision; the
+  // most-seen pill in the app must read as part of the same family as the
+  // re-check/action pills. Dense geometry: --control-pad-x-sm (9px), 11px font.
   const style = {
     display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px',
-    borderRadius: 9999, fontSize: 11, fontWeight: 600, lineHeight: 1.6,
+    borderRadius: 'var(--control-radius)', fontSize: 11, fontWeight: 600, lineHeight: 1.6,
     border: '1px solid var(--color-border)',
     cursor: (onClick || href) ? 'pointer' : 'default',
     color: color || 'var(--color-text-secondary)',

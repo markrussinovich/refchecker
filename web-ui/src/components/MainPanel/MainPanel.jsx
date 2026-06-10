@@ -334,9 +334,13 @@ export default function MainPanel() {
           />
         )}
 
-        {/* On-demand retraction check (OpenAlex is_retracted, real signal) */}
+        {/* On-demand retraction check (OpenAlex is_retracted, real signal).
+            Column-of-rows so every block left-aligns to one edge and shares one
+            vertical rhythm owned by the container gap (BUTTON_DESIGN §2.1) —
+            removing/adding a block never leaves a double/zero margin. Capped at
+            760px so the pills don't stretch edge-to-edge. */}
         {showContent && isComplete && (
-          <div className="flex flex-wrap items-start gap-2">
+          <div className="flex flex-col items-start" style={{ gap: 'var(--control-row-gap)', maxWidth: 760 }}>
             {/*
              * Per-article remount keys (#bug: cross-article result bleed).
              * In a batch, these on-demand panels keep their fetched results

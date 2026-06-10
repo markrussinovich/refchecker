@@ -1,6 +1,26 @@
 import { useState } from 'react'
 import { getCheckRetractions } from '../../utils/api'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import Button from '../common/Button'
+import LabelSizer from '../common/LabelSizer'
+
+// Every label this control can show — the longest decides the reserved width so
+// the rest↔checking↔result swap never resizes the button (BUTTON_DESIGN §3.1).
+const RETRACTION_LABELS = [
+  'Check for retractions',
+  'Checking retractions…',
+  'No retractions — re-check',
+  '99 retracted — re-check',
+]
+
+// 14px action glyphs (BUTTON_DESIGN §1.4): refresh after a check, crossed-circle
+// before. Rendered into the Button's fixed 16×16 icon slot.
+const REFRESH_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+)
+const CROSS_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.9" y1="4.9" x2="19.1" y2="19.1" /></svg>
+)
 
 /**
  * On-demand "are any cited papers retracted?" check, using OpenAlex's real
@@ -34,13 +54,11 @@ export default function RetractionCheck({ checkId, references }) {
   const checked = !!d
   const clean = checked && retracted.length === 0
   // The button stays clickable after a check so you can re-run it (each click
-  // re-queries OpenAlex live). It turns green on a clean result, red if any
-  // retraction was found — so its colour itself reports the status.
-  const btnStyle = !checked
-    ? { background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }
-    : clean
-      ? { background: 'rgba(16,185,129,0.12)', color: 'var(--color-success, #10b981)', borderColor: 'var(--color-success, #10b981)' }
-      : { background: 'rgba(239,68,68,0.12)', color: 'var(--color-error, #ef4444)', borderColor: 'var(--color-error, #ef4444)' }
+  // re-queries OpenAlex live). Its colour itself reports the status: green on a
+  // clean result, red if any retraction was found — routed through the shared
+  // status-* variants so border/fill come from tokens and geometry never changes
+  // across rest/clean/retracted/loading (BUTTON_DESIGN §3.1, R52).
+  const variant = !checked ? 'outline' : clean ? 'status-success' : 'status-error'
   const btnLabel = state.loading
     ? 'Checking retractions…'
     : !checked
@@ -50,21 +68,17 @@ export default function RetractionCheck({ checkId, references }) {
         : `${retracted.length} retracted — re-check`
 
   return (
-    <div className="mb-3">
-      <button type="button" onClick={run} disabled={state.loading}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border"
-        style={{ ...btnStyle, opacity: state.loading ? 0.6 : 1, cursor: state.loading ? 'default' : 'pointer', transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease' }}
-        title="Check cited DOIs against OpenAlex for retractions — runs again each click">
-        {checked && !state.loading ? (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.9" y1="4.9" x2="19.1" y2="19.1" /></svg>
-        )}
-        {btnLabel}
-      </button>
-      {state.error && <div className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
+      <div>
+        <Button size="pill" variant={variant} onClick={run} loading={state.loading}
+          icon={checked ? REFRESH_ICON : CROSS_ICON}
+          title="Check cited DOIs against OpenAlex for retractions — runs again each click">
+          <LabelSizer candidates={RETRACTION_LABELS}>{btnLabel}</LabelSizer>
+        </Button>
+      </div>
+      {state.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
       {d && retracted.length > 0 && (
-        <div className="rounded-lg p-3 text-sm mt-2" style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid var(--color-error, #ef4444)' }}>
+        <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--status-error-fill)', border: '1px solid var(--color-error, #ef4444)' }}>
           <div style={{ fontWeight: 700, color: 'var(--color-error, #ef4444)' }}>
             {retracted.length} cited reference{retracted.length === 1 ? ' appears' : 's appear'} to be retracted
           </div>
@@ -83,7 +97,9 @@ export default function RetractionCheck({ checkId, references }) {
         </div>
       )}
       {d && retracted.length === 0 && (
-        <div className="rounded-lg p-2.5 text-xs mt-2" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+        /* The clean-state line is a caption (BUTTON_DESIGN §2.2): plain muted
+           text directly under the pill, no border/background card. */
+        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           No retractions found in OpenAlex for the {withDoi} reference{withDoi === 1 ? '' : 's'} with a DOI
           {noDoi > 0 ? ` · ${noDoi} had no DOI to check` : ''}
           {unknown > 0 ? ` · ${unknown} not indexed by OpenAlex` : ''}.

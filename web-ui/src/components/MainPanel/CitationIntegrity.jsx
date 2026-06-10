@@ -1,5 +1,25 @@
 import { useState } from 'react'
 import { getCitationIntegrity } from '../../utils/api'
+import Button from '../common/Button'
+import SplitButton from '../common/SplitButton'
+import LabelSizer from '../common/LabelSizer'
+
+// Every label the main segment can show — longest reserves the width so no swap
+// between rest↔checking↔result reflows (BUTTON_DESIGN §3.1).
+const CITATION_LABELS = [
+  'Check citation numbering',
+  'Checking numbering…',
+  'Numbering consistent — re-check',
+  'Numbering n/a — re-check',
+  '99 numbering issues — re-check',
+]
+
+const REFRESH_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+)
+const LIST_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V4h16v3" /><path d="M9 20h6" /><path d="M12 4v16" /></svg>
+)
 
 /**
  * Inline-citation numbering integrity badge. Parses the paper body for its
@@ -53,13 +73,11 @@ export default function CitationIntegrity({ checkId }) {
   const clean = checked && !abstained && issues.length === 0
 
   // The button stays clickable after a check so it can be re-run (each click
-  // re-analyses live). Its colour itself reports the status: green when the
-  // numbering is consistent, amber when issues were found, neutral otherwise.
-  const btnStyle = !checked || abstained
-    ? { background: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)', borderColor: 'var(--color-border)' }
-    : clean
-      ? { background: 'rgba(16,185,129,0.12)', color: 'var(--color-success, #10b981)', borderColor: 'var(--color-success, #10b981)' }
-      : { background: 'rgba(245,158,11,0.14)', color: 'var(--color-warning, #f59e0b)', borderColor: 'var(--color-warning, #f59e0b)' }
+  // re-analyses live). Its colour itself reports the status, routed through the
+  // shared status-* variants so border/fill come from tokens and geometry never
+  // changes (BUTTON_DESIGN §3.1, R52): green when consistent, amber when issues
+  // found, neutral (outline) before a check or when it abstains.
+  const variant = (!checked || abstained) ? 'outline' : clean ? 'status-success' : 'status-warning'
   const btnLabel = state.loading
     ? 'Checking numbering…'
     : !checked
@@ -70,55 +88,38 @@ export default function CitationIntegrity({ checkId }) {
           ? 'Numbering consistent — re-check'
           : `${issues.length} numbering issue${issues.length === 1 ? '' : 's'} — re-check`
 
+  // Pre-check: a lone outline pill identical to the other action pills. Post-
+  // check: the caret fades/slides in (SplitButton owns the radius transition so
+  // the main segment's LEFT edge never moves) (BUTTON_DESIGN §3.2 option A).
+  const mainButton = (
+    <Button size="pill" variant={variant} onClick={run} loading={state.loading}
+      icon={checked ? REFRESH_ICON : LIST_ICON}
+      title="Check inline-citation numbering for gaps, out-of-order, duplicates, undefined or uncited references — runs again each click">
+      <LabelSizer candidates={CITATION_LABELS}>{btnLabel}</LabelSizer>
+    </Button>
+  )
+
   return (
-    <div className="mb-3 flex flex-wrap items-start gap-2" style={{ flexBasis: '100%', width: '100%' }}>
-      <div className="inline-flex items-stretch">
-        <button type="button" onClick={run} disabled={state.loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border"
-          style={{
-            ...btnStyle,
-            opacity: state.loading ? 0.6 : 1,
-            cursor: state.loading ? 'default' : 'pointer',
-            borderRadius: checked ? '6px 0 0 6px' : '6px',
-            borderRight: checked ? 'none' : undefined,
-            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
-          }}
-          title="Check inline-citation numbering for gaps, out-of-order, duplicates, undefined or uncited references — runs again each click">
-          {checked && !state.loading ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V4h16v3" /><path d="M9 20h6" /><path d="M12 4v16" /></svg>
-          )}
-          {btnLabel}
-        </button>
-        {checked && (
-          <button type="button" onClick={() => setOpen((o) => !o)}
-            className="inline-flex items-center px-2 border text-xs font-medium"
-            style={{
-              ...btnStyle,
-              borderRadius: '0 6px 6px 0',
-              cursor: 'pointer',
-              transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
-            }}
-            aria-expanded={open}
-            title={open ? 'Hide details' : 'Show details'}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease' }}>
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        )}
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)', flexBasis: '100%', width: '100%' }}>
+      <div>
+        <SplitButton
+          main={mainButton}
+          caret={checked}
+          caretOpen={open}
+          onCaretToggle={() => setOpen((o) => !o)}
+          caretTitle={open ? 'Hide details' : 'Show details'}
+        />
       </div>
 
       {state.error && (
-        <div className="text-xs" style={{ color: 'var(--color-error)', flexBasis: '100%', width: '100%' }}>{state.error}</div>
+        <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>
       )}
 
       {d && open && (
-        <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', flexBasis: '100%', width: '100%', maxHeight: 360, overflowY: 'auto' }}>
+        <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', maxHeight: 360, overflowY: 'auto' }}>
           <div className="flex items-center gap-2 flex-wrap">
             <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Citation numbering</span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
+            <span className="px-2 py-0.5 rounded-[8px] text-xs font-semibold"
               style={{ color, background: 'var(--color-bg-tertiary)', border: `1px solid ${color}` }}>
               {badge.label || 'n/a'}
             </span>
