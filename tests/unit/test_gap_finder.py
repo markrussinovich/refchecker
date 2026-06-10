@@ -1,4 +1,9 @@
-"""Unit tests for the reference gap-finder (OpenAlex co-citation, no fabrication)."""
+"""Unit tests for the reference gap-finder (OpenAlex co-citation, no fabrication).
+
+Also covers the R39 route smoke test: ``GET /api/check/<id>/gaps`` must return
+a real JSON envelope (not the SPA catch-all HTML), so the frontend's 404
+friendly-message branch only ever fires on a genuinely missing route.
+"""
 
 from backend import gap_finder
 
@@ -66,3 +71,88 @@ def test_no_dois_returns_empty_note():
     assert res["suggestions"] == []
     assert res["checked"] == 0
     assert "note" in res
+
+
+# --------------------------------------------------------------------------- #
+# R39 — route smoke test: GET /api/check/<id>/gaps returns JSON, not SPA HTML.  #
+# --------------------------------------------------------------------------- #
+
+def _gaps_test_client(monkeypatch):
+    """Build a FastAPI TestClient with auth + db + find_gaps stubbed offline.
+
+    Returns ``(client, captured)`` where ``captured`` records the references
+    handed to find_gaps so the test can assert the route wired them through.
+    """
+    from fastapi.testclient import TestClient
+    from backend import main as backend_main
+    from backend.auth import UserInfo, require_user
+
+    # Authenticated user (bypass the real OAuth dependency).
+    app = backend_main.app
+    app.dependency_overrides[require_user] = lambda: UserInfo(id=1, provider="test")
+
+    # A real, owned check with two DOI-bearing references.
+    fake_check = {
+        "id": 42,
+        "results": [
+            {"index": 1, "title": "Paper A", "doi": "10.1000/a"},
+            {"index": 2, "title": "Paper B", "doi": "10.1000/b"},
+        ],
+    }
+
+    async def _fake_get_check_by_id(check_id, user_id=None):
+        return fake_check if check_id == 42 else None
+
+    monkeypatch.setattr(backend_main.db, "get_check_by_id", _fake_get_check_by_id)
+
+    captured = {}
+
+    def _fake_find_gaps(refs, **_kw):
+        captured["refs"] = refs
+        return {
+            "source": "openalex",
+            "checked": 2,
+            "suggestions": [
+                {"openalex_id": "W_MISS", "title": "A Missed Work", "co_citations": 2,
+                 "doi": "10.9/miss", "year": 2019, "resolved": True},
+            ],
+            "note": None,
+        }
+
+    # The route does `from backend.gap_finder import find_gaps` at call time,
+    # so patching the module attribute swaps the implementation it imports.
+    monkeypatch.setattr(gap_finder, "find_gaps", _fake_find_gaps)
+
+    return TestClient(app), captured, fake_check
+
+
+def test_gaps_route_returns_json_not_spa_catch_all(monkeypatch):
+    """GET /api/check/<id>/gaps -> 200 with a real JSON body (the route is
+    served by the API, never falling through to the SPA index HTML)."""
+    client, captured, fake_check = _gaps_test_client(monkeypatch)
+    try:
+        resp = client.get("/api/check/42/gaps")
+        assert resp.status_code == 200
+        # Genuine JSON content-type, not text/html SPA fallback.
+        assert resp.headers["content-type"].startswith("application/json")
+        body = resp.json()  # raises if the body weren't JSON
+        assert body["source"] == "openalex"
+        assert isinstance(body["suggestions"], list)
+        assert body["suggestions"][0]["title"] == "A Missed Work"
+        # The route handed the check's references through to find_gaps.
+        assert captured["refs"] == fake_check["results"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+def test_gaps_route_missing_check_is_404_json(monkeypatch):
+    """A missing check returns a 404 with a JSON detail (the handler's own
+    HTTPException), distinct from the route itself being absent."""
+    client, _captured, _fake = _gaps_test_client(monkeypatch)
+    try:
+        resp = client.get("/api/check/999/gaps")
+        assert resp.status_code == 404
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json().get("detail") == "Check not found"
+    finally:
+        client.app.dependency_overrides.clear()

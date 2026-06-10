@@ -206,7 +206,9 @@ async def _shared_reference_candidates(
     # informative shared references are still captured for ranking.
     probe = ref_ids[: max(per_relation * 4, 12)]
 
-    # work short id -> {record, shared} so we can tally overlap and dedupe.
+    # work short id -> {record, shared, shared_ids} so we can tally overlap,
+    # dedupe, and remember WHICH of the source's references each candidate
+    # shares (the actual overlapping reference works — R08).
     tally: Dict[str, Dict[str, Any]] = {}
     select = "id,title,display_name,publication_year,authorships,doi"
     for ref_id in probe:
@@ -225,15 +227,25 @@ async def _shared_reference_candidates(
                 continue
             entry = tally.get(wid)
             if entry is None:
-                tally[wid] = {"record": _work_to_candidate(w, "reference"), "shared": 1}
+                tally[wid] = {
+                    "record": _work_to_candidate(w, "reference"),
+                    "shared": 1,
+                    # Set of the source's reference works this candidate also
+                    # cites — the concrete shared works behind the count.
+                    "shared_ids": {ref_id},
+                }
             else:
                 entry["shared"] += 1
+                entry["shared_ids"].add(ref_id)
 
     ranked = sorted(tally.values(), key=lambda e: e["shared"], reverse=True)
     out: List[Dict[str, Any]] = []
     for entry in ranked:
         cand = dict(entry["record"])
         cand["shared_with_source"] = entry["shared"]
+        # Ordered, stable list of the shared reference short ids (the works
+        # that are actually shared) so the caller can hydrate their titles.
+        cand["shared_ids"] = sorted(entry["shared_ids"])
         out.append(cand)
     return out
 
@@ -269,6 +281,10 @@ async def _shared_citation_candidates(
 
     # co-referenced work short id -> times co-cited with the source.
     tally: Dict[str, int] = {}
+    # co-referenced work short id -> set of the source's citers that co-cite
+    # it. These citing works ARE the shared works behind a co-citation count
+    # (the papers that reference both the source and this candidate) — R08.
+    shared_citers: Dict[str, set] = {}
     for citer in citers:
         citer_short = _oa_short_id(citer.get("id"))
         for ref in (citer.get("referenced_works") or []):
@@ -277,6 +293,8 @@ async def _shared_citation_candidates(
             if not ref_short or ref_short == source_short or ref_short == citer_short:
                 continue
             tally[ref_short] = tally.get(ref_short, 0) + 1
+            if citer_short:
+                shared_citers.setdefault(ref_short, set()).add(citer_short)
 
     if not tally:
         return []
@@ -297,6 +315,9 @@ async def _shared_citation_candidates(
             continue
         cand = dict(cand)
         cand["shared_with_source"] = n
+        # The source's citers that co-cite this candidate (short ids) — the
+        # concrete works that connect this candidate to the source.
+        cand["shared_ids"] = sorted(shared_citers.get(wid, set()))
         out.append(cand)
     return out
 
@@ -384,4 +405,77 @@ async def fetch_cites_and_refs(
         for cand in cite_cands:
             _add(cand)
 
+    # R08 — hydrate the shared OVERLAP works so the panel can show WHICH
+    # works are shared (titles + links), not just a count. Each candidate
+    # carries ``shared_ids`` (OpenAlex short ids of the works that connect it
+    # to the source: shared references for 'reference' rows, co-citing works
+    # for 'citation' rows). We resolve them all in one batched hydration pass
+    # (cap to keep the call bounded) and project the real records onto each
+    # candidate as ``shared_works`` / ``shared_works_titles``. Real data only:
+    # ids OpenAlex can't return simply don't appear; never fabricated.
+    await _attach_shared_works(fetch, candidates)
+
     return {"source_work": source_short, "candidates": candidates}
+
+
+# How many shared works to hydrate per candidate at most, so a huge overlap
+# set doesn't bloat the payload. The full count is always preserved via
+# ``shared_with_source`` / ``shared_overlap_count``.
+_MAX_SHARED_WORKS_PER_CAND = 10
+
+
+async def _attach_shared_works(fetch: Callable, candidates: List[Dict[str, Any]]) -> None:
+    """Resolve each candidate's ``shared_ids`` to real OpenAlex records.
+
+    Mutates ``candidates`` in place, adding:
+
+      * ``shared_works`` — up to ``_MAX_SHARED_WORKS_PER_CAND`` records
+        ``{openalex_id, title, doi, url, year}`` for the works actually shared
+        with the source (shared references for 'reference' rows, co-citing
+        works for 'citation' rows).
+      * ``shared_works_titles`` — the same works' titles (FE convenience).
+      * ``shared_overlap_count`` — the true number of shared works.
+
+    One batched hydration pass over the union of every candidate's
+    (capped) shared ids. Real data only; unresolved ids are dropped.
+    """
+    # Collect the capped id set we actually want to show, union across rows.
+    wanted: List[str] = []
+    seen_ids: set = set()
+    for cand in candidates:
+        ids = cand.get("shared_ids") or []
+        cand["shared_overlap_count"] = len(ids)
+        for wid in ids[:_MAX_SHARED_WORKS_PER_CAND]:
+            if wid and wid not in seen_ids:
+                seen_ids.add(wid)
+                wanted.append(wid)
+
+    by_id: Dict[str, Dict[str, Any]] = {}
+    if wanted:
+        # 'shared' is just a hydration tag here; the records are projected
+        # below — the relation tag on the OUTER candidate is what matters.
+        hydrated = await _hydrate_works(fetch, wanted, "shared")
+        for rec in hydrated:
+            oid = rec.get("openalex_id")
+            if oid:
+                by_id[oid] = rec
+
+    for cand in candidates:
+        ids = (cand.get("shared_ids") or [])[:_MAX_SHARED_WORKS_PER_CAND]
+        works: List[Dict[str, Any]] = []
+        for wid in ids:
+            rec = by_id.get(wid)
+            if not rec:
+                continue
+            works.append({
+                "openalex_id": rec.get("openalex_id"),
+                "title": rec.get("title"),
+                "doi": rec.get("doi"),
+                "url": rec.get("url"),
+                "year": rec.get("year"),
+            })
+        cand["shared_works"] = works
+        cand["shared_works_titles"] = [w["title"] for w in works if w.get("title")]
+        # Drop the internal id set from the public payload — the hydrated
+        # works carry everything the FE needs.
+        cand.pop("shared_ids", None)

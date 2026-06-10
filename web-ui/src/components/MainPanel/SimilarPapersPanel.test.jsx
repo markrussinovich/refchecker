@@ -165,3 +165,81 @@ describe('SimilarPapersPanel relation chips', () => {
     expect(screen.getByText(/shared refs \(2\)/)).toBeInTheDocument()
   })
 })
+
+describe('SimilarPapersPanel R20 verification + provenance', () => {
+  it('renders a REAL verification chip and an OpenAlex provenance link per overlap row', async () => {
+    findSimilarPapers.mockResolvedValue({
+      data: {
+        candidates: [
+          // Verified overlap row: carries was_verified + an OpenAlex id.
+          {
+            openalex_id: 'W100', title: 'Verified overlap', relation: 'reference',
+            sources: ['openalex'], year: 2018, shared_with_source: 2,
+            was_verified: true, pre_verified: true, verified_status: 'verified', times_seen: 3,
+          },
+          // Unconfirmed overlap row: DOI-only provenance, "? unconfirmed" chip.
+          {
+            doi: '10.3/unconf', title: 'Unconfirmed overlap', relation: 'citation',
+            sources: ['openalex'], year: 2020, shared_with_source: 1,
+            was_verified: false, verified_status: 'unverified',
+          },
+        ],
+        source_counts: { reference: 1, citation: 1 },
+      },
+    })
+    render(<SimilarPapersPanel references={REFS} paperTitle="Verify Paper" paperSource="10.9/verify-src" />)
+    fireEvent.click(screen.getByText('Find shared references + citations'))
+
+    await screen.findByText('Verified overlap')
+    // Real verification chips (R20) — not always-null. The cache chip also
+    // carries a "×N times-seen" suffix, so match on the substring.
+    expect(screen.getByText(/✓ in cache/)).toBeInTheDocument()
+    expect(screen.getByText('? unconfirmed')).toBeInTheDocument()
+
+    // Provenance link (R20): OpenAlex for the row with an openalex_id…
+    const oaLink = screen.getByText('✓ OpenAlex ↗')
+    expect(oaLink.tagName).toBe('A')
+    expect(oaLink.getAttribute('href')).toBe('https://openalex.org/W100')
+    // …and a DOI provenance link for the DOI-only row.
+    const doiLink = screen.getByText('DOI ↗')
+    expect(doiLink.getAttribute('href')).toBe('https://doi.org/10.3/unconf')
+  })
+})
+
+describe('SimilarPapersPanel R08 shared-works visualization', () => {
+  it('expands to show WHICH works are shared (hydrated titles + links), not just a count', async () => {
+    findSimilarPapers.mockResolvedValue({
+      data: {
+        candidates: [
+          {
+            openalex_id: 'W200', title: 'Reference overlap row', relation: 'reference',
+            sources: ['openalex'], year: 2015, shared_with_source: 2,
+            shared_overlap_count: 2,
+            shared_works: [
+              { openalex_id: 'W_S1', title: 'Shared Work One', year: 2009, doi: '10.4/s1' },
+              { openalex_id: 'W_S2', title: 'Shared Work Two', year: 2011 },
+            ],
+            shared_works_titles: ['Shared Work One', 'Shared Work Two'],
+          },
+        ],
+        source_counts: { reference: 1 },
+      },
+    })
+    render(<SimilarPapersPanel references={REFS} paperTitle="Shared Works Paper" paperSource="10.9/shared-works-src" />)
+    fireEvent.click(screen.getByText('Find shared references + citations'))
+
+    await screen.findByText('Reference overlap row')
+    // The "Shared refs" relation chip is clickable; expand it.
+    fireEvent.click(screen.getByText('Shared refs'))
+
+    // The ACTUAL shared works are listed (R08), not just a count.
+    expect(await screen.findByText('Shared Work One')).toBeInTheDocument()
+    expect(screen.getByText('Shared Work Two')).toBeInTheDocument()
+    // The section header reflects the real overlap count.
+    expect(screen.getByText(/Shared references \(2\)/)).toBeInTheDocument()
+    // Each shared work links to its real OpenAlex page.
+    const links = Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href'))
+    expect(links).toContain('https://openalex.org/W_S1')
+    expect(links).toContain('https://openalex.org/W_S2')
+  })
+})

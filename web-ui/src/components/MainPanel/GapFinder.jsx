@@ -43,7 +43,15 @@ export default function GapFinder({ checkId, references }) {
       const res = await getCheckGaps(checkId)
       setState({ loading: false, data: res.data, error: null })
     } catch (e) {
-      setState({ loading: false, data: null, error: e?.response?.data?.detail || e?.message || 'Gap analysis failed' })
+      // R39 — a 404 means the /gaps route isn't served by this build (an
+      // older desktop binary hitting the SPA catch-all returns the index
+      // HTML, surfacing as a 404 against the API). Show a friendly update
+      // prompt instead of raw proxy HTML / a generic failure.
+      const status = e?.response?.status
+      const friendly = status === 404
+        ? 'Gap finder is unavailable — please update the app'
+        : (e?.response?.data?.detail || e?.message || 'Gap analysis failed')
+      setState({ loading: false, data: null, error: friendly })
     }
   }
 

@@ -379,3 +379,137 @@ def test_want_flags_select_relation():
     assert {c["relation"] for c in result["candidates"]} == {"reference"}
     # No cites:<source> co-citation query ran.
     assert not any(f == "cites:W_SRC" for f in seen_filters)
+
+
+# --------------------------------------------------------------------------- #
+# R08 — surface WHICH works are shared, not just a count.                       #
+# --------------------------------------------------------------------------- #
+
+# Hydrated records for the source's reference works (the works that
+# 'reference' candidates SHARE) and the co-citing works (the works that
+# connect a 'citation' candidate to the source).
+SHARED_REF_W_R1 = {
+    "id": "https://openalex.org/W_R1",
+    "title": "Foundational Reference One",
+    "publication_year": 2005,
+    "authorships": [{"author": {"display_name": "Ref Author 1"}}],
+    "doi": "https://doi.org/10.3/r1",
+}
+SHARED_REF_W_R2 = {
+    "id": "https://openalex.org/W_R2",
+    "title": "Foundational Reference Two",
+    "publication_year": 2008,
+    "authorships": [],
+    "doi": None,
+}
+CITER_W_CITER = {
+    "id": "https://openalex.org/W_CITER",
+    "title": "A Citing Paper",
+    "publication_year": 2021,
+    "authorships": [],
+    "doi": "https://doi.org/10.4/citer1",
+}
+CITER_W_CITER2 = {
+    "id": "https://openalex.org/W_CITER2",
+    "title": "Another Citing Paper",
+    "publication_year": 2022,
+    "authorships": [],
+    "doi": None,
+}
+
+
+def _r08_handler(request: httpx.Request) -> httpx.Response:
+    """Like _full_handler but ALSO hydrates the shared reference works
+    (W_R1/W_R2) and the co-citing works (W_CITER/W_CITER2) so the R08
+    overlap-hydration pass returns real titles, not just ids."""
+    url = str(request.url)
+    qs = parse_qs(urlparse(url).query)
+    filt = (qs.get("filter") or [""])[0]
+
+    if "/works/doi:" in url:
+        return httpx.Response(200, json=SOURCE_WORK)
+    if filt == "cites:W_R1":
+        return httpx.Response(200, json={"results": [SHAREREF_BOTH, SHAREREF_ONE]})
+    if filt == "cites:W_R2":
+        return httpx.Response(200, json={"results": [SHAREREF_BOTH]})
+    if filt == "cites:W_SRC":
+        return httpx.Response(200, json={"results": [CITER_WORK, CITER_WORK_2]})
+    if filt.startswith("openalex_id:"):
+        ids = filt[len("openalex_id:"):].split("|")
+        table = {
+            "W_COCITE": COCITE_WORK,
+            "W_R1": SHARED_REF_W_R1,
+            "W_R2": SHARED_REF_W_R2,
+            "W_CITER": CITER_W_CITER,
+            "W_CITER2": CITER_W_CITER2,
+        }
+        return httpx.Response(200, json={"results": [table[i] for i in ids if i in table]})
+    if filt.startswith("title.search:"):
+        return httpx.Response(200, json={"results": []})
+    return httpx.Response(404, json={"results": []})
+
+
+def test_reference_candidate_carries_hydrated_shared_works():
+    """A 'reference' candidate exposes the ACTUAL shared reference works
+    (hydrated titles + links), not just a shared count."""
+    result = asyncio.run(
+        _run(_r08_handler, paper_id="10.1234/source", paper_title=None, limit=5, mode="references")
+    )
+    cands = result["candidates"]
+    shareref = next(c for c in cands if c["title"] == "Shares Both References")
+    # Internal id set is dropped from the public payload.
+    assert "shared_ids" not in shareref
+    # The hydrated shared works carry real titles + the true overlap count.
+    assert shareref["shared_overlap_count"] == 2
+    titles = {w["title"] for w in shareref["shared_works"]}
+    assert titles == {"Foundational Reference One", "Foundational Reference Two"}
+    assert shareref["shared_works_titles"] == [w["title"] for w in shareref["shared_works"] if w.get("title")]
+    # Real provenance flows through (a DOI on the one that has it).
+    r1 = next(w for w in shareref["shared_works"] if w["title"] == "Foundational Reference One")
+    assert r1["openalex_id"] == "W_R1"
+    assert r1["doi"] == "10.3/r1"
+    # The candidate that shares only one ref shows exactly that one work.
+    oneref = next(c for c in cands if c["title"] == "Shares One Reference")
+    assert oneref["shared_overlap_count"] == 1
+    assert [w["title"] for w in oneref["shared_works"]] == ["Foundational Reference One"]
+
+
+def test_citation_candidate_carries_hydrated_cociting_works():
+    """A 'citation' (co-cited) candidate exposes the ACTUAL co-citing works
+    that connect it to the source — the works shared between them."""
+    result = asyncio.run(
+        _run(_r08_handler, paper_id="10.1234/source", paper_title=None, limit=5, mode="citations")
+    )
+    cocite = next(c for c in result["candidates"] if c["title"] == "Co-cited Work")
+    assert cocite["shared_overlap_count"] == 2
+    titles = {w["title"] for w in cocite["shared_works"]}
+    assert titles == {"A Citing Paper", "Another Citing Paper"}
+
+
+def test_shared_works_empty_when_overlap_unresolvable_no_fabrication():
+    """When the shared overlap ids can't be hydrated, shared_works is empty —
+    the count is still reported, but no titles are invented (real-data gate)."""
+
+    def handler(request):
+        url = str(request.url)
+        qs = parse_qs(urlparse(url).query)
+        filt = (qs.get("filter") or [""])[0]
+        if "/works/doi:" in url:
+            return httpx.Response(200, json=SOURCE_WORK)
+        if filt in ("cites:W_R1", "cites:W_R2"):
+            return httpx.Response(200, json={"results": [SHAREREF_BOTH]})
+        if filt == "cites:W_SRC":
+            return httpx.Response(200, json={"results": []})
+        # Hydration of the shared reference works returns NOTHING.
+        if filt.startswith("openalex_id:"):
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(404, json={"results": []})
+
+    result = asyncio.run(
+        _run(handler, paper_id="10.1234/source", paper_title=None, limit=5, mode="references")
+    )
+    shareref = next(c for c in result["candidates"] if c["title"] == "Shares Both References")
+    # Count preserved, but no fabricated titles.
+    assert shareref["shared_overlap_count"] == 2
+    assert shareref["shared_works"] == []
+    assert shareref["shared_works_titles"] == []

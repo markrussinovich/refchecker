@@ -6763,6 +6763,14 @@ async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
         )
 
     candidates = _shape_cites_refs_candidates(result.get("candidates", []))
+    # R20 — populate REAL verification status (pre_verified / was_verified /
+    # verified_status) on each row so the existing SimilarPapersPanel chips
+    # render true "verified / ? unconfirmed" state instead of always-null.
+    # Reuses the same cache-lookup + active-verify discipline as the similar
+    # path (db.lookup_verified_reference -> checker.verify_reference), bounded
+    # by a semaphore. Real-data-gated: a candidate that can't be confirmed is
+    # marked unverified, never synthesized as verified.
+    await _verify_candidates_in_place(candidates)
     # Tally by relation: 'reference' = shared-references match,
     # 'citation' = shared-citations (co-cited) match.
     source_counts: Dict[str, int] = {}
@@ -6804,6 +6812,18 @@ def _shape_cites_refs_candidates(raw: list) -> list:
             "shared_refs_jaccard": 0.0,
             "candidate_ref_count": 0,
             "shared_refs_titles": [],
+            # R08 — the ACTUAL works shared with the source paper (hydrated
+            # real OpenAlex records), so the panel can show WHICH works are
+            # shared, not just a count. For 'reference' rows these are the
+            # shared reference works; for 'citation' rows, the co-citing
+            # works. Real data only — empty when nothing resolved.
+            "shared_works": c.get("shared_works") or [],
+            "shared_works_titles": c.get("shared_works_titles") or [],
+            "shared_overlap_count": (
+                c.get("shared_overlap_count")
+                if c.get("shared_overlap_count") is not None
+                else (c.get("shared_with_source") or 0)
+            ),
             "sources": ["openalex"],
             "via": "openalex",
             "semantic_scholar_url": None,
@@ -6814,6 +6834,113 @@ def _shape_cites_refs_candidates(raw: list) -> list:
             "times_seen": 0,
         })
     return out
+
+
+def _build_similar_papers_checker():
+    """Best-effort init of the hybrid reference checker used to actively
+    verify candidate rows. Returns the checker or ``None`` if it can't load
+    (no network deps available, import error, etc.) — callers degrade to
+    cache-only verification. Mirrors the init in ``_find_similar_papers_impl``."""
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+        return EnhancedHybridReferenceChecker(debug_mode=False)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Could not init checker for cites/refs verification: %s", e)
+        return None
+
+
+async def _verify_candidates_in_place(candidates: list) -> None:
+    """R20 — populate REAL verification status on shaped candidate rows.
+
+    For each candidate row (already shaped by ``_shape_cites_refs_candidates``)
+    this resolves a real verification status using the SAME discipline as the
+    similar path's ``_enrich``:
+
+      1. Look the candidate up in the global identity cache
+         (``db.lookup_verified_reference``). A hit sets ``pre_verified`` /
+         ``was_verified`` and carries the cached status + ``times_seen``.
+      2. On a cache miss, actively verify via ``checker.verify_reference`` —
+         bounded by a semaphore so we never fan out unboundedly — and mark
+         ``verified`` only when a real database record is matched. No match
+         -> ``unverified`` ("? unconfirmed" chip). An error -> ``unknown``.
+
+    Mutates ``candidates`` in place. REAL-DATA-GATED: a row is only marked
+    verified when a real source confirmed it — never synthesized. When there
+    are no candidates, this is a no-op (no checker init, no network).
+    """
+    if not candidates:
+        return
+
+    checker = await asyncio.to_thread(_build_similar_papers_checker)
+    sem = asyncio.Semaphore(5)
+
+    async def _verify_one(row: dict) -> None:
+        probe = {
+            "doi": row.get("doi"),
+            "arxiv_id": row.get("arxiv_id"),
+            "title": row.get("title"),
+            "year": row.get("year"),
+        }
+        cached = None
+        try:
+            cached = await db.lookup_verified_reference(probe)
+        except Exception:
+            cached = None
+
+        if cached:
+            row["pre_verified"] = True
+            row["was_verified"] = True
+            row["verified_status"] = (cached or {}).get("status") or "verified"
+            row["times_seen"] = (cached or {}).get("times_seen") or 0
+            return
+
+        # Cache miss: actively verify if we have any identifier or title.
+        if checker is not None and (row.get("doi") or row.get("arxiv_id") or row.get("title")):
+            async with sem:
+                try:
+                    verified_data, _errors, url = await asyncio.to_thread(
+                        checker.verify_reference,
+                        {
+                            "title": row.get("title"),
+                            "authors": row.get("authors"),
+                            "year": row.get("year"),
+                            "doi": row.get("doi"),
+                            "arxiv_id": row.get("arxiv_id"),
+                            "venue": row.get("venue"),
+                        },
+                    )
+                    if verified_data:
+                        row["was_verified"] = True
+                        row["verified_status"] = "verified"
+                        if not row.get("doi") and verified_data.get("doi"):
+                            row["doi"] = verified_data["doi"]
+                        if not row.get("arxiv_id") and verified_data.get("arxiv_id"):
+                            row["arxiv_id"] = verified_data["arxiv_id"]
+                        if not row.get("url") and url:
+                            row["url"] = url
+                        try:
+                            await db.upsert_verified_reference({
+                                "doi": row.get("doi"),
+                                "arxiv_id": row.get("arxiv_id"),
+                                "title": row.get("title"),
+                                "year": row.get("year"),
+                                "status": "verified",
+                                "verified_url": url,
+                                "matched_db": (verified_data.get("source") if isinstance(verified_data, dict) else None),
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        # No record found — likely fake or just missing.
+                        row["verified_status"] = "unverified"
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Active verification failed for cites/refs candidate: %s", e)
+                    row["verified_status"] = "unknown"
+
+    await asyncio.gather(*[_verify_one(c) for c in candidates])
 
 
 async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo):

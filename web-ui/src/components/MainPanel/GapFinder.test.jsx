@@ -67,3 +67,30 @@ describe('GapFinder — R33 styling + R52 fixed-header collapse', () => {
     expect(screen.getByText(/work your references cite/i)).toBeInTheDocument()
   })
 })
+
+describe('GapFinder — R39 friendly 404', () => {
+  it('shows the "update the app" message on an HTTP 404 instead of raw HTML', async () => {
+    // Simulate an older desktop build whose /gaps route 404s (SPA catch-all).
+    const err = new Error('Request failed with status code 404')
+    err.response = { status: 404, data: '<!doctype html><html>…SPA index…</html>' }
+    getCheckGaps.mockRejectedValue(err)
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+
+    await screen.findByText('Gap finder is unavailable — please update the app')
+    // The raw proxy HTML must never reach the user.
+    expect(screen.queryByText(/SPA index/)).toBeNull()
+  })
+
+  it('still surfaces a detail message for non-404 errors', async () => {
+    const err = new Error('boom')
+    err.response = { status: 500, data: { detail: 'Gap analysis failed: upstream 503' } }
+    getCheckGaps.mockRejectedValue(err)
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+
+    await screen.findByText('Gap analysis failed: upstream 503')
+    // Not masked by the 404 message.
+    expect(screen.queryByText(/please update the app/)).toBeNull()
+  })
+})

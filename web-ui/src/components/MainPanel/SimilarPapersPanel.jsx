@@ -342,6 +342,13 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
           const url = c.semantic_scholar_url
           const arxivUrl = c.arxiv_id ? `https://arxiv.org/abs/${c.arxiv_id}` : null
           const doiUrl = c.doi ? `https://doi.org/${c.doi}` : null
+          // R20 — per-row provenance: a link to the real source record the
+          // candidate was resolved from (OpenAlex Work or its DOI). Mirrors
+          // GapFinder's "✓ OpenAlex ↗". Real data only — no provenance link
+          // is rendered when neither identifier is present.
+          const openalexUrl = c.openalex_id ? `https://openalex.org/${c.openalex_id}` : null
+          const provenanceHref = openalexUrl || doiUrl
+          const provenanceLabel = openalexUrl ? '✓ OpenAlex ↗' : 'DOI ↗'
           // Cites/refs rows have no S2 paperId, so fall back to a stable
           // composite key (openalex id / doi / index) to avoid React key
           // collisions on the null paperId. (The shared-refs expand toggle
@@ -381,6 +388,35 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                         {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
                       </span>
                     ))}
+                    {/* R20 — provenance link to the real resolved source
+                        record (OpenAlex Work, falling back to DOI). Lets the
+                        user verify the candidate isn't AI-generated. Real
+                        data only: rendered only when an identifier exists. */}
+                    {provenanceHref && (
+                      <a
+                        href={provenanceHref}
+                        onClick={(e) => {
+                          if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+                            e.preventDefault()
+                            openExternal(provenanceHref)
+                          }
+                        }}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-1.5 py-0.5 rounded underline"
+                        style={{
+                          color: openalexUrl ? 'var(--color-success, #16a34a)' : 'var(--color-accent, #3b82f6)',
+                          fontSize: '0.7rem',
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-bg-primary)',
+                        }}
+                        title={openalexUrl
+                          ? 'Verified provenance: a real OpenAlex record (not AI-generated)'
+                          : 'Provenance: resolve this candidate via its DOI'}
+                      >
+                        {provenanceLabel}
+                      </a>
+                    )}
                     {/* Relation chip: in References / Citations / Both mode each
                         candidate is tagged by HOW it overlaps the source —
                         sharing references (Shared refs) or sharing citations
@@ -525,7 +561,12 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                   {/* Expanded shared-works panel. Surfaces the ACTUAL shared
                       works behind a candidate's overlap count — restoring the
                       "which papers/citations are shared" view for every mode.
-                      Three real-data sources, in priority order:
+                      Real-data sources, in priority order:
+                        0. shared_works (R08) — the relation path's hydrated
+                           real OpenAlex records for the works actually shared
+                           with the source (shared references for 'reference'
+                           rows, co-citing works for 'citation' rows), each
+                           linked to its OpenAlex/DOI page.
                         1. shared_refs_titles — the similar/References path's
                            per-candidate list of which of THIS paper's
                            references the candidate also cites.
@@ -534,6 +575,45 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                            overlap count and explain the relationship without
                            fabricating titles the backend didn't return.
                       Never invents titles — when only a count is known, we say so. */}
+                  {expandedShared === rowKey && Array.isArray(c.shared_works) && c.shared_works.length > 0 && (
+                    <div className="mt-2 p-2 rounded text-xs"
+                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      <div className="font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.relation === 'citation' ? 'Co-citing works' : 'Shared references'} ({c.shared_overlap_count || c.shared_with_source || c.shared_works.length}):
+                      </div>
+                      <ul className="space-y-0.5 list-disc pl-4" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.shared_works.map((w, i) => {
+                          const wHref = w.openalex_id ? `https://openalex.org/${w.openalex_id}` : (w.doi ? `https://doi.org/${w.doi}` : (w.url || null))
+                          return (
+                            <li key={w.openalex_id || w.doi || i} className="leading-snug">
+                              <span>{w.title || '(untitled work)'}</span>
+                              {w.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {w.year}</span> : null}
+                              {wHref && (
+                                <a
+                                  href={wHref}
+                                  onClick={(e) => {
+                                    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+                                      e.preventDefault()
+                                      openExternal(wHref)
+                                    }
+                                  }}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-1 underline"
+                                  style={{ color: 'var(--color-accent, #3b82f6)' }}
+                                >↗</a>
+                              )}
+                            </li>
+                          )
+                        })}
+                        {(c.shared_overlap_count || 0) > c.shared_works.length && (
+                          <li style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            …and {c.shared_overlap_count - c.shared_works.length} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
                   {expandedShared === rowKey && Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0 && (
                     <div className="mt-2 p-2 rounded text-xs"
                       style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
@@ -554,6 +634,7 @@ export default function SimilarPapersPanel({ references, paperTitle, paperSource
                   )}
                   {expandedShared === rowKey
                     && (c.relation === 'reference' || c.relation === 'citation')
+                    && !(Array.isArray(c.shared_works) && c.shared_works.length > 0)
                     && !(Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0) && (
                     <div className="mt-2 p-2 rounded text-xs"
                       style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
