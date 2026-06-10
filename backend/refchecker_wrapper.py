@@ -1340,7 +1340,8 @@ class ProgressRefChecker:
             _actual = err.get('actual_value')
             if not _actual:
                 _actual = (err.get('ref_year_correct') or err.get('ref_venue_correct')
-                           or err.get('ref_title_correct') or err.get('ref_authors_correct'))
+                           or err.get('ref_title_correct') or err.get('ref_authors_correct')
+                           or err.get('ref_doi_correct'))
             _san = {
                 # Preserve original error_type for suggestion_type mapping;
                 # use is_suggestion flag for categorization instead.
@@ -1355,7 +1356,7 @@ class ProgressRefChecker:
             # Carry the typed correction fields through so the FE corrected-bibtex
             # builder can recover year/venue/title/authors even when the checker
             # only set the typed field (belt-and-suspenders with the backfill).
-            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct"):
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct", "ref_doi_correct"):
                 if err.get(_k):
                     _san[_k] = err.get(_k)
             sanitized.append(_san)
@@ -1507,7 +1508,7 @@ class ProgressRefChecker:
             }
             # Propagate typed correction fields so the FE corrected-bibtex builder
             # always has year/venue/title/authors to insert.
-            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct"):
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct", "ref_doi_correct"):
                 if err.get(_k):
                     err_obj[_k] = err.get(_k)
             # Check is_suggestion flag (set when original had info_type)

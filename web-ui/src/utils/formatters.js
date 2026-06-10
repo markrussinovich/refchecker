@@ -605,25 +605,42 @@ function getCorrectedReferenceData(ref) {
   const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
   const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
   const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
+
+  // Check errors and warnings for 'actual' values
+  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
+
+  // A doi-type error/warning that names a DOI is the verifier's correction
+  // and MUST win over whatever (possibly wrong) DOI the citation carried.
+  // Seed corrected.doi from such an issue when present; only fall back to the
+  // cited ref.doi / authoritative DOI URL when no doi-type issue named a value.
+  const _doiIssueValue = (() => {
+    for (const i of allIssues) {
+      const t = (i?.error_type || i?.warning_type || '').toLowerCase()
+      if (t !== 'doi') continue
+      const v = parseErrorDetailsForMarkdown(i?.error_details || i?.warning_details)?.actual
+        || i?.actual_value || i?.ref_doi_correct
+      if (v) return _normalizeDoi(v)
+    }
+    return null
+  })()
+
   const corrected = {
     title: ref.title,
     authors: ref.authors,
     year: displayReferenceValue(ref.year),
     venue: displayReferenceValue(ref.venue),
-    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    doi: _doiIssueValue
+      || ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
     arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
     citedUrl: ref.cited_url || null,
     url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
   }
   
-  // Check errors and warnings for 'actual' values
-  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
-  
   for (const issue of allIssues) {
-    const errorType = (issue.error_type || '').toLowerCase()
-    const parsed = parseErrorDetailsForMarkdown(issue.error_details)
+    const errorType = (issue.error_type || issue.warning_type || '').toLowerCase()
+    const parsed = parseErrorDetailsForMarkdown(issue.error_details || issue.warning_details)
     // Prefer the parsed/explicit actual_value; fall back to the typed correction
-    // fields the backend carries for "missing" issues (year/venue/title/authors),
+    // fields the backend carries for "missing" issues (year/venue/title/authors/doi),
     // so the corrected bibtex includes exactly what the warning named.
     const typedByType = {
       title: issue.ref_title_correct,
@@ -631,6 +648,8 @@ function getCorrectedReferenceData(ref) {
       authors: issue.ref_authors_correct,
       year: issue.ref_year_correct,
       venue: issue.ref_venue_correct,
+      doi: issue.ref_doi_correct,
+      arxiv_id: issue.ref_arxiv_id_correct,
     }
     const actualValue = parsed?.actual || issue.actual_value || typedByType[errorType]
 
@@ -656,6 +675,14 @@ function getCorrectedReferenceData(ref) {
           break
         case 'venue':
           corrected.venue = displayReferenceValue(actualValue)
+          break
+        case 'doi':
+          // Verifier-named DOI wins over the cited one (normalize off any
+          // https://doi.org/ prefix so bibtex emits the bare identifier).
+          corrected.doi = _normalizeDoi(actualValue)
+          break
+        case 'arxiv_id':
+          corrected.arxivId = String(actualValue).replace(/^arxiv:/i, '').trim()
           break
       }
     }
@@ -1074,10 +1101,15 @@ export function exportReferenceAsBibtex(ref, index = 0) {
       lines.push(`  eprint = {${arxivMatch[1]}},`)
       lines.push(`  archiveprefix = {arXiv},`)
     }
+  } else if (corrected.doi) {
+    // Prefer the corrected/verified DOI (a doi-type error/warning wins over the
+    // cited ref.doi via getCorrectedReferenceData). corrected.doi is already
+    // normalized to the bare identifier (no https://doi.org/ prefix).
+    lines.push(`  doi = {${corrected.doi}},`)
   } else {
     const doiUrl = ref.authoritative_urls?.find(u => u.type === 'doi')
     const arxivUrl = ref.authoritative_urls?.find(u => u.type === 'arxiv')
-    
+
     if (doiUrl) {
       // Extract DOI from URL
       const doiMatch = doiUrl.url.match(/doi\.org\/(.+)/)

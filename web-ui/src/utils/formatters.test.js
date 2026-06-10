@@ -148,14 +148,19 @@ describe('formatters', () => {
   })
 
   describe('exportReferenceAsBibtex — corrected values', () => {
-    it('includes year + venue named by "missing" warnings via typed correction fields', () => {
-      // Regression for #53: warnings say year/venue are missing and carry only
-      // the typed ref_*_correct fields (no actual_value). The corrected bibtex
-      // must still include exactly those values, not just the DOI.
+    it('includes year + venue + DOI named by errors/warnings (no authoritative_urls)', () => {
+      // Regression for #53 (R06/R07): warnings name the missing year/venue via
+      // typed correction fields, and a doi-type error names the verified DOI.
+      // The corrected @article{awcomparison} bibtex must carry year=2018, the
+      // venue, AND doi=10.5812/ijem.12104 — with NO ref.doi and NO
+      // authoritative_urls to fall back on. The verifier-named DOI wins.
       const ref = {
         title: 'Comparison of osteoporosis pharmacotherapy fracture rates',
         authors: ['Reynolds AW', 'Liu G', 'Kocis PT'],
-        doi: '10.5812/ijem.12104',
+        // ref.doi intentionally absent — the DOI must come from the error.
+        errors: [
+          { error_type: 'doi', actual_value: '10.5812/ijem.12104' },
+        ],
         warnings: [
           { error_type: 'year', error_details: "Year missing: should include '2018'", ref_year_correct: '2018' },
           { error_type: 'venue', error_details: "Venue missing: should include 'International Journal of Endocrinology and Metabolism'", ref_venue_correct: 'International Journal of Endocrinology and Metabolism' },
@@ -164,6 +169,40 @@ describe('formatters', () => {
       const bibtex = exportReferenceAsBibtex(ref, 0)
       expect(bibtex).toContain('2018')
       expect(bibtex).toContain('International Journal of Endocrinology and Metabolism')
+      expect(bibtex).toContain('doi = {10.5812/ijem.12104}')
+    })
+
+    it('R06: a verifier-named DOI wins over the (wrong) cited ref.doi', () => {
+      const ref = {
+        title: 'Some paper',
+        authors: ['Doe J'],
+        doi: '10.0000/wrong.cited',
+        errors: [{ error_type: 'doi', actual_value: 'https://doi.org/10.1234/correct.5678' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      // Emitted DOI is the verified one, normalized off the https://doi.org/ prefix.
+      expect(bibtex).toContain('doi = {10.1234/correct.5678}')
+      expect(bibtex).not.toContain('10.0000/wrong.cited')
+    })
+
+    it('R06: DOI from ref_doi_correct (no actual_value) is emitted in bibtex', () => {
+      const ref = {
+        title: 'Typed-correction paper',
+        authors: ['Roe J'],
+        warnings: [{ error_type: 'doi', ref_doi_correct: '10.9999/typed.doi' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('doi = {10.9999/typed.doi}')
+    })
+
+    it('R06: falls back to authoritative_urls DOI when no doi-type issue exists', () => {
+      const ref = {
+        title: 'Fallback paper',
+        authors: ['Poe J'],
+        authoritative_urls: [{ type: 'doi', url: 'https://doi.org/10.5555/from.url' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('doi = {10.5555/from.url}')
     })
 
     it('still honours explicit actual_value when present', () => {
