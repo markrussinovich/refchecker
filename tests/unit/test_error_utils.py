@@ -5,6 +5,7 @@ Unit tests for error utilities module.
 import pytest
 import sys
 import os
+from unittest.mock import patch
 
 # Add the src directory to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
@@ -88,10 +89,24 @@ class TestDoiError:
     """Test DOI error creation."""
     
     def test_create_doi_error(self):
-        """Test creating DOI error dictionary."""
-        # Test with different DOIs
-        error = create_doi_error("10.1000/invalid", "10.1000/correct")
-        
+        """Test creating DOI error dictionary.
+
+        ``create_doi_error`` performs a live ``validate_doi_resolves`` network
+        check to decide error-vs-warning; that call is mocked so this unit test
+        is deterministic (an un-resolvable cited DOI -> hard error). Without the
+        mock the test is network-flaky: a timed-out HEAD request makes
+        ``validate_doi_resolves`` fall back to ``True`` and emit a warning dict
+        (no ``error_type`` key), which previously caused a ``KeyError`` under
+        full-suite network load.
+        """
+        # Cited DOI does not resolve -> the error branch is exercised.
+        with patch(
+            'refchecker.utils.doi_utils.validate_doi_resolves',
+            return_value=False,
+        ):
+            # Test with different DOIs
+            error = create_doi_error("10.1000/invalid", "10.1000/correct")
+
         assert error['error_type'] == 'doi'
         assert "DOI mismatch" in error['error_details']
         assert error['ref_doi_correct'] == "10.1000/correct"

@@ -95,6 +95,14 @@ export default function useReferenceActions() {
       await reloadCheck()
       return addedId
     } catch (e) {
+      // R17 (G3) — the backend rejects a duplicate with 409 and a friendly
+      // top-level envelope ({duplicate, existing_index, message}). Surface
+      // "already reference [N]" instead of a generic "Add failed".
+      const r = e?.response
+      if (r?.status === 409 && r?.data?.duplicate) {
+        alert(r.data.message || `Already reference [${r.data.existing_index}] in this check.`)
+        return null
+      }
       alert(e?.response?.data?.detail || e?.message || 'Add failed')
       return null
     } finally {

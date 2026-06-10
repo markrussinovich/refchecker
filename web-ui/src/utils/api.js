@@ -255,6 +255,13 @@ export const postArticleChat = (checkId, messages, config = {}) =>
 export const getCitationRenumberPreview = (checkId, insertAt) =>
   api.get(`/check/${checkId}/citation-renumber-preview`, { params: insertAt != null ? { insert_at: insertAt } : {}, timeout: 60000 })
 
+// R18 (G1) — the full reference list re-serialized in a citation style with new
+// contiguous numbers (1..N) after an Add/renumber. Backs the "Download new
+// reference list" button. `renumber=1` numbers by list position; a chosen
+// `style` selects the citation format (defaults to plaintext server-side).
+export const getCorrectedReferenceList = (checkId, { style = 'plaintext', renumber = true } = {}) =>
+  api.get(`/check/${checkId}/corrected-reference-list`, { params: { style, renumber: renumber ? 1 : 0 }, timeout: 60000 })
+
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>
   api.post(`/history/${checkId}/references`, payload)
