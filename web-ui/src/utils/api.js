@@ -256,6 +256,20 @@ export const getArticleSummary = (checkId, config = {}) =>
   api.post(`/check/${checkId}/summarize`, config, { timeout: 120000 })
 export const postArticleChat = (checkId, messages, config = {}) =>
   api.post(`/check/${checkId}/chat`, { ...config, messages }, { timeout: 120000 })
+// R43 — per-reference chat grounded in the reference's OWN fetched full text.
+// Resolves the cited reference's open-access PDF (arXiv → OpenAlex
+// best_oa_location / Unpaywall), downloads + extracts it, and returns
+// { source:'pdf', grounding:<full_text> } when real text was fetched, else
+// { source:'tldr', grounding:null } so the UI keeps the TL;DR-only disclaimer.
+// HONESTY: only real fetched text — never fabricated.
+export const postReferenceFulltext = (checkId, reference) =>
+  api.post(`/check/${checkId}/reference-fulltext`, {
+    doi: reference?.doi || null,
+    verified_doi: reference?.verified_doi || null,
+    arxiv_id: reference?.arxiv_id || null,
+    title: reference?.title || null,
+    enrichment: reference?.enrichment || null,
+  }, { timeout: 90000 })
 // Read-only preview of how inline numeric markers would renumber if a new
 // reference were inserted at the given 1-based printed position (omit to append).
 // Abstains (empty shifts) whenever the inline-citation checker abstains.

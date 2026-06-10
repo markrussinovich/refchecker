@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // and we can assert how it reacts to the backend's honest `source` field.
 const getArticleSummary = vi.hoisted(() => vi.fn())
 const postArticleChat = vi.hoisted(() => vi.fn())
-vi.mock('../../utils/api', () => ({ getArticleSummary, postArticleChat }))
+const postReferenceFulltext = vi.hoisted(() => vi.fn())
+vi.mock('../../utils/api', () => ({ getArticleSummary, postArticleChat, postReferenceFulltext }))
 
 // Config store: `configs` drives whether a Chat & Summarize model is
 // considered configured; `getSelectedChatConfig` resolves the chosen config.
@@ -27,6 +28,10 @@ const CHECK_ID = 42
 beforeEach(() => {
   getArticleSummary.mockReset()
   postArticleChat.mockReset()
+  postReferenceFulltext.mockReset()
+  // Default: reference full-text retrieval misses (TL;DR fallback) unless a
+  // test overrides it. A never-resolving promise keeps the "Fetching…" state.
+  postReferenceFulltext.mockResolvedValue({ data: { source: 'tldr', grounding: null } })
   openSettings.mockReset()
   configState.configs = []
   configState.getSelectedChatConfig = vi.fn(() => null)
@@ -169,5 +174,76 @@ describe('ArticleAssistant — segmented tabs + Send stability (R33/R52)', () =>
     expect(close.className).toContain('rc-iconbtn')
     expect(close.className).not.toContain('rc-iconbtn-sm')
     expect(close.className).toContain('rc-control')
+  })
+})
+
+// R43 — per-reference chat grounded in the reference's OWN fetched full text.
+// Opening the per-ref assistant triggers a retrieval ("Fetching full text…");
+// on an OA hit the banner switches to "grounded in the full text"; on a miss
+// the existing TL;DR-only disclaimer is kept VERBATIM (no fabrication).
+describe('ArticleAssistant — per-reference full-text grounding (R43)', () => {
+  // A reference with a real TL;DR claim so the per-ref button renders (it omits
+  // entirely when there is nothing real to ground on).
+  const REF = { title: 'Attention Is All You Need', arxiv_id: '1706.03762', enrichment: { tldr: 'Transformers via self-attention.' } }
+
+  beforeEach(() => {
+    configState.configs = [{ id: 1, provider: 'openai', model: 'gpt-4o' }]
+    configState.getSelectedChatConfig = vi.fn(() => ({ id: 1 }))
+  })
+
+  function openRef() {
+    render(<ArticleAssistant checkId={CHECK_ID} reference={REF} />)
+    fireEvent.click(screen.getByRole('button', { name: /Chat about this reference/i }))
+  }
+
+  it('shows "Fetching full text…" while retrieval is in flight', () => {
+    // Never-resolving promise so the in-flight state persists for the assertion.
+    postReferenceFulltext.mockReturnValue(new Promise(() => {}))
+    openRef()
+    expect(postReferenceFulltext).toHaveBeenCalledWith(CHECK_ID, REF)
+    expect(screen.getByText(/Fetching full text…/i)).toBeTruthy()
+  })
+
+  it('switches to the "grounded in the full text" banner on an OA hit', async () => {
+    postReferenceFulltext.mockResolvedValue({ data: { source: 'pdf', grounding: 'FULL REAL TEXT'.repeat(50) } })
+    openRef()
+    await screen.findByText(/Grounded in the full text of this reference/i)
+    // The TL;DR-only disclaimer is NOT shown when we have the real full text.
+    expect(screen.queryByText(/full text isn’t available here/i)).toBeNull()
+  })
+
+  it('keeps the TL;DR-only disclaimer VERBATIM on an OA miss (no fabrication)', async () => {
+    postReferenceFulltext.mockResolvedValue({ data: { source: 'tldr', grounding: null } })
+    openRef()
+    await waitFor(() => expect(postReferenceFulltext).toHaveBeenCalled())
+    await screen.findByText(/full text isn’t available here/i)
+    // Falls back to the reference's real TL;DR claim wording, not the full-text banner.
+    expect(screen.getByText(/one-line claim \(TL;DR\)/i)).toBeTruthy()
+    expect(screen.queryByText(/Grounded in the full text of this reference/i)).toBeNull()
+  })
+
+  it('keeps the TL;DR disclaimer when retrieval errors (soft-fail, no fabrication)', async () => {
+    postReferenceFulltext.mockRejectedValue(new Error('network down'))
+    openRef()
+    await waitFor(() => expect(postReferenceFulltext).toHaveBeenCalled())
+    await screen.findByText(/full text isn’t available here/i)
+    expect(screen.queryByText(/Grounded in the full text of this reference/i)).toBeNull()
+  })
+
+  it('grounds the chat in the fetched full text after an OA hit', async () => {
+    const FULL = 'The model uses 8 attention heads and was trained on WMT 2014.'.repeat(40)
+    postReferenceFulltext.mockResolvedValue({ data: { source: 'pdf', grounding: FULL } })
+    postArticleChat.mockResolvedValue({ data: { source: 'pdf', answer: 'It uses 8 heads.' } })
+    openRef()
+    await screen.findByText(/Grounded in the full text of this reference/i)
+    fireEvent.click(screen.getByRole('tab', { name: /^Chat$/i }))
+    fireEvent.change(screen.getByPlaceholderText(/Ask about this reference/i), { target: { value: 'How many heads?' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Send$/i }))
+    await waitFor(() => expect(postArticleChat).toHaveBeenCalled())
+    // The wired chat messages carry the fetched FULL TEXT as the grounding turn.
+    const sentMessages = postArticleChat.mock.calls[0][1]
+    const joined = sentMessages.map((m) => m.content).join('\n')
+    expect(joined).toContain('full text of the reference')
+    expect(joined).toContain(FULL)
   })
 })

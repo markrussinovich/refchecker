@@ -2692,6 +2692,67 @@ async def chat_article(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --------------------------------------------------------------------------- #
+# R43: per-reference chat grounded in the reference's own fetched full text.   #
+# --------------------------------------------------------------------------- #
+# When a user opens Chat & Summarize for a CITED reference (not the host
+# paper), we try to fetch that reference's open-access PDF (arXiv → OpenAlex
+# best_oa_location / Unpaywall) and extract its real body text so chat can
+# answer from the document. HONESTY: only real fetched text is returned; on any
+# miss the FE keeps the existing TL;DR-only disclaimer verbatim — nothing is
+# fabricated. Retrieval is cached per identity (DOI/arXiv/title), soft-fails,
+# and is concurrency-bounded inside the retrieval module.
+
+
+class _ReferenceFulltextRequest(BaseModel):
+    # The minimal real identity of the cited reference, as the FE already holds
+    # it on each ReferenceCard: doi / arxiv_id / title (+ optional enrichment so
+    # an already-resolved oa_pdf_url can short-circuit the network).
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    title: Optional[str] = None
+    verified_doi: Optional[str] = None
+    enrichment: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/check/{check_id}/reference-fulltext")
+async def get_reference_fulltext(
+    check_id: int,
+    req: _ReferenceFulltextRequest = Body(default=_ReferenceFulltextRequest()),
+    current_user: UserInfo = Depends(require_user),
+):
+    """Retrieve a cited reference's REAL open-access full text for grounded chat.
+
+    Returns ``{source: 'pdf', grounding: <full_text>}`` when an OA PDF was
+    fetched + extracted, else ``{source: 'tldr', grounding: None}`` so the FE
+    keeps the existing TL;DR-only disclaimer. Never fabricates: on any miss it
+    returns the TL;DR fallback. The check ownership gate is reused so this
+    endpoint can't be used to fetch arbitrary PDFs anonymously.
+    """
+    try:
+        await _get_owned_check_or_404(check_id, current_user)
+        from refchecker.utils.reference_fulltext import get_reference_fulltext as _get_ft
+        reference = {
+            "doi": req.doi,
+            "verified_doi": req.verified_doi,
+            "arxiv_id": req.arxiv_id,
+            "title": req.title,
+            "enrichment": req.enrichment or {},
+        }
+        text, source = await asyncio.to_thread(_get_ft, reference)
+        if source == "pdf" and text:
+            return {"source": "pdf", "grounding": text}
+        # Honest fallback — no full text resolved; FE keeps the TL;DR disclaimer.
+        return {"source": "tldr", "grounding": None}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving reference full text for {check_id}: {e}", exc_info=True)
+        # Soft-fail to the TL;DR fallback rather than surfacing a 500 — the chat
+        # still works grounded in the reference metadata.
+        return {"source": "tldr", "grounding": None}
+
+
 @app.get("/api/check/{check_id}/citation-renumber-preview")
 async def get_citation_renumber_preview(
     check_id: int,

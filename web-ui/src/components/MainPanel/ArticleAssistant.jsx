@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { getArticleSummary, postArticleChat } from '../../utils/api'
+import { useEffect, useState } from 'react'
+import { getArticleSummary, postArticleChat, postReferenceFulltext } from '../../utils/api'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import Button from '../common/Button'
@@ -146,12 +146,33 @@ function SourceBanner({ source }) {
   )
 }
 
-// Honest banner for per-reference mode. The grounded backend grounds on the HOST
-// paper's document, not on each reference's own full text — which we don't have.
-// So we ground on whatever real metadata we DO hold for the reference (its
-// abstract, else its TL;DR claim, else just its title) and say so plainly, with
-// no fabrication. `grounding` ∈ 'abstract' | 'claim' | 'title'.
-function ReferenceGroundingBanner({ grounding }) {
+// Honest banner for per-reference mode (R43).
+//
+// We first try to fetch the reference's OWN open-access full text (arXiv →
+// OpenAlex best_oa_location / Unpaywall). Three honest states:
+//   • fetching  — retrieval is in flight ("Fetching full text…").
+//   • 'pdf'     — real full text was fetched → "grounded in the full text".
+//   • else      — no OA PDF resolved → fall back to the reference's real
+//                 metadata (abstract → TL;DR claim → title) and keep the
+//                 existing TL;DR-only disclaimer VERBATIM (no fabrication).
+function ReferenceGroundingBanner({ grounding, fetching, hasFullText }) {
+  if (fetching) {
+    return (
+      <div className="text-xs mt-2 mb-2 rounded-md px-2.5 py-1.5"
+        style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+        Fetching full text…
+      </div>
+    )
+  }
+  if (hasFullText) {
+    return (
+      <div className="text-xs mt-2 mb-2 rounded-md px-2.5 py-1.5"
+        style={{ color: 'var(--color-success)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-success)' }}>
+        Grounded in the full text of this reference — answers come only from the fetched document.
+        The assistant won’t invent details beyond what it says.
+      </div>
+    )
+  }
   const what = grounding === 'abstract'
     ? 'this reference’s abstract'
     : grounding === 'claim'
@@ -192,6 +213,12 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   const refContext = reference ? buildReferenceContext(reference) : null
   const isRefMode = !!reference
 
+  // R43 — per-reference full-text retrieval. When chat opens for a reference,
+  // we try to fetch its OWN open-access PDF and ground on the real document.
+  // States: { fetching, fullText|null }. fullText is REAL fetched text only;
+  // on a miss it stays null and the existing TL;DR disclaimer is kept verbatim.
+  const [refFullText, setRefFullText] = useState({ fetching: false, fullText: null, done: false })
+
   // Summarize state
   const [sum, setSum] = useState({ loading: false, data: null, error: null })
   // Chat state
@@ -199,6 +226,36 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   const [input, setInput] = useState('')
   const [chatSource, setChatSource] = useState(null)
   const [chat, setChat] = useState({ loading: false, error: null })
+
+  // R43 — trigger the reference full-text fetch the first time the panel opens
+  // in reference mode. Soft-fails to the TL;DR fallback on any error; runs once
+  // per opened reference. Declared before the early returns to honor the Rules
+  // of Hooks (the effect body no-ops in non-ref / closed states).
+  const refIdentityKey = isRefMode
+    ? (reference?.arxiv_id || reference?.doi || reference?.verified_doi || reference?.title || '')
+    : ''
+  useEffect(() => {
+    if (!open || !isRefMode || !checkId || checkId <= 0) return
+    if (refFullText.done || refFullText.fetching) return
+    let cancelled = false
+    setRefFullText({ fetching: true, fullText: null, done: false })
+    postReferenceFulltext(checkId, reference)
+      .then((res) => {
+        if (cancelled) return
+        const d = res?.data || {}
+        const ft = d.source === 'pdf' && typeof d.grounding === 'string' && d.grounding.trim()
+          ? d.grounding
+          : null
+        setRefFullText({ fetching: false, fullText: ft, done: true })
+      })
+      .catch(() => {
+        // Honest fallback: keep the TL;DR disclaimer verbatim, never fabricate.
+        if (!cancelled) setRefFullText({ fetching: false, fullText: null, done: true })
+      })
+    return () => { cancelled = true }
+    // refIdentityKey changes only when the reference itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isRefMode, checkId, refIdentityKey])
 
   if (!checkId || checkId <= 0) return null
   // Per-reference mode needs at least one real, citable scrap of the reference's
@@ -211,12 +268,31 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
     return c ? { llm_config_id: c.id } : {}
   }
 
+  // Whether we have the reference's REAL fetched full text to ground on (R43).
+  const hasRefFullText = isRefMode && !!refFullText.fullText
+  // The effective per-reference grounding source for the badge/summary:
+  // 'pdf' when full text was fetched, else the metadata grounding we hold.
+  const refGroundingSource = hasRefFullText
+    ? 'pdf'
+    : (refContext?.grounding === 'abstract' ? 'abstract' : 'pdf')
+
   // In reference mode, lead the conversation with the reference's own real
   // context as a user turn so the grounded assistant has the reference text to
-  // work from (the grounded backend otherwise grounds on the host paper). No
-  // fabrication: only fields we actually hold are included.
+  // work from (the grounded backend otherwise grounds on the host paper). When
+  // we fetched the reference's real full text (R43), use THAT as the grounding;
+  // otherwise fall back to the reference's real metadata. No fabrication: only
+  // text we actually hold/fetched is included.
   const groundingPreamble = () => {
     if (!isRefMode || !refContext) return []
+    if (hasRefFullText) {
+      return [{
+        role: 'user',
+        content:
+          'Here is the full text of the reference I want to ask about. Use ONLY ' +
+          'this text; if a detail is not present here, say it is not stated ' +
+          'rather than guessing.\n\n' + refFullText.fullText,
+      }]
+    }
     return [{
       role: 'user',
       content:
@@ -242,7 +318,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
         }]
         const res = await postArticleChat(checkId, msgs, configPayload())
         const d = res.data || {}
-        setSum({ loading: false, data: { summary: d.answer || '', source: refContext.grounding === 'abstract' ? 'abstract' : 'pdf' }, error: null })
+        setSum({ loading: false, data: { summary: d.answer || '', source: refGroundingSource }, error: null })
         return
       }
       const res = await getArticleSummary(checkId, configPayload())
@@ -318,7 +394,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
 
           {tab === 'summarize' ? (
             <div>
-              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} />}
+              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} fetching={refFullText.fetching} hasFullText={hasRefFullText} />}
               {!hasChatModel && <NoModelEmptyState verb="summarize" />}
               {hasChatModel && !summary && (
                 <Button size="pill" variant="outline" onClick={runSummary} loading={sum.loading}>
@@ -352,7 +428,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
             </div>
           ) : (
             <div>
-              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} />}
+              {isRefMode && hasChatModel && <ReferenceGroundingBanner grounding={refContext.grounding} fetching={refFullText.fetching} hasFullText={hasRefFullText} />}
               {!isRefMode && chatSource && (
                 <div className="flex items-center gap-2 mb-1.5">
                   <SourceBadge source={chatSource} />
