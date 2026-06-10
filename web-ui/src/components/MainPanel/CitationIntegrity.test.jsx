@@ -74,3 +74,41 @@ describe('CitationIntegrity — R33 unified styling + R52 click-state stability'
     expect(geom(mainPill())).toEqual(beforeGeom) // caret toggle never reflows the main pill
   })
 })
+
+describe('CitationIntegrity — R15 alphabetic-key scheme', () => {
+  it('renders the alpha-key scheme label and alphabetical ordering for a clean alpha-key result', async () => {
+    getCitationIntegrity.mockResolvedValue({ data: {
+      issues: [], badge: { label: 'consistent', color: 'var(--color-success)' }, abstained: false,
+      scheme: 'alpha-key', counts: { total_markers: 8 },
+      ordering: { convention: 'alphabetical', consistent: true },
+    } })
+    render(<CitationIntegrity checkId={CHECK_ID} />)
+    fireEvent.click(mainPill())
+    await waitFor(() => expect(screen.getByText('scheme: alpha-key')).toBeTruthy())
+    expect(screen.getByText('order: alphabetical ✓')).toBeTruthy()
+  })
+
+  it('shows the alpha-key-specific ABSTAIN message (not the generic one) when the refs are not derivable', async () => {
+    getCitationIntegrity.mockResolvedValue({ data: {
+      issues: [], badge: { label: 'n/a', color: '#6b7280' }, abstained: true,
+      scheme: 'alpha-key', has_text: true,
+      abstain_reason: 'alpha-key reference list not derivable',
+    } })
+    render(<CitationIntegrity checkId={CHECK_ID} />)
+    fireEvent.click(mainPill())
+    await waitFor(() => expect(
+      screen.getByText(/Alphabetic citation keys detected, but the reference list lacks the author\/year data/),
+    ).toBeTruthy())
+  })
+
+  it('renders the reverse-appearance ordering label honestly', async () => {
+    getCitationIntegrity.mockResolvedValue({ data: {
+      issues: [], badge: { label: 'consistent', color: 'var(--color-success)' }, abstained: false,
+      scheme: 'numeric', counts: { total_markers: 5 },
+      ordering: { convention: 'reverse-appearance', consistent: true },
+    } })
+    render(<CitationIntegrity checkId={CHECK_ID} />)
+    fireEvent.click(mainPill())
+    await waitFor(() => expect(screen.getByText('order: reverse-appearance ✓')).toBeTruthy())
+  })
+})

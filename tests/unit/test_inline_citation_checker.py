@@ -547,3 +547,187 @@ def test_author_year_unicode_surnames_abstain():
     rep = inline_citation_report(body, refs)
     assert rep["scheme"] == "author-year"
     assert rep["abstained"] is True
+
+
+# --------------------------------------------------------------------------- #
+# R15 — Alphabetic-key scheme ([Knu97]/[AHU74]/[ABC+20]) + [a] + reverse        #
+#       (ABSTAIN beats a wrong badge)                                           #
+# --------------------------------------------------------------------------- #
+
+def _alpha_refs():
+    # A reference list whose alpha keys are derivable (single + multi-author).
+    return [
+        {"index": 1, "title": "The Art of Computer Programming",
+         "authors": ["Knuth, D"], "year": 1997},                       # -> Knu97
+        {"index": 2, "title": "Compilers: Principles",
+         "authors": ["Aho, A", "Hopcroft, J", "Ullman, J"], "year": 1974},  # -> AHU74
+        {"index": 3, "title": "Introduction to Algorithms",
+         "authors": ["Cormen, T"], "year": 2009},                      # -> Cor09
+        {"index": 4, "title": "Concrete Mathematics",
+         "authors": ["Graham, R"], "year": 1994},                      # -> Gra94
+    ]
+
+
+def test_alpha_key_scheme_detected_and_clean():
+    # A well-formed alpha-key paper is DETECTED as 'alpha-key', ordering is
+    # 'alphabetical' (ascending check skipped), and a fully-cited list is clean.
+    refs = _alpha_refs()
+    body = (
+        "The seminal text [Knu97] introduced literate programming. Classic "
+        "compiler theory [AHU74] remains foundational. Modern treatments [Cor09] "
+        "build on [Knu97] and [AHU74]. Discrete foundations [Gra94] complete the "
+        "picture, and [Cor09] cites [Gra94] extensively in the analysis chapters."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["scheme"] == "alpha-key"
+    assert rep["issues"] == []
+    assert rep["badge"]["label"] == "consistent"
+    assert rep["ordering"]["convention"] == "alphabetical"
+    # No spurious out-of-order on alpha schemes.
+    assert all(i["type"] != "out_of_order" for i in rep["issues"])
+
+
+def test_alpha_key_et_al_plus_form_detected():
+    # The '[ABC+20]' (et-al '+') form is recognised as an alpha-key marker.
+    from backend.inline_citation_checker import _count_alpha_key
+    assert _count_alpha_key("see [ABC+20] and [Knu97] and [AHU74] here") == 3
+
+
+def test_alpha_key_undefined_marker():
+    # A cited key with no matching reference is flagged 'undefined' (high).
+    refs = _alpha_refs()
+    body = (
+        "We cite [Knu97] and [AHU74] and [Cor09] and [Gra94]. But this stray key "
+        "[Xyz99] has no matching reference anywhere in the list of works cited."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["scheme"] == "alpha-key"
+    assert "undefined" in _types(rep)
+    und = _issues_of(rep, "undefined")
+    assert any("[Xyz99]" == u["marker"] for u in und)
+    assert any(u["severity"] == "high" for u in und)
+
+
+def test_alpha_key_uncited_reference():
+    # [Gra94] is in the list but never cited -> 'uncited' (medium).
+    refs = _alpha_refs()
+    body = (
+        "We cite [Knu97], [AHU74], and [Cor09] repeatedly: [Knu97] again and "
+        "[Cor09] again and [AHU74] once more throughout the document body text."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["scheme"] == "alpha-key"
+    assert "uncited" in _types(rep)
+    unc = _issues_of(rep, "uncited")
+    assert any(u["ref_index"] == 4 for u in unc)
+
+
+def test_alpha_key_duplicate_key():
+    # Two references collapse to the same key '[Smi04]' -> ambiguous 'duplicate'.
+    refs = [
+        {"index": 1, "title": "First Smith paper", "authors": ["Smith, A"], "year": 2004},
+        {"index": 2, "title": "Second Smith paper", "authors": ["Smith, B"], "year": 2004},
+        {"index": 3, "title": "Jones work", "authors": ["Jones, C"], "year": 2010},
+        {"index": 4, "title": "Brown work", "authors": ["Brown, D"], "year": 2015},
+    ]
+    body = (
+        "A key result [Smi04] is widely cited. Later [Jon10] extended it and "
+        "[Bro15] generalized it. We rely on [Smi04] and [Jon10] and [Bro15] often."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["scheme"] == "alpha-key"
+    assert "duplicate" in _types(rep)
+    dups = _issues_of(rep, "duplicate")
+    assert any("[Smi04]" == d["marker"] for d in dups)
+
+
+def test_alpha_letter_form_abstains():
+    # Lone '[a]'/'[b]' single-letter footnote markers are AMBIGUOUS -> ABSTAIN,
+    # never mis-classified as a numeric / author-year / alpha-key scheme.
+    refs = _alpha_refs()
+    body = (
+        "See note [a] for details and footnote [b] and panel [c]. The figure "
+        "label [a] appears again and [d] is referenced in the supplementary part."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is True
+    assert rep["issues"] == []
+    assert rep["badge"]["label"] == "n/a"
+
+
+def test_alpha_key_abstains_when_refs_not_derivable():
+    # Alpha-key markers present, but the reference list lacks authors/years to
+    # derive keys from -> ABSTAIN (don't guess which keys are defined).
+    refs = [{"index": i, "title": f"Ref {i}"} for i in range(1, 6)]  # no authors/year
+    body = (
+        "We cite [Knu97] and [AHU74] and [Cor09] and [Gra94] across the paper, "
+        "but the reference metadata is missing so the keys cannot be validated."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["scheme"] == "alpha-key"
+    assert rep["abstained"] is True
+    assert rep["issues"] == []
+    assert rep["abstain_reason"] == "alpha-key reference list not derivable"
+
+
+def test_alpha_key_mixed_with_numeric_abstains():
+    # Alpha-key AND numeric brackets both clearing their bar -> 'mixed' ABSTAIN.
+    refs = [{"index": i, "title": f"R{i}", "authors": [f"Auth{i}, X"], "year": 2000 + i}
+            for i in range(1, 6)]
+    body = (
+        "Some cite [Knu97] and [AHU74] and [Cor09] using alpha keys, while others "
+        "use [1] and [2] and [3] and [4] numeric markers in the same document."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["scheme"] == "mixed"
+    assert rep["abstained"] is True
+    assert rep["issues"] == []
+
+
+def test_author_year_bracket_year_not_alpha_key():
+    # '[Smith, 2004]' (space/comma + 4-digit year) is AUTHOR-YEAR, NOT alpha-key.
+    refs = [{"index": i, "title": f"R{i}", "authors": [s + ", X"], "year": y}
+            for i, (s, y) in enumerate(
+                [("Smith", 2020), ("Jones", 2019), ("Doe", 2021), ("Roe", 2018)], start=1)]
+    body = (
+        "Prior work [Smith, 2020] established the baseline, extended by "
+        "[Jones, 2019] and later by [Doe, 2021]. A contrast appears in [Roe, 2018]."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["scheme"] == "author-year"
+    assert rep["abstained"] is True
+
+
+def test_reverse_appearance_numbering_not_flagged_out_of_order():
+    # Strictly DESCENDING first-mention order (last-mentioned-first) is recognised
+    # as a 'reverse-appearance' convention and NOT flagged as out-of-order.
+    refs = [{"index": i + 1, "title": f"R{i + 1}", "authors": [f"{s} X"]}
+            for i, s in enumerate(["Zegna", "Apexx", "Mintz", "Delos", "Yara"])]
+    body = (
+        "We close with the latest result [5], then earlier work [4], before that "
+        "[3], and then [2], and finally the foundational study [1] at the end."
+    )
+    rep = inline_citation_report(body, refs)
+    assert rep["abstained"] is False
+    assert rep["ordering"]["convention"] == "reverse-appearance"
+    assert rep["ordering"]["consistent"] is True
+    assert all(i["type"] != "out_of_order" for i in rep["issues"])
+    assert rep["counts"]["ordering_inconsistent"] == 0
+
+
+def test_alpha_key_renumber_preview_abstains():
+    # Alpha-key markers carry no numeric sequence -> renumber preview ABSTAINS.
+    refs = _alpha_refs()
+    body = (
+        "We cite [Knu97] and [AHU74] and [Cor09] and [Gra94] throughout the paper "
+        "body in a way that exercises the alphabetic-key renumber-preview path."
+    )
+    rep = renumber_preview(body, refs, 2)
+    assert rep["abstained"] is True
+    assert rep["scheme"] == "alpha-key"
+    assert rep["shifted_markers"] == []
+    assert rep["shifted_count"] == 0

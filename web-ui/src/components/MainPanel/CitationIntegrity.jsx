@@ -43,6 +43,10 @@ const ABSTAIN_MSG = {
   'no recognizable scheme': 'No consistent numeric citation scheme detected — not flagging to avoid false alarms.',
   'too few resolved markers': 'Too few inline citation markers to audit the numbering reliably.',
   'reference list likely incomplete': 'The reference list looks incomplete relative to the citations — not flagging.',
+  // Alphabetic-key scheme ([Knu97]/[ABC+20]) abstain reasons (R15).
+  'too few resolved alpha-key markers': 'Too few alphabetic citation keys (e.g. [Knu97]) to audit reliably.',
+  'alpha-key reference list not derivable': 'Alphabetic citation keys detected, but the reference list lacks the author/year data needed to validate them — not flagging.',
+  'alpha-key reference list likely incomplete': 'The reference list looks incomplete relative to the alphabetic citation keys — not flagging.',
   'body too short': 'Not enough body text to analyze.',
   'empty input': 'No body text or references available to analyze.',
 }
@@ -131,9 +135,11 @@ export default function CitationIntegrity({ checkId }) {
                 style={{ color: d.ordering.consistent === false ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
                 {d.ordering.convention === 'alphabetical'
                   ? 'order: alphabetical ✓'
-                  : d.ordering.consistent
-                    ? 'order: by appearance ✓'
-                    : 'order: numbering doesn’t match ✗'}
+                  : d.ordering.convention === 'reverse-appearance'
+                    ? 'order: reverse-appearance ✓'
+                    : d.ordering.consistent
+                      ? 'order: by appearance ✓'
+                      : 'order: numbering doesn’t match ✗'}
               </span>
             )}
           </div>

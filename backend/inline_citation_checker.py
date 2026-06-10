@@ -93,6 +93,27 @@ _AU_YR_PATTERNS = (
     re.compile(rf"\b({_SUR})(?:\s+et\s+al\.?|\s+{_CONN}\s+{_SUR})?\s*[\(\[](\d{{4}})[a-z]?[\)\]]"),
 )
 
+# Alphabetic-key (LaTeX 'alpha' bibstyle) family: a short surname/initials stem
+# fused DIRECTLY to a 2-digit year, with an optional '+' (et-al) and an optional
+# disambiguating letter — '[Knu97]', '[AHU74]', '[ABC+20]', '[Sch04a]'. The
+# letters-then-digits run has NO space/comma (that is author-year, '[Smith, 04]'),
+# so the families never collide. Bounded 1-4 letters + exactly 2 digits keeps it
+# from matching prose-in-brackets or 4-digit years. A leading lowercase-only stem
+# (e.g. '[et04]') is excluded by requiring the FIRST char to be a capital.
+_ALPHAKEY_TOKEN = r"[A-Z][A-Za-z]{0,3}\+?\d{2}[a-z]?"
+_ALPHAKEY_PAT = re.compile(
+    rf"\[\s*{_ALPHAKEY_TOKEN}(?:\s*[,;]\s*{_ALPHAKEY_TOKEN})*\s*\]"
+)
+# Capture a single alpha-key token (stem, optional '+', 2-digit year) for the
+# author/year -> key map and per-key validation.
+_ALPHAKEY_ONE = re.compile(r"([A-Z][A-Za-z]{0,3})(\+?)(\d{2})([a-z]?)")
+
+# Letter-footnote form: a lone bracketed single letter '[a]' / '[A]'. This is
+# ambiguous (footnote marker, sub-figure label, list bullet) and is NOT a
+# standard citation-key scheme, so the checker ABSTAINS on it rather than risk a
+# wrong badge. The pattern exists only so detection can recognise and decline it.
+_ALPHA_LETTER_PAT = re.compile(r"\[\s*[A-Za-z]\s*\]")
+
 # Bibliography heading -> truncate the body here so reference-list digits
 # ('276(2):553', '9. Smith...') never count as in-body citations.
 _BIB_HEADER_RE = re.compile(
@@ -235,6 +256,100 @@ def _count_author_year(body, ref_count):
     return len(seen)
 
 
+def _count_alpha_letter_markers(body):
+    """Count lone single-letter bracket markers '[a]'/'[A]'. Used only so the
+    detector can recognise the ambiguous letter-footnote form and ABSTAIN."""
+    try:
+        return len(_ALPHA_LETTER_PAT.findall(body or ""))
+    except Exception:
+        return 0
+
+
+def _count_alpha_key(body):
+    """Distinct alphabetic-key citations ('[Knu97]', '[ABC+20]') in *body*.
+
+    Counts only well-formed alpha-key markers (capital-initial stem fused to a
+    2-digit year), keyed on the normalised token so repeats don't inflate the
+    scheme vote. A 4-digit year inside brackets cannot match (the inner pattern
+    binds exactly two trailing digits to a short alpha stem)."""
+    seen = set()
+    try:
+        for m in _ALPHAKEY_PAT.finditer(body or ""):
+            for tok in _ALPHAKEY_ONE.finditer(m.group(0)):
+                stem, plus, yr, suffix = tok.group(1), tok.group(2), tok.group(3), tok.group(4)
+                seen.add((stem.lower(), plus, yr, suffix))
+    except Exception:
+        return 0
+    return len(seen)
+
+
+def _ref_alpha_keys(ref, positional):
+    """Derive the plausible alpha-key STEMS (lower-cased, no year) for *ref*.
+
+    LaTeX's 'alpha' style builds the key from author surnames + a 2-digit year:
+    a single author -> first 3 letters of the surname ('Knuth' -> 'Knu'); two or
+    three authors -> their initials ('Aho,Hopcroft,Ullman' -> 'AHU'); 4+ ->
+    initials of the first three plus '+'. We can't reproduce BibTeX exactly, so
+    we return the SET of plausible stems for fuzzy matching, paired with the
+    ref's 2-digit year (when known). Returns ``(stems:set[str], year2:str|None)``.
+    Conservative: returns an empty stem set when authors are unusable so the
+    caller can abstain rather than mis-derive."""
+    if not isinstance(ref, dict):
+        return set(), None
+    # Year -> last two digits.
+    year2 = None
+    raw_year = ref.get("year")
+    ytxt = _coerce_text(raw_year)
+    ym = re.search(r"\b(\d{4})\b", ytxt) if ytxt else None
+    if ym:
+        year2 = ym.group(1)[2:]
+
+    surnames = _ref_surnames(ref)
+    stems = set()
+    if not surnames:
+        return stems, year2
+    # Single-author key: first 1-3 letters of the lone surname (BibTeX uses 3;
+    # we also allow 1-2 so short surnames / truncated stems still match).
+    s0 = surnames[0]
+    if s0:
+        for n in (3, 2, 1):
+            if len(s0) >= n:
+                stems.add(s0[:n])
+        stems.add(s0)  # full surname stem (defensive)
+    # Multi-author key: concatenated leading initials of the first up to 3.
+    if len(surnames) >= 2:
+        initials = "".join(s[:1] for s in surnames[:3] if s)
+        if initials:
+            stems.add(initials)
+    return {s for s in stems if s}, year2
+
+
+def _ref_surnames(ref):
+    """Lower-cased surname list for *ref* (mirrors ``_first_author_surname``'s
+    heuristic, applied to every author)."""
+    if not isinstance(ref, dict):
+        return []
+    authors = ref.get("authors")
+    raw = []
+    if isinstance(authors, (list, tuple)):
+        raw = [a for a in authors]
+    elif isinstance(authors, str):
+        raw = re.split(r";|\band\b|&", authors)
+    out = []
+    for a in raw:
+        a = _coerce_text(a)
+        if not a.strip():
+            continue
+        if "," in a:
+            surname = a.split(",")[0].strip().lower()
+        else:
+            toks = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\-']+", a)
+            surname = toks[-1].lower() if toks else ""
+        if surname:
+            out.append(surname)
+    return out
+
+
 def _superscript_is_exponent(body, start):
     """True when the superscript at *start* is a maths exponent, scientific-
     notation digit, or unit (x², 10⁶, cm², Sr⁹⁰) rather than a citation marker.
@@ -335,6 +450,11 @@ def _detect_scheme(body, ref_count, max_index=0):
     }
     au = _count_author_year(body, ref_count)
     counts["author-year"] = au
+    alpha = _count_alpha_key(body)
+    counts["alpha-key"] = alpha
+    # Lone '[a]'/'[A]' letter-footnote markers — recognised only so the detector
+    # can decline the ambiguous form rather than mis-route it.
+    counts["alpha-letter"] = _count_alpha_letter_markers(body)
 
     numeric = {k: counts[k] for k in ("bracket", "superscript", "paren")}
     numeric_total = sum(numeric.values())
@@ -344,8 +464,21 @@ def _detect_scheme(body, ref_count, max_index=0):
     second = ordered[1][1] if len(ordered) > 1 else 0
 
     # Too little of everything -> no scheme.
-    if numeric_total < _MIN_NUMERIC_MARKERS and au < _MIN_AUTHOR_YEAR_HITS:
+    if (numeric_total < _MIN_NUMERIC_MARKERS and au < _MIN_AUTHOR_YEAR_HITS
+            and alpha < _MIN_NUMERIC_MARKERS):
         return None, 0.0, counts
+
+    # Alpha-key dominant: clears its bar AND no competing numeric/author-year
+    # family is comparable. Otherwise it's mixed and we abstain (alpha-key brackets
+    # never collide with numeric brackets or '[Surname, 2004]' author-year, so a
+    # genuine alpha-key paper has alpha >> everything else).
+    if alpha >= _MIN_NUMERIC_MARKERS:
+        rival = max(numeric_total, au)
+        if alpha >= max(_MIN_NUMERIC_MARKERS, 2 * rival):
+            conf = _clamp(0.45 + 0.5 * (alpha - rival) / float(alpha))
+            return "alpha-key", conf, counts
+        # An alpha-key signal that is real but rivalled -> mixed (abstain).
+        return "mixed", _clamp(alpha / float(alpha + rival or 1)), counts
 
     # Author-year dominant with no real numeric markers.
     if au >= _MIN_AUTHOR_YEAR_HITS and numeric_total < _MIN_NUMERIC_MARKERS:
@@ -570,11 +703,31 @@ def _classify_ordering(references, index_by_pos, first_mention_order, cited_indi
     alphabetical = _looks_alphabetical(references, index_by_pos)
 
     appearance_ratio = None
+    descending_ratio = None
     if len(first_mention_order) >= 4:
         pairs = list(zip(first_mention_order, first_mention_order[1:]))
         appearance_ratio = sum(1 for a, b in pairs if a <= b) / float(len(pairs))
+        descending_ratio = sum(1 for a, b in pairs if a >= b) / float(len(pairs))
 
     strong_appearance = appearance_ratio is not None and appearance_ratio >= 0.999
+
+    # "Last-mentioned" (reverse-appearance) convention: the most recently cited
+    # reference carries the LOWEST number, so first-mention order runs strictly
+    # DESCENDING. This is non-standard and, critically, a perfectly descending
+    # run is indistinguishable from a deliberate reverse-appearance scheme — so
+    # rather than emit a wrong 'out-of-order' badge we recognise it explicitly
+    # and treat it as consistent (mirrors the alphabetical branch on descending
+    # pairs). Only when it is NOT also strongly ascending (a 4-marker tie would
+    # be ambiguous, handled below).
+    if (not alphabetical and not strong_appearance
+            and descending_ratio is not None and descending_ratio >= 0.999):
+        return {
+            "convention": "reverse-appearance", "consistent": True,
+            "appearance_ratio": appearance_ratio, "alphabetical": False,
+            "reason": "Inline numbers run in reverse order of first appearance "
+                      "(last-mentioned first) — consistent with a reverse-appearance "
+                      "convention, so not flagged as out-of-order.",
+        }
 
     # Alphabetical list — but NOT if it is also strictly ascending (then we can't
     # tell the two conventions apart -> ambiguous below).
@@ -675,6 +828,185 @@ def _badge_for(issues, abstained):
 
 
 # --------------------------------------------------------------------------- #
+# Alphabetic-key scheme audit                                                  #
+# --------------------------------------------------------------------------- #
+
+class _AlphaOccurrence:
+    __slots__ = ("key", "offset", "marker")
+
+    def __init__(self, key, offset, marker):
+        self.key = key
+        self.offset = offset
+        self.marker = marker
+
+
+def _norm_alpha_key(stem, year2):
+    """Canonical comparable form of an alpha-key token: lower-cased stem + year,
+    disambiguating suffix dropped (so '[Sch04a]' and '[Sch04b]' share a base)."""
+    return (stem.lower(), year2)
+
+
+def _extract_alpha_occurrences(body):
+    """Single document-order pass collecting every alpha-key token. Returns a
+    list of ``_AlphaOccurrence`` (one per token, composite '[A,B]' splits)."""
+    occ = []
+    for m in _ALPHAKEY_PAT.finditer(body):
+        marker = m.group(0)
+        offset = m.start()
+        context = _line_for_offset(body, offset)
+        if _is_header_noise(context) or _is_table_noise(context):
+            continue
+        for tok in _ALPHAKEY_ONE.finditer(marker):
+            stem, _plus, yr, _suffix = tok.group(1), tok.group(2), tok.group(3), tok.group(4)
+            occ.append(_AlphaOccurrence(_norm_alpha_key(stem, yr), offset, marker))
+    return occ
+
+
+def _build_alpha_key_map(references, index_by_pos):
+    """Build the author/year -> key map from the reference list.
+
+    Returns ``(key_to_positions, derivable)`` where ``key_to_positions`` maps a
+    normalised ``(stem, year2)`` to the list of reference positions that plausibly
+    produce it, and ``derivable`` is the count of references we could derive any
+    key for (used to decide whether validation is trustworthy enough to run)."""
+    key_to_positions = {}
+    derivable = 0
+    for pos, ref in enumerate(references):
+        stems, year2 = _ref_alpha_keys(ref, index_by_pos.get(pos, pos + 1))
+        if not stems or year2 is None:
+            continue
+        derivable += 1
+        for stem in stems:
+            key_to_positions.setdefault(_norm_alpha_key(stem, year2), set()).add(pos)
+    return key_to_positions, derivable
+
+
+def _alpha_key_report(body, references, index_by_pos, scheme, confidence, ref_count):
+    """Validate an alphabetic-key paper against the author/year -> key map.
+
+    Honesty discipline (ABSTAIN beats a wrong badge):
+      * abstain when too few resolved keys, OR when the reference list cannot be
+        derived into keys for most entries (we'd be guessing), OR when a large
+        fraction of cited keys are undefined (truncated/unparsed reference list).
+      * ordering convention is forced to ``alphabetical`` — alpha keys are sorted
+        by author, so the ascending first-mention check is SKIPPED entirely.
+    Reports: ``undefined`` (a body key with no matching reference), ``uncited``
+    (a reference never cited), ``duplicate`` (two references collapse to the same
+    key -> the marker is ambiguous)."""
+    occurrences = _extract_alpha_occurrences(body)
+    distinct_cited = {o.key for o in occurrences}
+    if len(distinct_cited) < _MIN_NUMERIC_MARKERS:
+        return _abstain_report(scheme, confidence * 0.7, ref_count,
+                               "too few resolved alpha-key markers")
+
+    key_to_positions, derivable = _build_alpha_key_map(references, index_by_pos)
+    # If we can't derive keys for at least half the references, we'd be guessing
+    # which keys are 'defined' -> abstain rather than emit false undefined/uncited.
+    if ref_count and derivable < max(_MIN_NUMERIC_MARKERS, 0.5 * ref_count):
+        return _abstain_report(scheme, confidence * 0.6, ref_count,
+                               "alpha-key reference list not derivable")
+
+    defined_keys = set(key_to_positions)
+    cited_defined = distinct_cited & defined_keys
+    undefined_keys = distinct_cited - defined_keys
+    # Guard: if most cited keys are undefined, the derivation/reference list is
+    # unreliable -> abstain rather than dump false errors.
+    if undefined_keys and len(undefined_keys) > 0.5 * len(distinct_cited):
+        return _abstain_report(scheme, confidence * 0.6, ref_count,
+                               "alpha-key reference list likely incomplete")
+
+    first_offset = {}
+    for o in occurrences:
+        if o.key not in first_offset or o.offset < first_offset[o.key][0]:
+            first_offset[o.key] = (o.offset, o.marker)
+
+    issues = []
+
+    # --- UNDEFINED (high): a cited key matches no reference --------------------
+    for key in sorted(undefined_keys):
+        off, marker = first_offset.get(key, (None, None))
+        issues.append(_issue(
+            "undefined", "high",
+            "Citation key %s has no matching reference in the list." % (marker,),
+            marker=marker,
+        ))
+
+    # --- DUPLICATE (medium): two references collapse to the same key ----------
+    for key in sorted(k for k, ps in key_to_positions.items() if len(ps) >= 2):
+        positions = sorted(key_to_positions[key])
+        if key not in cited_defined:
+            continue  # only flag keys actually used in the body (ambiguous target)
+        ta = _short_title(_ref_title(references[positions[0]]))
+        tb = _short_title(_ref_title(references[positions[1]]))
+        marker = first_offset.get(key, (None, None))[1]
+        issues.append(_issue(
+            "duplicate", "medium",
+            "Citation key %s is ambiguous — it matches two references (%r and %r)." % (
+                marker, ta, tb),
+            marker=marker,
+        ))
+
+    # --- UNCITED (medium): a reference whose key is never cited ----------------
+    # Same coverage gate as the numeric path: below 50% recall the dominant
+    # hypothesis is derivation under-recall, not a genuinely uncited bibliography.
+    # Coverage is measured over DERIVABLE reference POSITIONS (one ref may yield
+    # several candidate stems, so a raw key-count denominator would be inflated).
+    cited_positions = set()
+    for key in cited_defined:
+        cited_positions |= key_to_positions.get(key, set())
+    coverage = (len(cited_positions) / float(derivable)) if derivable else 0.0
+    if coverage >= 0.5:
+        for pos, ref in enumerate(references):
+            stems, year2 = _ref_alpha_keys(ref, index_by_pos.get(pos, pos + 1))
+            if not stems or year2 is None:
+                continue  # not derivable -> can't claim it's uncited
+            if pos in cited_positions:
+                continue
+            title = _short_title(_ref_title(ref))
+            tail = (" (%r)" % title) if title else ""
+            issues.append(_issue(
+                "uncited", "medium",
+                "Reference %d%s is in the list but never cited in the text." % (
+                    index_by_pos.get(pos, pos + 1), tail),
+                ref_index=index_by_pos.get(pos, pos + 1),
+            ))
+
+    # --- counts + ordering (alphabetical; ascending check SKIPPED) ------------
+    counts = _empty_counts()
+    counts["references"] = ref_count
+    # 'cited' counts distinct REFERENCES reached (not raw keys, which can match
+    # several candidate stems per ref).
+    counts["cited"] = len(cited_positions)
+    counts["uncited"] = sum(1 for i in issues if i["type"] == "uncited")
+    counts["undefined"] = sum(1 for i in issues if i["type"] == "undefined")
+    counts["duplicates"] = sum(1 for i in issues if i["type"] == "duplicate")
+    counts["distinct_cited"] = len(distinct_cited)
+    counts["total_markers"] = len(occurrences)
+
+    ordering = {
+        "convention": "alphabetical", "consistent": True,
+        "appearance_ratio": None, "alphabetical": True,
+        "reason": "Alphabetic citation keys (e.g. [Knu97]) are sorted by author, "
+                  "so inline keys are not expected to appear in ascending order.",
+    }
+    counts["ordering_inconsistent"] = 0
+    counts["issues"] = len(issues)
+
+    issues.sort(key=lambda i: (_SEVERITY_RANK.get(i["severity"], 9),
+                               i.get("ref_index") if i.get("ref_index") is not None else 1 << 30))
+
+    return {
+        "scheme": scheme,
+        "scheme_confidence": round(_clamp(confidence), 3),
+        "abstained": False,
+        "counts": counts,
+        "issues": issues,
+        "ordering": ordering,
+        "badge": _badge_for(issues, abstained=False),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Public API                                                                   #
 # --------------------------------------------------------------------------- #
 
@@ -734,6 +1066,12 @@ def inline_citation_report(paper_text, references):
         # No integer sequence to validate -> abstain on numbering.
         return _abstain_report("author-year", confidence, ref_count,
                                "author-year style has no numeric sequence")
+    if scheme == "alpha-key":
+        # Validate alphabetic keys against an author/year -> key map instead of a
+        # numeric sequence; ordering is alphabetical so the ascending check is
+        # skipped. Abstains on its own when keys are under-resolved.
+        return _alpha_key_report(body, references, index_by_pos, scheme,
+                                 confidence, ref_count)
 
     # --- STEP 3: enumerate numeric occurrences -------------------------------
     occurrences, raw_out, range_errors = _extract_numeric_occurrences(
@@ -819,10 +1157,17 @@ def inline_citation_report(paper_text, references):
                     ref_index=k,
                 ))
 
+    # Ordering convention (alphabetical / appearance / reverse-appearance). Used
+    # both to gate the out-of-order check below and surfaced as the top-level
+    # ``ordering`` field in STEP 6.
+    ordering = _classify_ordering(references, index_by_pos, first_mention_order, cited_indices)
+
     # --- STEP 5e: OUT-OF-ORDER (low/medium) ----------------------------------
     # Only meaningful for citation-order numbering. Suppress for alphabetical
-    # bibliographies (legit non-ascending first mention).
-    if not _looks_alphabetical(references, index_by_pos):
+    # bibliographies (legit non-ascending first mention) AND for a recognised
+    # reverse-appearance ("last-mentioned") convention (legit descending order).
+    if (not _looks_alphabetical(references, index_by_pos)
+            and ordering.get("convention") != "reverse-appearance"):
         running_max = 0
         violations = []
         for n in first_mention_order:
@@ -875,10 +1220,10 @@ def inline_citation_report(paper_text, references):
     counts["distinct_cited"] = len(distinct_cited)
     counts["total_markers"] = len(occurrences)
 
-    # Ordering convention (alphabetical vs order-of-appearance) + whether the
-    # inline numbering is consistent with it. Additive — does not change the
-    # issues/scheme/badge shape; surfaced as a top-level ``ordering`` field.
-    ordering = _classify_ordering(references, index_by_pos, first_mention_order, cited_indices)
+    # Ordering convention (alphabetical / appearance / reverse-appearance) +
+    # whether the inline numbering is consistent with it. Computed above (before
+    # STEP 5e); surfaced as a top-level ``ordering`` field. Additive — does not
+    # change the issues/scheme/badge shape.
     counts["ordering_inconsistent"] = 1 if ordering.get("consistent") is False else 0
     counts["issues"] = len(issues)
 
@@ -968,7 +1313,8 @@ def renumber_preview(paper_text, references, new_printed_number=None):
 
     max_index = max((_ref_index(r, i + 1) for i, r in enumerate(references)), default=0)
     scheme, confidence, _families = _detect_scheme(body, ref_count, max_index)
-    if scheme in (None, "mixed", "author-year"):
+    if scheme in (None, "mixed", "author-year", "alpha-key"):
+        # alpha-key markers carry no numeric sequence to shift -> abstain.
         return _abstain_preview(scheme, confidence, True,
                                 "no numeric scheme to renumber")
 
