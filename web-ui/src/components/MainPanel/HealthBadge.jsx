@@ -49,8 +49,23 @@ function computeScore(references, style) {
         r?.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
       halluc += 1
     }
-    if ((styleFilteredErrors || []).length > 0) errors += 1
-    if ((styleFilteredWarnings || []).length > 0) warnings += 1
+    // Bucket on the SAME effective status StatsSection's chips derive
+    // (`computeReferenceStats` increments `withErrors`/`withWarnings` off
+    // `getEffectiveReferenceStatus`, not off raw `.errors`/`.warnings`).
+    // Two divergences this fixes vs. the old raw-length bucketing:
+    //   1. unverified-only refs ({error_type:'unverified'}) are NOT errors —
+    //      effective status is 'unverified', so the chip excludes them; the
+    //      old `.length > 0` test counted them as errors (off-by-N).
+    //   2. hallucinated refs carry error entries as evidence; the chip
+    //      suppresses those and counts the ref only in the hallucination
+    //      bucket. Effective status 'hallucination' keeps them out of
+    //      errors/warnings here too. The old block ran unconditionally and
+    //      double-counted them as BOTH halluc and error.
+    // A ref with both errors and warnings resolves to 'error' (precedence in
+    // getEffectiveReferenceStatus), so it's an error ref only — never also a
+    // warning ref. This makes HealthBadge counts == StatsSection chip counts.
+    if (effective === 'error') errors += 1
+    else if (effective === 'warning') warnings += 1
   }
   // Score weights: verified contributes 70, clean contributes 30 — sums
   // to 100 when every ref is verified + clean (was 70+25=95, capping

@@ -699,7 +699,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                     e.currentTarget.style.borderColor = 'var(--color-border)'
                   }
                 }}
-                title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
+                title={`${filter.value} reference${filter.value === 1 ? '' : 's'} with ${filter.label.toLowerCase()}`}
               >
                 <span className="font-bold">{filter.value}</span>
                 <span>{filter.label}</span>

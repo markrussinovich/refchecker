@@ -96,6 +96,39 @@ describe('SimilarPapersPanel mode-aware cache key', () => {
   })
 })
 
+describe('SimilarPapersPanel per-article isolation (R25)', () => {
+  it('does not bleed results across articles with identical empty title/source but different checkId', async () => {
+    findSimilarPapers.mockResolvedValue({
+      data: {
+        candidates: [{ paperId: 'iso1', title: 'Isolated result', authors: ['Z'], year: 2021, doi: '10.7/iso', sources: ['semantic_scholar'] }],
+        source_counts: { semantic_scholar: 1 },
+      },
+    })
+
+    // Two articles in the same batch with NO title and NO source — the only
+    // thing distinguishing them is their checkId. Pre-R25 the panel fell
+    // through to the `title:` cache key (identical, empty), so searching the
+    // first leaked its result onto the second.
+    const { unmount: unmountA } = render(
+      <SimilarPapersPanel references={REFS} paperTitle="" paperSource="" checkId={101} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Find shared references + citations' }))
+    await screen.findByText('Isolated result')
+    expect(findSimilarPapers).toHaveBeenCalledTimes(1)
+    unmountA()
+
+    // The SECOND article (different checkId) must NOT inherit the first's
+    // cached candidates: it still shows its own Find button, not "Refresh"
+    // and not the leaked candidate.
+    render(
+      <SimilarPapersPanel references={REFS} paperTitle="" paperSource="" checkId={202} />,
+    )
+    expect(screen.getByRole('button', { name: 'Find shared references + citations' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull()
+    expect(screen.queryByText('Isolated result')).toBeNull()
+  })
+})
+
 describe('SimilarPapersPanel relation chips', () => {
   it('tags overlap candidates as Shared refs or Shared cites, and shows shared-refs for similar rows', async () => {
     findSimilarPapers.mockResolvedValue({

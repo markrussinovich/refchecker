@@ -500,9 +500,11 @@ export default function MainPanel() {
                 </button>
               </div>
               <SimilarPapersPanel
+                key={`similar-${selectedCheckId}`}
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
                 paperSource={displayPaperSource}
+                checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
                 onCheckPaper={(source) => {
                   // Switch UI to "New refcheck" so the input panel is visible,
                   // then dispatch the URL to InputSection which auto-submits.

@@ -1,9 +1,20 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import StatsSection from './StatsSection'
+import HealthBadge from './HealthBadge'
 
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}))
+
+// HealthBadge animates the score with anime.js; stub it so the badge renders
+// the final value synchronously and the tooltip counts are stable to assert.
+vi.mock('animejs', () => ({
+  default: (opts) => {
+    if (opts && typeof opts.update === 'function') opts.update()
+    if (opts && typeof opts.complete === 'function') opts.complete()
+    return { pause: vi.fn() }
+  },
 }))
 
 vi.mock('../../stores/useCheckStore', () => {
@@ -81,6 +92,144 @@ describe('StatsSection warning count excludes refs that also have errors', () =>
     expect(badgeTexts).toContain('2')
     // Warnings should NOT show 4 (inclusive would count refs with both errors+warnings)
     expect(badgeTexts).not.toContain('4')
+  })
+})
+
+// R16 (F2): the Citation-health badge and the Summary chips must agree —
+// HealthBadge.computeScore must bucket refs warnings-ONLY (a ref with both an
+// error and a warning is an error ref, not also a warning ref), exactly like
+// the StatsSection chips. Before the fix the badge tooltip read 4 warnings
+// where the chips showed 2.
+describe('HealthBadge counts agree with StatsSection chip counts (R16)', () => {
+  // Shared fixture: 3 error refs (2 of them also carry a warning),
+  // 2 warning-only refs, 1 verified ref. Chips => Errors 3 · Warnings 2.
+  const references = [
+    makeRef('error', {
+      errors: [{ error_type: 'author', message: 'author mismatch' }],
+      warnings: [{ message: 'year is approximate' }],
+    }),
+    makeRef('error', {
+      errors: [{ error_type: 'title', message: 'title mismatch' }],
+      warnings: [{ message: 'venue differs' }],
+    }),
+    makeRef('error', {
+      errors: [{ error_type: 'year', message: 'wrong year' }],
+    }),
+    makeRef('warning', { warnings: [{ message: 'year off by 1' }] }),
+    makeRef('warning', { warnings: [{ message: 'venue not found' }] }),
+    makeRef('verified'),
+  ]
+
+  it('reports the same error/warning ref counts the StatsSection chips show', () => {
+    // HealthBadge in isolation — read its tooltip, which spells out the
+    // per-status breakdown ("… · N warning(s) · M error(s) …").
+    const { container, unmount } = render(<HealthBadge references={references} />)
+    const tooltip = container.querySelector('span[title]').getAttribute('title')
+    const warnFromBadge = Number(/(\d+)\s+warning/.exec(tooltip)?.[1])
+    const errFromBadge = Number(/(\d+)\s+error/.exec(tooltip)?.[1])
+    unmount()
+
+    // The badge buckets warnings-only and errors-with-priority, so for this
+    // fixture: 3 errors, 2 warnings (NOT 4 — the both-error+warning refs are
+    // counted as errors only).
+    expect(errFromBadge).toBe(3)
+    expect(warnFromBadge).toBe(2)
+
+    // StatsSection chips for the SAME references must match exactly.
+    render(
+      <StatsSection
+        stats={{ total_refs: 6, processed_refs: 6 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Agreement Paper"
+        paperSource="https://example.com/agree"
+      />
+    )
+    // Row-1 Errors badge ("N references with errors") and row-1 Warnings
+    // badge ("N references with warnings only") — both rows now read
+    // "references with <issue>", so the error title appears on the row-2
+    // chip too; assert at least one carrier shows the badge's count.
+    const errChips = screen.getAllByTitle(/references? with errors/i)
+    const warnChip = screen.getByTitle(/references? with warnings only/i)
+    expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
+    expect(within(warnChip).getByText(String(warnFromBadge))).toBeTruthy()
+  })
+
+  // The common unverified case: a ref whose ONLY error entry is
+  // {error_type:'unverified'} ("could not verify / not found"). The chips
+  // exclude it from the error bucket (getEffectiveReferenceStatus treats
+  // unverified-only errors as NOT errors), so the badge must too. Before the
+  // fix, HealthBadge's raw `(errors||[]).length > 0` test counted it as an
+  // error ref → badge "1 error" vs chip "0 references with errors".
+  it('does not count an unverified-only ref as an error (agrees with chips)', () => {
+    const refs = [
+      makeRef('error', { errors: [{ error_type: 'author', message: 'author mismatch' }] }),
+      makeRef('unverified', { errors: [{ error_type: 'unverified', message: 'not found' }] }),
+    ]
+
+    const { container, unmount } = render(<HealthBadge references={refs} />)
+    const tooltip = container.querySelector('span[title]').getAttribute('title')
+    const errFromBadge = Number(/(\d+)\s+error/.exec(tooltip)?.[1])
+    const warnFromBadge = Number(/(\d+)\s+warning/.exec(tooltip)?.[1])
+    unmount()
+
+    // 1 genuine error ref, the unverified-only ref is NOT an error.
+    expect(errFromBadge).toBe(1)
+    expect(warnFromBadge).toBe(0)
+
+    // StatsSection chips for the SAME refs (isComplete=true so the unverified
+    // ref finalizes) must match.
+    render(
+      <StatsSection
+        stats={{ total_refs: 2, processed_refs: 2 }}
+        isComplete={true}
+        references={refs}
+        paperTitle="Unverified Paper"
+        paperSource="https://example.com/unverified"
+      />
+    )
+    const errChips = screen.getAllByTitle(/references? with errors/i)
+    expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
+  })
+
+  // A hallucinated ref carries its error entries as EVIDENCE of the
+  // hallucination. The chips suppress those (counting the ref only in the
+  // hallucination bucket); the badge must too. Before the fix the
+  // error/warning block ran unconditionally, so the hallucinated ref bumped
+  // BOTH halluc and errors → badge "1 error" vs chip "0 references with errors".
+  it('does not count a hallucinated ref with error evidence as an error', () => {
+    const refs = [
+      makeRef('error', { errors: [{ error_type: 'title', message: 'title mismatch' }] }),
+      makeRef('hallucination', {
+        title: 'A fabricated paper that does not exist',
+        authors: ['Nobody'],
+        errors: [{ error_type: 'not_found', message: 'no matching record found' }],
+        hallucination_assessment: { verdict: 'LIKELY' },
+      }),
+    ]
+
+    const { container, unmount } = render(<HealthBadge references={refs} />)
+    const tooltip = container.querySelector('span[title]').getAttribute('title')
+    const errFromBadge = Number(/(\d+)\s+error/.exec(tooltip)?.[1])
+    const warnFromBadge = Number(/(\d+)\s+warning/.exec(tooltip)?.[1])
+    unmount()
+
+    // Only the genuine error ref is an error; the hallucinated ref's error
+    // entry is evidence, not a counted error.
+    expect(errFromBadge).toBe(1)
+    expect(warnFromBadge).toBe(0)
+
+    render(
+      <StatsSection
+        stats={{ total_refs: 2, processed_refs: 2 }}
+        isComplete={true}
+        references={refs}
+        paperTitle="Hallucination Paper"
+        paperSource="https://example.com/halluc"
+      />
+    )
+    const errChips = screen.getAllByTitle(/references? with errors/i)
+    expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
   })
 })
 
