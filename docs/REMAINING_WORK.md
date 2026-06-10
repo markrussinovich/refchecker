@@ -645,4 +645,30 @@ P0 + the viewer stream are committed and the branch HEAD is CI-green (eslint 0 e
 | R12/R13/R31 focus-zoom + sentence span + pinch | `e4dabd0` |
 | R55 lint (jumpToPage) + S8 cleanup | `ea1b84d` |
 
-**Remaining (next batches, serialized):** B = button spec R33/R52/R44; C = R06/R07, R16/R25, R20/R39/R08; D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; I = R40 full CI + release cut. (Each viewer item committed above closed its `BROKEN/PARTIAL` from §3.)
+**Remaining (next batches, serialized):** B = button spec R33/R52/R44; C = R06/R07, R16/R25, R20/R39/R08; D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; then J (parity/docs) + K (release) below. (Each viewer item committed above closed its `BROKEN/PARTIAL` from §3.)
+
+---
+
+## 13. Batch J + K — access-method parity, help/guides, push, release (R56–R60)
+
+User decisions (locked): push `fix/remaining-p0-viewers` to **origin** (`ArioMoniri/refchecker`), **no PR**; release **desktop 0.9.18→0.9.19** AND **PyPI/CLI 3.1.0→3.2.0**; **I push the tags autonomously** once CI is green; **expose all CLI-applicable features + full --help/guides**. Runs only AFTER B–H land and the §6 DoD passes.
+
+### R56 — CLI feature parity *(Batch J)*
+- *Change:* extend `backend/cli.py` (and the entry in `src/refchecker`/`run_refchecker.py`) so the CLI exposes every CLI-applicable backend capability with flags + structured output + `--help`: hallucination check (`--check-hallucinations` + provider/model/key), inline-citation numbering/ordering check (`--check-citation-order`), retraction check (`--check-retractions`), gap-finder / co-citation suggestions (`--suggest-missing`), cross-source enrichment backfill (on by default; `--no-enrich` to opt out), AI-generated-text detection (`--ai-detection [local|api]` + consent). Mirror the web/API defaults; emit JSON (`--json`) and a human report. UI-only features (native PDF viewers, graphs, share video, author hover) are explicitly documented as web/desktop-only.
+- *Acceptance:* [ ] each new flag works end-to-end against a sample paper; [ ] `--help` documents them; [ ] `--json` schema covers the new fields; [ ] pytest (`/opt/homebrew/bin/python3`) for the CLI arg wiring + at least one feature path; [ ] no regression to existing CLI behavior.
+
+### R57 — Help & guides across all access methods *(Batch J)*
+- *Change:* update `README.md` + `docs/` with a feature matrix (web / desktop / CLI / API) and guides for the new capabilities: auth/Teams + presence (R26/R27), unified native-PDF viewers + find + in-PDF links (R02/R28/R42), share video, enrichment/author metrics, inline-citation parser, add-to-reference-list, similar Cites&Refs, AI detection, and the live token/$ telemetry (R47). Add in-app help/links (the Support menu already exists) and CLI usage examples. Keep honesty notes (no-fabrication, opt-in AI detection, single-user vs multi-user).
+- *Acceptance:* [ ] README feature matrix + per-feature guide; [ ] CLI examples match `--help`; [ ] desktop README/updater + multi-user setup guide current; [ ] links valid.
+
+### R58 — Version bump + changelog *(Batch K)*
+- *Change:* `src/refchecker/__version__.py` 3.1.0→**3.2.0**; `tauri-app/package.json` 0.9.18→**0.9.19** (tauri.conf reads it); refresh the README/desktop changelog with the R01–R57 highlights. Leave `web-ui/package.json` (1.0.0) unless the release flow requires it.
+- *Acceptance:* [ ] versions consistent where they must be; [ ] changelog lists the shipped fixes/features; [ ] `pyproject.toml` resolves 3.2.0.
+
+### R59 — Push branch + full CI green (R40) *(Batch K)*
+- *Change:* run the full gate locally — `cd web-ui && npm run lint && npx vitest run && npm run build`; `/opt/homebrew/bin/python3 -m pytest tests/unit`; note the Tauri `cargo` sidecar prereq (the missing `binaries/refchecker-server-*` is built by `tauri-app/scripts/build-sidecar.sh` in CI, so it's a local-only gap, not a release blocker — `desktop-release.yml` builds it). Then `git push origin fix/remaining-p0-viewers` (no PR).
+- *Acceptance:* [ ] local gate green (FE + pytest); [ ] branch pushed to origin; [ ] GitHub Actions `test.yml` green on the pushed branch.
+
+### R60 — Cut the release (autonomous tag push) *(Batch K — LAST)*
+- *Change:* after R59 is green, push the release tags so CI publishes: the desktop tag (per `desktop-release.yml`'s trigger, e.g. `desktop-v0.9.19`) → builds dmg + updater (signed via `refchecker-updater.key`); the PyPI tag (per `release.yml`'s trigger, e.g. `v3.2.0`) → publishes the Python package/CLI. Confirm the exact tag patterns from the workflow `on:` triggers before tagging.
+- *Acceptance:* [ ] tag patterns verified against the workflow triggers; [ ] tags pushed; [ ] `desktop-release.yml` + `release.yml` runs succeed (dmg/updater + PyPI published); [ ] release notes attached. Requires the repo's configured secrets (PyPI token, signing/updater key) — surfaced to the user if any run fails on a missing secret.
