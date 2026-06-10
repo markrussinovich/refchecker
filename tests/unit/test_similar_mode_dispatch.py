@@ -50,6 +50,10 @@ _WANTED = [
     "find_similar_papers",
     "_cites_refs_papers_impl",
     "_shape_cites_refs_candidates",
+    # R20 — the cites/refs verification pass the impl now runs. Lifted
+    # verbatim; its heavy collaborators (db, checker) are doubled in the ns.
+    "_build_similar_papers_checker",
+    "_verify_candidates_in_place",
 ]
 
 
@@ -90,9 +94,16 @@ def _load_dispatch_namespace():
         "Dict": __import__("typing").Dict,
         "Any": __import__("typing").Any,
         "List": __import__("typing").List,
+        "asyncio": asyncio,
         # Doubles for heavy module-level names the bodies touch.
         "logger": _NullLogger(),
         "HTTPException": _FakeHTTPException,
+        # R20 — the verification pass talks to the global identity cache via
+        # `db`. Offline double: every lookup is a cache MISS so no row is
+        # marked verified from cache; the active-verify branch is short-
+        # circuited because `_build_similar_papers_checker` is overridden to
+        # return None below (no network checker in unit tests).
+        "db": _OfflineDB(),
         # Names evaluated at def-time in the find_similar_papers signature
         # (annotations + the Depends(require_user) default). These never run;
         # we pass current_user explicitly when calling.
@@ -105,7 +116,24 @@ def _load_dispatch_namespace():
     # so the real httpx is used; we drive it via a MockTransport-backed client
     # by patching httpx.AsyncClient for the duration of each call (see _Patched).
     exec(code, ns)
+    # Force the cache-only verification path in unit tests: no real network
+    # checker is initialised. The cache-miss double then leaves rows
+    # unverified, which is the correct REAL-DATA-GATED behaviour offline.
+    ns["_build_similar_papers_checker"] = lambda: None
     return ns
+
+
+class _OfflineDB:
+    """Offline stand-in for ``backend.database.db`` used by the R20 verify
+    pass. Every lookup is a cache miss; upserts are no-ops. This keeps the
+    test fully offline and asserts the real-data-gated contract: nothing is
+    marked verified unless a real source confirmed it (impossible offline)."""
+
+    async def lookup_verified_reference(self, _probe):
+        return None
+
+    async def upsert_verified_reference(self, *_a, **_k):
+        return None
 
 
 class _NullLogger:
@@ -259,15 +287,29 @@ def _openalex_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"results": []})
 
 
-def _call(req, *, similar_impl=None, handler=_openalex_handler):
-    """Run the real dispatcher with a patched httpx + injected similar impl."""
+def _call(req, *, similar_impl=None, handler=_openalex_handler, db=None, checker_factory=None):
+    """Run the real dispatcher with a patched httpx + injected similar impl.
+
+    ``db`` / ``checker_factory`` let a test swap the R20 verification
+    collaborators (cache + active-verify checker) for offline doubles.
+    Both are restored after the call so tests don't leak state."""
     # Inject the controllable similar pipeline into the dispatch namespace.
     async def _default_similar(_req, _user):  # pragma: no cover - guard
         raise AssertionError("_find_similar_papers_impl must not run in this mode")
 
     _NS["_find_similar_papers_impl"] = similar_impl or _default_similar
-    with _PatchAsyncClient(handler):
-        return asyncio.run(find_similar_papers(req, current_user=_USER))
+    saved_db = _NS.get("db")
+    saved_checker = _NS.get("_build_similar_papers_checker")
+    if db is not None:
+        _NS["db"] = db
+    if checker_factory is not None:
+        _NS["_build_similar_papers_checker"] = checker_factory
+    try:
+        with _PatchAsyncClient(handler):
+            return asyncio.run(find_similar_papers(req, current_user=_USER))
+    finally:
+        _NS["db"] = saved_db
+        _NS["_build_similar_papers_checker"] = saved_checker
 
 
 # --------------------------------------------------------------------------- #
@@ -414,3 +456,97 @@ def test_dispatch_swallows_errors_into_safe_envelope():
     assert out["candidates"] == []
     assert out["source_paper"] == "Boom Paper"
     assert "error" in out and "exploded" in out["error"]
+
+
+# --------------------------------------------------------------------------- #
+# R20 — real verification status + provenance on overlap rows.                  #
+# --------------------------------------------------------------------------- #
+
+class _CacheHitDB:
+    """`db` double whose cache CONFIRMS rows matching a given DOI set —
+    exercising the pre_verified / was_verified / times_seen path."""
+
+    def __init__(self, verified_dois):
+        self._verified = {d.lower() for d in verified_dois}
+
+    async def lookup_verified_reference(self, probe):
+        doi = (probe.get("doi") or "").lower()
+        if doi and doi in self._verified:
+            return {"status": "verified", "times_seen": 3}
+        return None
+
+    async def upsert_verified_reference(self, *_a, **_k):
+        return None
+
+
+class _ActiveVerifyChecker:
+    """checker double: verify_reference confirms titles in a set, else
+    returns no data (the 'unconfirmed' branch). Never fabricates a match."""
+
+    def __init__(self, confirm_titles):
+        self._ok = set(confirm_titles)
+
+    def verify_reference(self, ref):
+        if ref.get("title") in self._ok:
+            return ({"source": "crossref"}, [], "https://doi.org/real")
+        return (None, ["not found"], None)
+
+
+def test_r20_cached_verified_row_carries_real_status():
+    """A candidate already in the identity cache surfaces was_verified=True
+    with the cached status + times_seen — no always-null chip."""
+    # SHAREREF has doi 10.1/shareref; mark it verified in the cache.
+    db = _CacheHitDB({"10.1/shareref"})
+    out = _call(
+        _Req(paper_id="10.1234/source", mode="references", limit=5),
+        db=db,
+        checker_factory=lambda: None,  # cache hit, no active verify needed
+    )
+    shareref = next(c for c in out["candidates"] if c["title"] == "Shares References")
+    assert shareref["pre_verified"] is True
+    assert shareref["was_verified"] is True
+    assert shareref["verified_status"] == "verified"
+    assert shareref["times_seen"] == 3
+
+
+def test_r20_active_verify_marks_real_and_unconfirmed_without_fabrication():
+    """Cache miss -> active verify. A title the checker confirms is marked
+    verified; one it can't is 'unverified' (? unconfirmed) — never synthesized."""
+    # COCITE ("Co-cited Work") gets confirmed; SHAREREF ("Shares References")
+    # is NOT in the confirm set -> stays unverified.
+    db = _OfflineDB()  # every cache lookup misses -> active verify branch
+    checker = _ActiveVerifyChecker({"Co-cited Work"})
+    out = _call(
+        _Req(paper_id="10.1234/source", mode="both", limit=5),
+        db=db,
+        checker_factory=lambda: checker,
+    )
+    cocite = next(c for c in out["candidates"] if c["title"] == "Co-cited Work")
+    assert cocite["was_verified"] is True
+    assert cocite["verified_status"] == "verified"
+
+    shareref = next(c for c in out["candidates"] if c["title"] == "Shares References")
+    assert shareref["was_verified"] is False
+    assert shareref["verified_status"] == "unverified"  # honest "? unconfirmed"
+
+
+def test_r20_no_checker_leaves_rows_unverified_not_fabricated():
+    """With no cache hit AND no checker available, rows stay unverified —
+    the real-data gate: ABSTAIN beats a wrong 'verified' badge."""
+    out = _call(
+        _Req(paper_id="10.1234/source", mode="references", limit=5),
+        db=_OfflineDB(),
+        checker_factory=lambda: None,
+    )
+    assert out["candidates"], "overlap rows should still surface"
+    assert all(c["was_verified"] is False for c in out["candidates"])
+    assert all(c["verified_status"] in (None, "unverified", "unknown") for c in out["candidates"])
+
+
+def test_r20_overlap_rows_carry_provenance_identifier():
+    """Every shaped overlap row exposes an OpenAlex id and/or DOI so the FE
+    can render a real provenance link (R20)."""
+    out = _call(_Req(paper_id="10.1234/source", mode="both", limit=5), db=_OfflineDB())
+    assert out["candidates"]
+    for c in out["candidates"]:
+        assert c.get("openalex_id") or c.get("doi"), f"row lacks provenance id: {c.get('title')}"

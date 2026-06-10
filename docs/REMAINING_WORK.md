@@ -631,9 +631,11 @@ A full sweep of every request across the chat (79 items) found 74 fully covered;
 
 ## Progress log (branch `fix/remaining-p0-viewers`)
 
-P0 + the viewer stream are committed and the branch HEAD is CI-green (eslint 0 errors, vitest 199/199, build ok, pytest 1342 passed/1 skipped; `cargo` blocked only by a missing packaged sidecar binary — env/packaging prereq, no Rust source touched).
+P0, the viewer stream, AND the button spec are committed; branch HEAD CI-green (eslint 0 errors, vitest 231/231, build ok, pytest 1342 passed/1 skipped; `cargo` blocked only by the packaged-sidecar prereq — built in CI, no Rust source touched).
 
-| Item | Commit |
+**✅ DONE & committed (verified — tests green):**
+
+| Item(s) | Commit |
 |---|---|
 | R01 published-date honesty | `d2cb4d8` |
 | R04 LLM hang + R54 executor-leak | `da94935`, `b1ae210` |
@@ -644,8 +646,14 @@ P0 + the viewer stream are committed and the branch HEAD is CI-green (eslint 0 e
 | R28/R29/R30 in-PDF jump + opacity + refId | `303798b` |
 | R12/R13/R31 focus-zoom + sentence span + pinch | `e4dabd0` |
 | R55 lint (jumpToPage) + S8 cleanup | `ea1b84d` |
+| R33/R52 unified button system + click-state stability | `ee29ed6` |
+| R44 distinct "Remove from library" | `85a35e6` |
 
-**Remaining (next batches, serialized):** B = button spec R33/R52/R44; C = R06/R07, R16/R25, R20/R39/R08; D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; then J (parity/docs) + K (release) below. (Each viewer item committed above closed its `BROKEN/PARTIAL` from §3.)
+**⏳ IN PROGRESS — Batch C (running):** R06/R07 (DOI corrections), R16 (badge agreement), R25 (similar-papers isolation), R20 (gap-finder/similar verification + provenance), R39 (friendly 404), R08 (common-cites/refs viz).
+
+**⬜ QUEUED (serialized):** D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
+
+**Tally:** 23 of the R01–R55 items DONE (18 of the original R01–R41 + R44/R46/R52/R54/R55); 6 in progress (Batch C); the rest queued in D–K.
 
 ---
 
