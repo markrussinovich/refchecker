@@ -661,9 +661,15 @@ P0, the viewer stream, AND the button spec are committed; branch HEAD CI-green (
 
 Batch-F gate green (`b0b99ee`): lint 0 errors, vitest pass, build ok, pytest pass.
 
-**⬜ QUEUED (serialized):** G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
+| R23/R45/R51/R24 share video real counts + freeze + banner-only + stats-page video | `515a1f3` |
+| R42 native-PDF find/search (Cmd/Ctrl+F) | `6d24825` |
+| R43 per-ref chat grounded in fetched full text (TL;DR fallback) | `9427ad4` |
 
-**Tally:** 41 of the R01–R55 items DONE (R01–R22, R25, R28–R39, R41, R44, R46–R48, R52–R55); remaining: R23/R24/R26/R27/R32/R34/R38/R42/R43/R45/R49/R50/R51 (G–H), R40 (CI), R56–R60 (J/K).
+Batch-G gate green (`9f0c3a7`): lint 0 errors, vitest pass, build ok, pytest pass.
+
+**⬜ QUEUED (serialized):** H = R26/R27, R32/R34/R38, R49 (R50 deferred — needs design image); J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags).
+
+**Tally:** 47 of the R01–R55 items DONE (R01–R39, R41–R48, R52–R55); remaining: R26/R27/R32/R34/R38/R49 (H), R50 (deferred), R40 (CI), R56–R60 (J/K).
 
 ---
 
