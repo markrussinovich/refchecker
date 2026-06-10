@@ -2610,8 +2610,13 @@ class _ArticleChatRequest(_ArticleSummaryRequest):
     messages: List[Dict[str, str]] = []
 
 
-async def _resolve_article_assistant(req: _ArticleSummaryRequest, user_id: int):
-    """Resolve the Chat & Summarize provider via the shared LLM config path."""
+async def _resolve_article_assistant(req: _ArticleSummaryRequest, user_id: int, check_id=None):
+    """Resolve the Chat & Summarize provider via the shared LLM config path.
+
+    ``check_id`` attributes chat / summarize token spend to the per-check LLM
+    usage meter (the on-screen token/$ badge) so follow-up chat / summarize
+    calls tick the badge up live, with their own per-flow breakdown.
+    """
     provider, model, api_key, endpoint = await _resolve_llm_config_for_request(
         user_id=user_id,
         use_llm=True,
@@ -2623,7 +2628,9 @@ async def _resolve_article_assistant(req: _ArticleSummaryRequest, user_id: int):
     if not provider:
         raise HTTPException(status_code=400, detail="No LLM configured for Chat & Summarize.")
     from backend.article_chat import ArticleAssistant
-    return ArticleAssistant(provider=provider, api_key=api_key, endpoint=endpoint, model=model)
+    return ArticleAssistant(
+        provider=provider, api_key=api_key, endpoint=endpoint, model=model, check_id=check_id,
+    )
 
 
 @app.post("/api/check/{check_id}/summarize")
@@ -2642,7 +2649,7 @@ async def summarize_article(
         if source == "none":
             return {"summary": None, "source": "none",
                     "detail": "No article text is available to summarize."}
-        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user))
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user), check_id=check_id)
         if not assistant.available:
             raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
         result = await asyncio.to_thread(assistant.summarize, grounding, source)
@@ -2673,7 +2680,7 @@ async def chat_article(
                     "detail": "No article text is available to chat about."}
         if not req.messages:
             raise HTTPException(status_code=400, detail="No message provided.")
-        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user))
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user), check_id=check_id)
         if not assistant.available:
             raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
         result = await asyncio.to_thread(assistant.chat, req.messages, grounding, source)

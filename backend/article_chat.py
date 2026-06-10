@@ -94,7 +94,15 @@ class ArticleAssistant:
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
         model: Optional[str] = None,
+        check_id: Optional[Any] = None,
     ):
+        # check_id (when supplied by the FastAPI layer) attributes chat /
+        # summarize spend to the per-check usage meter that drives the
+        # on-screen LLM token + $ badge. Recorded explicitly (not via the
+        # FlowScope thread-local) because the endpoints run these calls in a
+        # fresh worker thread via ``asyncio.to_thread``, which the thread-local
+        # would not cross.
+        self.check_id = check_id
         # Lazy import so the module stays importable without runtime deps.
         try:
             from refchecker.config.settings import (
@@ -218,21 +226,58 @@ class ArticleAssistant:
         return extract_google_response_text(resp).strip()
 
     def _record_usage(self, provider: str, response: Any) -> None:
-        """Best-effort token tracking; never breaks the chat call."""
+        """Best-effort token tracking; never breaks the chat call.
+
+        Records into BOTH meters, mirroring the hallucination + extraction
+        paths: the process-wide ``backend.usage_tracker`` (global totals) and
+        the per-check ``refchecker.llm.usage_tracker`` (drives the on-screen
+        token/$ badge for this check). ``flow`` is ``chat`` or ``summarize`` so
+        the badge's per-flow hover breakdown attributes the spend correctly.
+        Only real provider-returned token counts are recorded.
+        """
+        flow = getattr(self, '_active_flow', 'chat') or 'chat'
+        norm_provider = 'google' if provider == 'gemini' else provider
+        usage = None
         try:
             from backend import usage_tracker as _ut
             if provider == 'anthropic':
-                u = _ut.extract_anthropic_usage(response)
+                usage = _ut.extract_anthropic_usage(response)
             elif provider in ('google', 'gemini'):
-                u = _ut.extract_gemini_usage(response)
+                usage = _ut.extract_gemini_usage(response)
             else:
-                u = _ut.extract_openai_usage(response)
+                usage = _ut.extract_openai_usage(response)
             _ut.record_usage(
-                'google' if provider == 'gemini' else provider,
-                self.model, u['input_tokens'], u['output_tokens'], 'article_chat',
+                norm_provider,
+                self.model, usage['input_tokens'], usage['output_tokens'], flow,
             )
         except Exception as exc:
-            logger.debug('article-chat usage tracking skipped: %s', exc)
+            logger.debug('article-chat global usage tracking skipped: %s', exc)
+
+        # Per-check meter — only when a check is in scope, attributed by flow so
+        # the badge ticks up live during chat / summarize follow-ups.
+        if self.check_id is None:
+            return
+        try:
+            from refchecker.llm import usage_tracker as _check_ut
+            if usage is None:
+                # Re-extract independently so a failure in the global path above
+                # doesn't silently drop the per-check record.
+                from backend import usage_tracker as _ut2
+                if provider == 'anthropic':
+                    usage = _ut2.extract_anthropic_usage(response)
+                elif provider in ('google', 'gemini'):
+                    usage = _ut2.extract_gemini_usage(response)
+                else:
+                    usage = _ut2.extract_openai_usage(response)
+            _check_ut.record(
+                check_id=str(self.check_id),
+                model=self.model,
+                input_tokens=usage['input_tokens'],
+                output_tokens=usage['output_tokens'],
+                flow=flow,
+            )
+        except Exception as exc:
+            logger.debug('article-chat per-check usage tracking skipped: %s', exc)
 
     def _call(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
         if self.provider == 'anthropic':
@@ -251,6 +296,7 @@ class ArticleAssistant:
         Returns ``{'summary', 'source'}``. ``source`` is echoed through so the
         UI can show a "from abstract only" banner.
         """
+        self._active_flow = 'summarize'
         system_prompt = _SYSTEM_PROMPT.format(not_stated=NOT_STATED)
         user = f"{_build_document_block(grounding)}\n\n{_SUMMARY_INSTRUCTION}"
         summary = self._call(system_prompt, [{'role': 'user', 'content': user}])
@@ -265,6 +311,7 @@ class ArticleAssistant:
 
         Returns ``{'answer', 'source'}``.
         """
+        self._active_flow = 'chat'
         system_prompt = _SYSTEM_PROMPT.format(not_stated=NOT_STATED)
         history = [
             {'role': m.get('role', 'user'), 'content': str(m.get('content', ''))}

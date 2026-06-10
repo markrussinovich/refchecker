@@ -26,6 +26,8 @@ const FLOW_LABEL = {
   reverify: 'Re-verify',
   context: 'Inline citation contexts',
   ai_detection: 'AI-generated-text detection',
+  chat: 'Chat with article',
+  summarize: 'Article summary',
   other: 'Other LLM calls',
 }
 
