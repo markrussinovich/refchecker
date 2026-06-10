@@ -651,12 +651,15 @@ P0, the viewer stream, AND the button spec are committed; branch HEAD CI-green (
 | R06/R07 AS-CITED DOI in suggested correction | `7ace2fa` |
 | R16/R25 Summary badges agree + similar-papers isolation | `1a1b00d` |
 | R20/R39/R08 gap-finder/similar verify + provenance + common-cites viz | `4de6f78` |
+| R09/R41/R11/R36/R53/R37 author popover: et-al expand, pin/scroll, ORCID link+number, badge | `ef28b08` |
+| R10 ID-less author name/title resolution (non-fabricating) | `8dccf8b` |
+| R15 inline parser: alphabetic + first/last-mentioned schemes | `d8dd25f` |
 
-Batch-C gate `fd4464d`: lint 0 errors, vitest **243** passed, build ok, pytest **1351** passed/1 skipped.
+Batch-D gate green: lint 0 errors, vitest **264** passed, build ok, pytest green.
 
-**⬜ QUEUED (serialized):** D = R09/R41/R11/R10/R36/R53/R37, R15; E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
+**⬜ QUEUED (serialized):** E = R17/R18/R19; F = R21/R22/R35, R47, R48; G = R23/R45/R51/R24, R42, R43; H = R26/R27, R32/R34/R38, R49, R50; J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) needs the user's design attachment.
 
-**Tally:** 25 of the R01–R55 items DONE (R01–R08, R12–R14, R16, R20, R25, R28–R31, R33, R39, R44, R46, R52, R54, R55); the rest queued in D–K.
+**Tally:** 33 of the R01–R55 items DONE (R01–R16, R20, R25, R28–R33, R36, R37, R39, R41, R44, R46, R52–R55); remaining: R17/R18/R19 (E), R21–R24/R35/R45/R47/R48/R49/R50/R51 + R26/R27/R32/R34/R38/R42/R43 (F–H), R40 (CI), R56–R60 (J/K).
 
 ---
 
