@@ -2710,6 +2710,43 @@ async def get_citation_renumber_preview(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/check/{check_id}/corrected-reference-list")
+async def get_corrected_reference_list(
+    check_id: int,
+    style: str = "plaintext",
+    renumber: int = 1,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return the FULL reference list in *style* with new CONTIGUOUS numbers.
+
+    Used by the "Download new reference list" button after an Add/renumber: the
+    persisted references already carry contiguous ``index`` values (the write
+    path renumbers on insert), so with ``renumber=1`` (default) the list is
+    numbered 1..N in document order. Each row prefers the verified
+    ``corrected_reference`` and never fabricates fields. Mutates nothing."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        from backend import export as _export
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        chosen = style if style in _export.CITATION_STYLES else "plaintext"
+        rows = await asyncio.to_thread(
+            _export.serialize_reference_list, refs, chosen, bool(renumber)
+        )
+        text = "\n".join(f"[{row['number']}] {row['formatted']}" for row in rows)
+        return {
+            "style": chosen,
+            "renumbered": bool(renumber),
+            "count": len(rows),
+            "references": rows,
+            "text": text,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error building corrected reference list for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/check/{check_id}/gaps")
 async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require_user)):
     """"Did you miss these?" — works frequently co-cited by the bibliography's own

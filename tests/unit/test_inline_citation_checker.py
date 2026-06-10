@@ -1,6 +1,10 @@
 """Unit tests for the inline-citation numbering parser + checker."""
 
-from backend.inline_citation_checker import inline_citation_report, renumber_preview
+from backend.inline_citation_checker import (
+    inline_citation_report,
+    renumber_preview,
+    apply_renumber,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -731,3 +735,29 @@ def test_alpha_key_renumber_preview_abstains():
     assert rep["scheme"] == "alpha-key"
     assert rep["shifted_markers"] == []
     assert rep["shifted_count"] == 0
+
+
+def test_apply_renumber_commits_preview_shifts_descending_offset():
+    # R18 (G1): preview + commit on a bracket-numeric paper. Inserting at printed
+    # position 2 shifts every marker >= 2; apply_renumber must splice the new
+    # markers over the old ones using the captured offsets in descending order so
+    # a length change ([9]->[10]) never corrupts an earlier offset. Adjacent and
+    # multi-digit markers exercised, no off-by-one.
+    refs = [{"index": i, "title": f"Ref {i}", "authors": [f"A {i}"], "year": 2000 + i}
+            for i in range(1, 11)]
+    body = (
+        "Intro cites [1]. Method builds on [2][9] and the survey [10]. "
+        "Later we revisit [2], and the appendix lists [3]-[5] together."
+    )
+    prev = renumber_preview(body, refs, 2)
+    assert prev["abstained"] is False
+    assert prev["shifted_count"] >= 1
+    out = apply_renumber(body, prev["shifted_markers"])
+    # [1] untouched; the adjacent [2][9] becomes [3][10]; standalone [10]->[11];
+    # the range [3]-[5] becomes [4]-[6]; the second [2]->[3].
+    assert "[1]" in out
+    assert "[3][10]" in out
+    assert "[11]" in out
+    assert "[4]-[6]" in out
+    # No original marker survives where it should have shifted.
+    assert "[2][9]" not in out

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["inline_citation_report", "renumber_preview"]
+__all__ = ["inline_citation_report", "renumber_preview", "apply_renumber"]
 
 
 # --------------------------------------------------------------------------- #
@@ -1366,3 +1366,73 @@ def renumber_preview(paper_text, references, new_printed_number=None):
         "shifted_markers": shifted,
         "shifted_count": len(shifted),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Renumber commit (splice the shifted markers back into the body text)         #
+# --------------------------------------------------------------------------- #
+
+def apply_renumber(text, shifted_markers):
+    """Return *text* with every shifted inline marker replaced by its new form.
+
+    *shifted_markers* is the ``shifted_markers`` list produced by
+    :func:`renumber_preview` (each item ``{offset, marker, new_marker, ...}``).
+    Each ``offset`` is the byte/char index of ``marker`` within the SAME body
+    text the preview ran on, so the splice is anchored to the captured position
+    rather than re-searched (a re-search would mis-target the second of two
+    identical markers, e.g. two ``[9]`` occurrences).
+
+    Correctness contract (algorithms-professor sign-off):
+      * Splices are applied in **strictly descending offset order** so that
+        replacing a later marker never shifts the indices of an earlier one —
+        essential because ``new_marker`` can be a DIFFERENT LENGTH than
+        ``marker`` (``[9]`` -> ``[10]`` grows by one char; a multi-number marker
+        ``[8,9]`` -> ``[9,10]`` grows by two). Ascending order would corrupt
+        every subsequent offset.
+      * Each splice is VERIFIED before it is applied: the slice
+        ``text[offset:offset+len(marker)]`` must equal ``marker`` exactly. A
+        mismatch (stale offset, edited text, malformed row) is skipped rather
+        than blindly overwriting the wrong characters — no off-by-one, no
+        corruption of unrelated text.
+      * A no-op marker (``new_marker == marker``) is skipped.
+      * Idempotent for malformed/empty input: returns *text* unchanged.
+
+    The original document/PDF is never touched by the checker; this helper only
+    transforms a copy of the extracted body text for the corrected-list export.
+    """
+    text = _coerce_text(text)
+    if not text or not isinstance(shifted_markers, (list, tuple)):
+        return text
+
+    # Collect (offset, marker, new_marker) for valid rows only.
+    splices = []
+    for sm in shifted_markers:
+        if not isinstance(sm, dict):
+            continue
+        offset = sm.get("offset")
+        marker = sm.get("marker")
+        new_marker = sm.get("new_marker")
+        if not isinstance(offset, int) or offset < 0:
+            continue
+        if not isinstance(marker, str) or not marker:
+            continue
+        if not isinstance(new_marker, str):
+            continue
+        if new_marker == marker:
+            continue  # no-op
+        splices.append((offset, marker, new_marker))
+
+    # DESCENDING offset order: replacing a marker further along the string
+    # cannot invalidate the offset of any marker earlier in the string, even
+    # when new_marker and marker differ in length.
+    splices.sort(key=lambda t: t[0], reverse=True)
+
+    out = text
+    for offset, marker, new_marker in splices:
+        end = offset + len(marker)
+        # Verify the captured offset still names exactly this marker before
+        # splicing — never overwrite text we can't confirm.
+        if out[offset:end] != marker:
+            continue
+        out = out[:offset] + new_marker + out[end:]
+    return out

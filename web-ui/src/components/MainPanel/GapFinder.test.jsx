@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const getCheckGaps = vi.hoisted(() => vi.fn())
 const addReferenceToCheck = vi.hoisted(() => vi.fn())
 const getCitationRenumberPreview = vi.hoisted(() => vi.fn())
+const getCorrectedReferenceList = vi.hoisted(() => vi.fn())
 vi.mock('../../utils/api', () => ({
   getCheckGaps,
   addReferenceToCheck,
   getCitationRenumberPreview,
+  getCorrectedReferenceList,
 }))
 vi.mock('../../utils/tauriBridge', () => ({ openExternal: vi.fn(), isTauri: () => false }))
 vi.mock('../../stores/useHistoryStore', () => ({
@@ -23,6 +25,7 @@ beforeEach(() => {
   getCheckGaps.mockReset()
   addReferenceToCheck.mockReset()
   getCitationRenumberPreview.mockReset()
+  getCorrectedReferenceList.mockReset()
 })
 
 describe('GapFinder — R33 styling + R52 fixed-header collapse', () => {
@@ -151,5 +154,97 @@ describe('GapFinder — R17 dedup/validity guard', () => {
 
     await screen.findByText(/already in list \(reference \[7\]\)/i)
     expect(screen.queryByText('add failed')).toBeNull()
+  })
+})
+
+describe('GapFinder — R18 commit renumber + download new list', () => {
+  it('passes insert_at_index derived from new_printed_number when the preview has numeric shifts', async () => {
+    getCheckGaps.mockResolvedValue({
+      data: { suggestions: [{ openalex_id: 'W1', title: 'A co-cited work', co_citations: 4, doi: '10.1/new' }] },
+    })
+    // A numeric preview that says the new ref takes printed position 3 and that
+    // existing markers shift — so the commit must NOT append (insert_at_index=2).
+    getCitationRenumberPreview.mockResolvedValue({
+      data: {
+        abstained: false, scheme: 'bracket', new_printed_number: 3,
+        shifted_markers: [{ offset: 10, marker: '[3]', new_marker: '[4]', numbers: [3] }],
+        shifted_count: 1,
+      },
+    })
+    addReferenceToCheck.mockResolvedValue({ data: { inserted_index: 3 } })
+
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText('A co-cited work')
+
+    fireEvent.click(screen.getByText('+ Add to references'))
+    const confirm = await screen.findByRole('button', { name: /confirm add/i })
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(addReferenceToCheck).toHaveBeenCalled())
+    const [, payload] = addReferenceToCheck.mock.calls[0]
+    // new_printed_number(3) - 1 => 0-based insert_at_index 2.
+    expect(payload.insert_at_index).toBe(2)
+  })
+
+  it('appends (no insert_at_index) when the preview abstains for a non-numeric scheme', async () => {
+    getCheckGaps.mockResolvedValue({
+      data: { suggestions: [{ openalex_id: 'W2', title: 'Author-year paper', co_citations: 2, doi: '10.2/ay' }] },
+    })
+    getCitationRenumberPreview.mockResolvedValue({
+      data: { abstained: true, scheme: 'author-year', shifted_markers: [], new_printed_number: null },
+    })
+    addReferenceToCheck.mockResolvedValue({ data: { inserted_index: 9 } })
+
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText('Author-year paper')
+    fireEvent.click(screen.getByText('+ Add to references'))
+    const confirm = await screen.findByRole('button', { name: /confirm add/i })
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(addReferenceToCheck).toHaveBeenCalled())
+    const [, payload] = addReferenceToCheck.mock.calls[0]
+    expect(payload.insert_at_index).toBeUndefined()
+  })
+
+  it('shows a "Download new reference list" button after an add and fetches the renumbered list', async () => {
+    getCheckGaps.mockResolvedValue({
+      data: { suggestions: [{ openalex_id: 'W3', title: 'Added work', co_citations: 3, doi: '10.3/x' }] },
+    })
+    getCitationRenumberPreview.mockResolvedValue({
+      data: { abstained: true, scheme: 'author-year', shifted_markers: [], new_printed_number: null },
+    })
+    addReferenceToCheck.mockResolvedValue({ data: { inserted_index: 5 } })
+    getCorrectedReferenceList.mockResolvedValue({
+      data: { style: 'plaintext', renumbered: true, count: 1, text: '[1] Added work. 2024.' },
+    })
+
+    // jsdom lacks URL.createObjectURL / anchor download; stub the bits we touch.
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fake')
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText('Added work')
+
+    // No download button before any add.
+    expect(screen.queryByText('Download new reference list')).toBeNull()
+
+    fireEvent.click(screen.getByText('+ Add to references'))
+    const confirm = await screen.findByRole('button', { name: /confirm add/i })
+    fireEvent.click(confirm)
+    await screen.findByText(/✓ Added/i)
+
+    // The download affordance now appears; clicking it pulls the renumbered list.
+    const dlBtn = await screen.findByText('Download new reference list')
+    fireEvent.click(dlBtn)
+    await waitFor(() => expect(getCorrectedReferenceList).toHaveBeenCalledWith(
+      CHECK_ID, expect.objectContaining({ renumber: true }),
+    ))
+    expect(clickSpy).toHaveBeenCalled()
+
+    createSpy.mockRestore(); revokeSpy.mockRestore(); clickSpy.mockRestore()
   })
 })

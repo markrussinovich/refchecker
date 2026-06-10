@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview } from '../../utils/api'
+import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview, getCorrectedReferenceList } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import Button from '../common/Button'
@@ -49,6 +49,7 @@ export default function GapFinder({ checkId, references }) {
   const [preview, setPreview] = useState({})   // key -> { open, loading, data, error }
   const [diffOpen, setDiffOpen] = useState({}) // key -> bool: per-preview "show renumbering" detail toggle
   const [collapsed, setCollapsed] = useState(false) // collapse the results panel
+  const [dl, setDl] = useState(false)              // R18 — "Download new reference list" busy flag
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
 
@@ -93,11 +94,23 @@ export default function GapFinder({ checkId, references }) {
     const k = keyOf(s, i)
     setAdded((a) => ({ ...a, [k]: 'adding' }))
     try {
+      // R18 (G1) — derive the insert position from the renumber preview's
+      // `new_printed_number` so the backend ACTUALLY renumbers (non-empty
+      // `renumbering` map) instead of always appending. Only when the preview
+      // is a real numeric scheme with shifts; a non-numeric/abstained preview
+      // appends honestly (nothing renumbers). `new_printed_number` is 1-based
+      // printed position; `insert_at_index` is 0-based -> subtract one.
+      const pvData = preview[k]?.data
+      const newPrinted = pvData?.new_printed_number
+      const willRenumber = pvData && !pvData.abstained
+        && Array.isArray(pvData.shifted_markers) && pvData.shifted_markers.length > 0
+        && Number.isInteger(newPrinted) && newPrinted >= 1
       const res = await addReferenceToCheck(checkId, {
         title: s.title,
         year: s.year,
         doi: s.doi || undefined,
         cited_url: s.doi ? `https://doi.org/${s.doi}` : undefined,
+        ...(willRenumber ? { insert_at_index: newPrinted - 1 } : {}),
       })
       setInfo((m) => ({ ...m, [k]: { insertedIndex: res?.data?.inserted_index } }))
       // Refresh the check so the new reference appears in the list.
@@ -117,6 +130,34 @@ export default function GapFinder({ checkId, references }) {
       setAdded((a) => ({ ...a, [k]: 'error' }))
     }
   }
+
+  // R18 (G1) — fetch the full re-serialized list (new contiguous numbers) and
+  // save it as a .txt file. Real data only: the server renders the persisted
+  // references (preferring verified corrected values), never invented entries.
+  const downloadNewList = async () => {
+    setDl(true)
+    try {
+      const res = await getCorrectedReferenceList(checkId, { style: 'plaintext', renumber: true })
+      const text = res?.data?.text || ''
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+      const href = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = href
+      a.download = `reference-list-${checkId}.txt`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(href)
+    } catch {
+      /* best-effort download; surfaced state stays "done" */
+    } finally {
+      setDl(false)
+    }
+  }
+
+  // True once at least one suggestion has been committed this session, so we can
+  // offer to download the renumbered list reflecting the new additions.
+  const anyAdded = Object.values(added).some((st) => st === 'done')
 
   const d = state.data
   const suggestions = Array.isArray(d?.suggestions) ? d.suggestions : []
@@ -331,6 +372,16 @@ export default function GapFinder({ checkId, references }) {
               )
             })}
           </ul>
+          {/* R18 (G1) — once a reference is added, offer the full renumbered
+              list (new contiguous 1..N numbers) as a download. */}
+          {anyAdded && (
+            <div className="mt-2">
+              <Button size="pill" variant="outline" onClick={downloadNewList} loading={dl}
+                title="Download the full reference list re-numbered 1..N to reflect the additions">
+                Download new reference list
+              </Button>
+            </div>
+          )}
           <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
             Advisory only (OpenAlex co-citation). Each is a real OpenAlex-resolved work cited by your own references — not AI-generated. Judge relevance yourself.
           </div>
