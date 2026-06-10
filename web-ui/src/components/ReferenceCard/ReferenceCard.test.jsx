@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReferenceCard from './ReferenceCard'
 
@@ -8,6 +8,22 @@ vi.mock('../../utils/formatters', async () => {
     ...actual,
     copyToClipboard: vi.fn(),
   }
+})
+
+// Control the author-profile fetch (used by the AuthorChip popover) and keep
+// isTauri() false so anchor clicks behave like a normal browser.
+const mockFetchAuthorProfile = vi.fn(() => Promise.resolve({ data: { available: false } }))
+vi.mock('../../utils/api', async () => {
+  const actual = await vi.importActual('../../utils/api')
+  return {
+    ...actual,
+    fetchAuthorProfile: (...args) => mockFetchAuthorProfile(...args),
+    getVenueProfile: vi.fn(() => Promise.resolve({ data: { available: false } })),
+  }
+})
+vi.mock('../../utils/tauriBridge', async () => {
+  const actual = await vi.importActual('../../utils/tauriBridge')
+  return { ...actual, isTauri: () => false, openExternal: vi.fn() }
 })
 
 describe('ReferenceCard', () => {
@@ -157,5 +173,189 @@ describe('ReferenceCard — R04 hallucination-pending safety net', () => {
 
     expect(screen.getByText(/Checking for hallucination with LLM/i)).toBeTruthy()
     expect(screen.queryByText(/Hallucination check timed out/i)).toBeNull()
+  })
+})
+
+// D1 author-UI cluster: R09 (et-al expand), R41 (no fake sentinel chip),
+// R11 (pin/scroll), R36/R53 (ORCID link + number), R37 (badge co-locate).
+describe('ReferenceCard — author UI cluster (D1)', () => {
+  afterEach(() => {
+    mockFetchAuthorProfile.mockReset()
+    mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
+  })
+
+  it('R41: never renders a standalone "et al." sentinel as an author chip', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Truncated authors paper',
+      authors: ['Jane Smith', 'John Doe', 'et al.'],
+      year: 2021,
+      errors: [], warnings: [], suggestions: [],
+    }
+    const { container } = render(<ReferenceCard reference={reference} index={0} />)
+    // The author line text shows the real names but NOT the bare sentinel.
+    expect(screen.getByText(/Jane Smith/)).toBeTruthy()
+    // No element renders the literal "et al." as a name (only the expand
+    // control, which is absent here because no enriched list was provided).
+    expect(within(container).queryByText('et al.')).toBeNull()
+  })
+
+  it('R09: "et al. (show N authors)" toggle swaps in the enriched author list', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Et-al expandable paper',
+      authors: ['Jane Smith', 'et al.'],
+      year: 2021,
+      enrichment: {
+        authors: [
+          { name: 'Jane Smith' },
+          { name: 'John Doe' },
+          { name: 'Alice Wong' },
+        ],
+      },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    // Collapsed: enriched-only names are not visible yet.
+    expect(screen.queryByText(/Alice Wong/)).toBeNull()
+    const expand = screen.getByRole('button', { name: /et al\. \(show 3 authors\)/i })
+    fireEvent.click(expand)
+
+    // Expanded: the full enriched list now renders.
+    expect(screen.getByText(/Alice Wong/)).toBeTruthy()
+    expect(screen.getByText(/John Doe/)).toBeTruthy()
+
+    // And it collapses back.
+    fireEvent.click(screen.getByRole('button', { name: /show less/i }))
+    expect(screen.queryByText(/Alice Wong/)).toBeNull()
+  })
+
+  it('R11: clicking the name pins the popover; ×, Escape, and outside-click close it; shows >3 papers', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockResolvedValue({
+      data: {
+        available: true,
+        hIndex: 12,
+        citationCount: 340,
+        papers: [
+          { title: 'Paper One', year: 2024 },
+          { title: 'Paper Two', year: 2023 },
+          { title: 'Paper Three', year: 2022 },
+          { title: 'Paper Four', year: 2021 },
+          { title: 'Paper Five', year: 2020 },
+        ],
+      },
+    })
+    const reference = {
+      status: 'verified',
+      title: 'Pinnable author paper',
+      authors: ['Jane Smith'],
+      year: 2021,
+      enrichment: { authors: [{ name: 'Jane Smith', s2_author_id: '99', orcid: '0000-0002-1825-0097' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    // Click the name → pins open (a dialog role appears, off-hover).
+    fireEvent.click(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeTruthy()
+
+    // Pinned panel shows the FULL recent-papers list (>3), not the 3-cap.
+    await waitFor(() => expect(within(dialog).getByText('Paper Four')).toBeTruthy())
+    expect(within(dialog).getByText('Paper Five')).toBeTruthy()
+
+    // Escape closes it.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    // Re-pin, then close via the × control.
+    fireEvent.click(screen.getByText('Jane Smith'))
+    const dialog2 = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog2).getByRole('button', { name: /close author card/i }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    // Re-pin, then close via outside-click (mousedown on the body).
+    fireEvent.click(screen.getByText('Jane Smith'))
+    await screen.findByRole('dialog')
+    fireEvent.mouseDown(document.body)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('R36/R53: renders the ORCID page link AND the visible ORCID number, gated to real values', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockResolvedValue({
+      data: { available: true, orcid: '0000-0001-2345-6789', papers: [] },
+    })
+    const reference = {
+      status: 'verified',
+      title: 'ORCID author paper',
+      authors: ['Jane Smith'],
+      year: 2021,
+      // No ORCID on the enrichment record — it must come from the fetched profile (R36).
+      enrichment: { authors: [{ name: 'Jane Smith', s2_author_id: '42' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.click(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('dialog')
+
+    // The visible ORCID NUMBER renders (R53)...
+    await waitFor(() => expect(within(dialog).getByText('0000-0001-2345-6789')).toBeTruthy())
+    // ...alongside a clickable orcid.org page LINK to it (R53/R36).
+    const orcidLink = within(dialog).getAllByRole('link').find(a => a.getAttribute('href') === 'https://orcid.org/0000-0001-2345-6789')
+    expect(orcidLink).toBeTruthy()
+  })
+
+  it('R36/R53: shows no ORCID when none resolved (no fabrication)', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockResolvedValue({ data: { available: true, papers: [] } })
+    const reference = {
+      status: 'verified',
+      title: 'No ORCID paper',
+      authors: ['Jane Smith'],
+      year: 2021,
+      enrichment: { authors: [{ name: 'Jane Smith', s2_author_id: '7' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.click(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(mockFetchAuthorProfile).toHaveBeenCalled())
+    // No orcid.org link anywhere in the pinned panel.
+    const orcidLink = within(dialog).queryAllByRole('link').find(a => (a.getAttribute('href') || '').includes('orcid.org'))
+    expect(orcidLink).toBeUndefined()
+  })
+
+  it('R37: relabels the inline badge and appends a literature-citation pill when cited_by_count exists', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Inline cited paper',
+      authors: ['Jane Smith'],
+      year: 2021,
+      is_inline_cited: true,
+      citation_count: 4,
+      enrichment: { cited_by_count: 1234 },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    expect(screen.getByText(/Used 4× in this paper/)).toBeTruthy()
+    expect(screen.getByText(/1,234 citations/)).toBeTruthy()
+  })
+
+  it('R37: omits the literature-citation pill when cited_by_count is absent', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Inline cited paper without enrichment count',
+      authors: ['Jane Smith'],
+      year: 2021,
+      is_inline_cited: true,
+      citation_count: 2,
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    expect(screen.getByText(/Used 2× in this paper/)).toBeTruthy()
+    expect(screen.queryByText(/citations/)).toBeNull()
   })
 })

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import {
   normalizeAuthors,
+  hasEtAlSentinel,
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
   exportReferenceAsBibtex,
@@ -686,17 +687,34 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
               {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (() => {
+                // R37: co-locate the two distinct citation signals.
+                //  - "Used N× in this paper": how many times THIS paper cites
+                //    the reference inline (local, from the body text).
+                //  - "· N citations": how many times the reference is cited
+                //    across the LITERATURE (from enrichment.cited_by_count).
+                // The literature pill is real-data gated — it only renders when
+                // a real count resolved, so nothing is fabricated.
                 const inlineUses = reference.citation_count || reference.citation_contexts?.length || 0
+                const litCount = reference.enrichment?.cited_by_count
+                const hasLitCount = typeof litCount === 'number'
                 return (
                   <span
-                    title={`Cited inline — mentioned ${inlineUses || 1}× in this paper's body text`}
+                    title={`Used ${inlineUses || 1}× in this paper — mentioned inline in this paper's body text`}
                     className="inline-flex items-center gap-1 align-middle ml-1.5 px-1.5 py-0.5 rounded text-xs font-medium"
                     style={{ color: 'var(--color-accent, #3b82f6)', background: 'rgba(59,130,246,0.14)', verticalAlign: 'middle' }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                       <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
                     </svg>
-                    Cited inline{inlineUses > 0 ? ` · ${inlineUses}×` : ''}
+                    Used {inlineUses > 0 ? inlineUses : 1}× in this paper
+                    {hasLitCount && (
+                      <span
+                        title="Times cited across the literature (OpenAlex/S2)"
+                        style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}
+                      >
+                        {' · '}{litCount.toLocaleString()} citations
+                      </span>
+                    )}
                   </span>
                 )
               })()}
@@ -1369,12 +1387,31 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
  * ref verified via DBLP only and has no author IDs).
  */
 function AuthorsLine({ authors, enrichedAuthors }) {
-  const list = normalizeAuthors(authors)
+  const citedList = normalizeAuthors(authors)
   // Hooks MUST run before any early return (rules-of-hooks). If a reference's
   // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
   // an early return here would skip the useState below and flip the hook count,
   // crashing the whole tree with React #310 (blank page).
   const [showAll, setShowAll] = useState(false)
+  // R09: when the cited list was truncated (ends in an "et al." sentinel)
+  // OR the enriched author list is strictly longer than what was cited,
+  // offer to swap the cited list for the full enriched author list.
+  const [showEnriched, setShowEnriched] = useState(false)
+
+  // Real enriched names from the resolved author records (sentinels already
+  // can't appear here — these are DB-resolved people). Drives the "et al.
+  // (show N authors)" expand control.
+  const enrichedNames = (Array.isArray(enrichedAuthors) ? enrichedAuthors : [])
+    .map(a => (a && typeof a.name === 'string' ? a.name.trim() : ''))
+    .filter(Boolean)
+  const etAlSentinel = hasEtAlSentinel(authors)
+  const canExpandEnriched = enrichedNames.length > citedList.length
+  const offerEtAlExpand = (etAlSentinel || canExpandEnriched) && enrichedNames.length > 0
+
+  // The list actually rendered: the enriched full list when expanded,
+  // otherwise the cited (possibly truncated) list.
+  const list = (showEnriched && offerEtAlExpand) ? enrichedNames : citedList
+  if (citedList.length === 0 && !offerEtAlExpand) return null
   if (list.length === 0) return null
 
   // Normalise a name fragment: lowercase, strip diacritics, strip
@@ -1499,6 +1536,20 @@ function AuthorsLine({ authors, enrichedAuthors }) {
         <button type="button" onClick={() => setShowAll(false)}
           className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
       )}
+      {/* R09: "et al." → expand to the full enriched author list. Only shown
+          when the cited list was truncated (or the enriched list is longer)
+          AND we actually have real enriched names to reveal — never fabricated. */}
+      {offerEtAlExpand && !showEnriched && (
+        <button type="button" onClick={() => { setShowEnriched(true); setShowAll(false) }}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+          title="Show the full author list resolved from the matched record">
+          {' '}et al. (show {enrichedNames.length} authors)
+        </button>
+      )}
+      {offerEtAlExpand && showEnriched && (
+        <button type="button" onClick={() => { setShowEnriched(false); setShowAll(false) }}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
+      )}
     </div>
   )
 }
@@ -1573,8 +1624,13 @@ function ProfileLinkIcon({ icon }) {
 
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   const [open, setOpen] = useState(false)
+  // R11: pinned keeps the popover open off-hover until explicitly dismissed
+  // (×, outside-click, or Escape) and switches it to the larger, fully-scrollable
+  // panel that shows the COMPLETE recent-papers list (no slice(0,3) cap).
+  const [pinned, setPinned] = useState(false)
   const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
   const wrapperRef = useRef(null)
+  const popoverRef = useRef(null)
   const enterTimer = useRef(null)
   const leaveTimer = useRef(null)
   // Popover placement so it always fits + scrolls even when the author sits low
@@ -1609,8 +1665,40 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
   }
   const onLeave = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    // R11: when pinned, leaving the chip must NOT close the popover.
+    if (pinned) return
     leaveTimer.current = setTimeout(() => setOpen(false), 120)
   }
+  // R11: pin the popover open (stays open off-hover). Clears any pending
+  // hover-leave close, opens immediately, and loads the rich profile.
+  const pin = () => {
+    if (!e) return
+    if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
+    setOpen(true)
+    setPinned(true)
+    loadProfile()
+  }
+  const closePinned = () => { setPinned(false); setOpen(false) }
+
+  // R11: while pinned, dismiss on outside-click (mousedown) or Escape — mirrors
+  // the export-menu outside-click pattern elsewhere in this file.
+  useEffect(() => {
+    if (!pinned) return undefined
+    const onDown = (ev) => {
+      const inAnchor = wrapperRef.current && wrapperRef.current.contains(ev.target)
+      const inPop = popoverRef.current && popoverRef.current.contains(ev.target)
+      if (!inAnchor && !inPop) closePinned()
+    }
+    const onKey = (ev) => { if (ev.key === 'Escape') closePinned() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pinned])
+
   useEffect(() => () => {
     if (enterTimer.current) clearTimeout(enterTimer.current)
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
@@ -1649,7 +1737,11 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
     }
   }, [open])
 
-  const orcidUrl = e?.orcid ? `https://orcid.org/${e.orcid}` : null
+  // R36: honour an ORCID surfaced by the fetched S2/OpenAlex profile too,
+  // not just the one carried on the enrichment record `e`. Real-data gated:
+  // resolves to a real id or null, never a guess.
+  const resolvedOrcid = (profile?.available && profile?.orcid) || e?.orcid || null
+  const orcidUrl = resolvedOrcid ? `https://orcid.org/${resolvedOrcid}` : null
   const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
   const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
 
@@ -1665,20 +1757,37 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={onClickHref}
-          title={!e ? tooltipFallback : undefined}
+          onClick={(ev) => {
+            // R11: a plain left-click on an enriched name pins the popover open
+            // instead of navigating; modifier-clicks (open-in-new-tab etc.)
+            // still follow the profile link.
+            if (e && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
+              ev.preventDefault()
+              pin()
+              return
+            }
+            onClickHref(ev)
+          }}
+          title={!e ? tooltipFallback : 'Click to pin this author card open'}
           style={{
             color: 'var(--color-text-secondary)',
             textDecorationColor: 'var(--color-link, #3b82f6)',
             textDecorationStyle: 'dotted',
             textUnderlineOffset: '3px',
             textDecorationLine: 'underline',
+            cursor: e ? 'pointer' : undefined,
           }}
         >
           {name}
         </a>
       ) : (
-        <span title={tooltipFallback || undefined}>{name}</span>
+        <span
+          title={tooltipFallback || undefined}
+          onClick={e ? pin : undefined}
+          style={e ? { cursor: 'pointer' } : undefined}
+        >
+          {name}
+        </span>
       )}
       {open && e && (() => {
         const dispName = e.name || name
@@ -1708,7 +1817,9 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
         ].filter(Boolean)
         return (
         <div
-          role="tooltip"
+          ref={popoverRef}
+          role={pinned ? 'dialog' : 'tooltip'}
+          aria-label={pinned ? `${dispName} — author details` : undefined}
           className="rounded-xl text-xs"
           style={{
             position: 'absolute', left: 0, zIndex: 60,
@@ -1718,11 +1829,15 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
             ...(placement.dir === 'up'
               ? { bottom: '100%', marginBottom: 8 }
               : { top: '100%', marginTop: 8 }),
-            minWidth: 300, maxWidth: 380,
+            // R11: the pinned panel is larger (wider + taller) so the full
+            // recent-papers list has room to scroll.
+            minWidth: pinned ? 360 : 300,
+            maxWidth: pinned ? 460 : 380,
             // Cap height to the ACTUAL space available (min(70vh, space−margin))
             // and scroll the overflow — the body used to clip below the viewport
             // when the author had lots of recent papers.
-            maxHeight: placement.maxHeight, overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
+            maxHeight: pinned ? '80vh' : placement.maxHeight,
+            overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
@@ -1732,14 +1847,30 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           onMouseEnter={onEnter}
           onMouseLeave={onLeave}
         >
-          {/* Header: avatar + name + affiliation */}
+          {/* Header: avatar + name + affiliation. Pin (⤢) / close (×) controls
+              sit top-right so the popover can be promoted to a persistent panel. */}
           <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
             <span className="flex-shrink-0 inline-flex items-center justify-center rounded-full"
               style={{ width: 36, height: 36, background: avatarBg, color: '#fff', fontWeight: 700, fontSize: 13 }}>
               {initials}
             </span>
-            <div className="min-w-0">
-              <div style={{ fontWeight: 600, lineHeight: 1.25 }}>{dispName}</div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start gap-2">
+                <div style={{ fontWeight: 600, lineHeight: 1.25, flex: 1, minWidth: 0 }}>{dispName}</div>
+                {pinned ? (
+                  <button type="button" onClick={closePinned} aria-label="Close author card"
+                    title="Close"
+                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 16, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+                    ×
+                  </button>
+                ) : (
+                  <button type="button" onClick={pin} aria-label="Pin author card open"
+                    title="Pin open"
+                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 13, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+                    ⤢
+                  </button>
+                )}
+              </div>
               {affs.length > 0 && (
                 <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
                   {affs.slice(0, 2).join(' · ')}
@@ -1776,12 +1907,36 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
             </div>
           )}
 
-          {/* Recent papers */}
+          {/* R53: ORCID — clickable orcid.org page link AND the visible ORCID
+              number, co-located. Real-data gated: only renders when a real
+              ORCID id resolved (from the enrichment record or the fetched
+              profile, R36), never fabricated. */}
+          {orcidUrl && resolvedOrcid && (
+            <div className="flex items-center gap-1.5 px-3 pb-2.5" style={{ fontSize: 11 }}>
+              <ProfileLinkIcon icon="orcid" />
+              <a
+                href={orcidUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(orcidUrl) } }}
+                title={`Open ORCID record ${resolvedOrcid}`}
+                style={{ color: 'var(--color-accent)' }}
+              >
+                ORCID
+              </a>
+              <span style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{resolvedOrcid}</span>
+            </div>
+          )}
+
+          {/* Recent papers. R11: the hover popover shows the top 3; the pinned
+              panel shows the COMPLETE list (the outer container scrolls). */}
           {profile?.available && Array.isArray(profile.papers) && profile.papers.length > 0 && (
             <div className="px-3 pb-2.5">
-              <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Recent work</div>
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                Recent work{pinned && profile.papers.length > 1 ? ` (${profile.papers.length})` : ''}
+              </div>
               <div className="space-y-1.5">
-                {profile.papers.slice(0, 3).map((p, i) => (
+                {(pinned ? profile.papers : profile.papers.slice(0, 3)).map((p, i) => (
                   <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
                     {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
                   </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex } from './formatters'
+import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex, normalizeAuthors, isEtAlSentinel, hasEtAlSentinel } from './formatters'
 
 describe('formatters', () => {
   describe('formatDate', () => {
@@ -213,6 +213,53 @@ describe('formatters', () => {
       }
       const bibtex = exportReferenceAsBibtex(ref, 0)
       expect(bibtex).toContain('2020')
+    })
+  })
+
+  // R41 / R09: et-al/"and others" truncation sentinels must never render as a
+  // fake author chip; normalizeAuthors strips them from the display list.
+  describe('normalizeAuthors — et-al sentinel filtering (R41)', () => {
+    it('filters a trailing "et al." token from an array', () => {
+      expect(normalizeAuthors(['Jane Smith', 'John Doe', 'et al.'])).toEqual(['Jane Smith', 'John Doe'])
+    })
+
+    it('filters "and others" / "others" sentinels (any case, trailing punctuation)', () => {
+      expect(normalizeAuthors(['A. Author', 'and others'])).toEqual(['A. Author'])
+      expect(normalizeAuthors(['A. Author', 'Others'])).toEqual(['A. Author'])
+      expect(normalizeAuthors(['A. Author', 'ET AL'])).toEqual(['A. Author'])
+    })
+
+    it('filters the sentinel from a comma-separated string', () => {
+      expect(normalizeAuthors('Jane Smith, John Doe, et al.')).toEqual(['Jane Smith', 'John Doe'])
+    })
+
+    it('keeps real names that merely contain "et" or "al" as substrings', () => {
+      expect(normalizeAuthors(['Pete Albers', 'Alan Etheridge'])).toEqual(['Pete Albers', 'Alan Etheridge'])
+    })
+
+    it('isEtAlSentinel classifies only standalone truncation tokens', () => {
+      expect(isEtAlSentinel('et al.')).toBe(true)
+      expect(isEtAlSentinel('and others')).toBe(true)
+      expect(isEtAlSentinel('Jane Smith')).toBe(false)
+    })
+  })
+
+  // R09: detect a trailing et-al sentinel so the UI can offer an "et al. (show
+  // N authors)" expand control to the full enriched list.
+  describe('hasEtAlSentinel (R09)', () => {
+    it('is true when the raw list ends in an et-al token', () => {
+      expect(hasEtAlSentinel(['Jane Smith', 'John Doe', 'et al.'])).toBe(true)
+      expect(hasEtAlSentinel('Jane Smith, et al.')).toBe(true)
+    })
+
+    it('is false for a complete author list', () => {
+      expect(hasEtAlSentinel(['Jane Smith', 'John Doe'])).toBe(false)
+      expect(hasEtAlSentinel('Jane Smith, John Doe')).toBe(false)
+    })
+
+    it('is false for empty / null input', () => {
+      expect(hasEtAlSentinel(null)).toBe(false)
+      expect(hasEtAlSentinel([])).toBe(false)
     })
   })
 })

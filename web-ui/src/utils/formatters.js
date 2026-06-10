@@ -64,6 +64,20 @@ function _authorToString(a) {
   return ''
 }
 
+// R09/R41: a bare "et al."/"and others" token is a TRUNCATION SENTINEL, not
+// a person. Extractors sometimes emit it as a standalone author entry, which
+// otherwise renders as a fake chip with a trailing comma. Strip it from the
+// display list so only real names render; the "et al." UI affordance is driven
+// separately (see `hasEtAlSentinel` + the AuthorsLine expand control).
+export function isEtAlSentinel(value) {
+  const t = String(value || '')
+    .normalize('NFKC')
+    .replace(/[.,;]+$/, '')
+    .trim()
+    .toLowerCase()
+  return t === 'et al' || t === 'et. al' || t === 'and others' || t === 'others'
+}
+
 export function normalizeAuthors(authors) {
   if (!authors) return []
   if (typeof authors === 'string') {
@@ -71,13 +85,36 @@ export function normalizeAuthors(authors) {
     if (authors.startsWith('[')) {
       try {
         const parsed = JSON.parse(authors)
-        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean)
+        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean).filter(s => !isEtAlSentinel(s))
       } catch { /* fall through to comma split */ }
     }
-    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean)
+    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean).filter(s => !isEtAlSentinel(s))
   }
   if (!Array.isArray(authors)) return []
-  return authors.map(_authorToString).filter(Boolean)
+  return authors.map(_authorToString).filter(Boolean).filter(s => !isEtAlSentinel(s))
+}
+
+// R09: true when the raw author payload ends with an "et al."/"and others"
+// truncation sentinel — signalling the list is incomplete and the UI should
+// offer to expand to the full enriched author list when one is available.
+export function hasEtAlSentinel(authors) {
+  if (!authors) return false
+  let raw
+  if (typeof authors === 'string') {
+    if (authors.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(authors)
+        raw = Array.isArray(parsed) ? parsed.map(_authorToString) : [authors]
+      } catch { raw = authors.split(/,\s*|\s+and\s+/i) }
+    } else {
+      raw = authors.split(/,\s*|\s+and\s+/i)
+    }
+  } else if (Array.isArray(authors)) {
+    raw = authors.map(_authorToString)
+  } else {
+    return false
+  }
+  return raw.map(s => String(s || '').trim()).filter(Boolean).some(isEtAlSentinel)
 }
 
 export function formatAuthors(authors, truncate = false) {
