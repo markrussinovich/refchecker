@@ -125,8 +125,13 @@ def test_parse_sections_defaults_to_all_on_garbage():
 def test_corrections_toggle_changes_output():
     without = export.serialize_check_to_markdown(_check(), corrections=False)
     with_ = export.serialize_check_to_markdown(_check(), corrections=True)
-    assert "suggested correction" not in without
-    assert "The Real Paper Title" in with_
+    # R19: corrections render as a tracked was→should-be diff, not a flat line.
+    assert "was → should be" not in without
+    assert "was → should be" in with_
+    # The verified should-be title's distinctive tokens appear (bolded inserts);
+    # the cited title's removed tokens are struck through.
+    assert "**Real**" in with_ and "**Title.**" in with_
+    assert "~~Hallucinated~~" in with_
 
 
 # --------------------------------------------------------------------------- #

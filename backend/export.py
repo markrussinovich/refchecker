@@ -187,27 +187,335 @@ def _issues_for(ref: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
     return errors, major, minor
 
 
-def _corrected_str(ref: Dict[str, Any]) -> Optional[str]:
-    """Render the stored corrected_reference (verified truth) as a citation line."""
-    cr = ref.get("corrected_reference")
-    if not isinstance(cr, dict):
-        return None
-    authors = _authors_str(cr.get("authors"))
-    year = cr.get("year")
-    title = cr.get("title")
-    venue = cr.get("journal") or cr.get("venue")
-    doi = cr.get("doi")
-    url = cr.get("url") or cr.get("verified_url")
+def _citation_line(authors: Any, year: Any, title: Any, venue: Any,
+                   doi: Any, url: Any) -> Optional[str]:
+    """Assemble a one-line citation from already-resolved fields (no fabrication;
+    the caller supplies either the cited or the corrected values)."""
+    authors = _authors_str(authors)
     parts = [
         authors,
         f"({year})" if year not in (None, "") else "",
-        title,
-        venue,
+        title or "",
+        venue or "",
         f"doi:{doi}" if doi else "",
         url if (url and not doi) else "",
     ]
     s = ". ".join(p for p in parts if p).strip()
     return s or None
+
+
+def _corrected_str(ref: Dict[str, Any]) -> Optional[str]:
+    """Render the stored corrected_reference (verified truth) as a citation line."""
+    cr = ref.get("corrected_reference")
+    if not isinstance(cr, dict):
+        return None
+    return _citation_line(
+        cr.get("authors"), cr.get("year"), cr.get("title"),
+        cr.get("journal") or cr.get("venue"), cr.get("doi"),
+        cr.get("url") or cr.get("verified_url"),
+    )
+
+
+def _cited_str(ref: Dict[str, Any]) -> Optional[str]:
+    """Render the ORIGINAL cited reference (the "was" side of a tracked change),
+    using only the values the author actually cited — same field order as
+    ``_corrected_str`` so a word-diff between the two reads as a clean tracked
+    change. Never falls back to verified/corrected fields (that would hide the
+    very change we are documenting)."""
+    if not isinstance(ref, dict):
+        return None
+    return _citation_line(
+        ref.get("authors"), ref.get("year"), ref.get("title"),
+        ref.get("venue") or ref.get("journal"), ref.get("doi"),
+        ref.get("cited_url") or ref.get("url"),
+    )
+
+
+def word_diff(a: Optional[str], b: Optional[str]) -> List[Dict[str, str]]:
+    """Word-level LCS diff — a faithful Python port of
+    web-ui/src/utils/wordDiff.js so the server-rendered tracked-change report
+    colours exactly the same was→should-be tokens the in-app CorrectionsView
+    shows. Returns ops ``{type: 'eq'|'del'|'add', word, sep}`` where ``sep`` is
+    the trailing whitespace of the original token (so callers rebuild faithful
+    spacing). ``del`` = present in *a* (cited) only; ``add`` = present in *b*
+    (corrected) only."""
+    import re as _re
+
+    def _tokenize(s: Optional[str]) -> List[Dict[str, str]]:
+        if not s:
+            return []
+        return [{"word": m.group(1), "sep": m.group(2) or ""}
+                for m in _re.finditer(r"(\S+)(\s*)", s)]
+
+    A = _tokenize(a)
+    B = _tokenize(b)
+    n, m = len(A), len(B)
+    # dp[i][j] = LCS length of A[:i], B[:j]; built bottom-up (O(n*m), fine for
+    # short citation lines).
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if A[i - 1]["word"] == B[j - 1]["word"]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    ops: List[Dict[str, str]] = []
+    i, j = n, m
+    while i > 0 and j > 0:
+        if A[i - 1]["word"] == B[j - 1]["word"]:
+            ops.insert(0, {"type": "eq", "word": A[i - 1]["word"], "sep": A[i - 1]["sep"]})
+            i -= 1
+            j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            ops.insert(0, {"type": "del", "word": A[i - 1]["word"], "sep": A[i - 1]["sep"]})
+            i -= 1
+        else:
+            ops.insert(0, {"type": "add", "word": B[j - 1]["word"], "sep": B[j - 1]["sep"]})
+            j -= 1
+    while i > 0:
+        ops.insert(0, {"type": "del", "word": A[i - 1]["word"], "sep": A[i - 1]["sep"]})
+        i -= 1
+    while j > 0:
+        ops.insert(0, {"type": "add", "word": B[j - 1]["word"], "sep": B[j - 1]["sep"]})
+        j -= 1
+    return ops
+
+
+def _diff_html(cited: Optional[str], corrected: Optional[str]) -> str:
+    """Render a word-diff as inline HTML — deletions struck through in red,
+    insertions bold green — mirroring CorrectionsView's DiffSide colouring so
+    the export shows a true was→should-be tracked change, not a flat "Suggested:".
+    Equal runs render once. Falls back to a plain green corrected line when there
+    is no cited baseline to diff against."""
+    if not corrected:
+        return ""
+    if not cited:
+        return f'<span style="color:#10a37f">{_e(corrected)}</span>'
+    out: List[str] = []
+    for op in word_diff(cited, corrected):
+        w = _e(op["word"])
+        sep = _e(op["sep"])
+        if op["type"] == "eq":
+            out.append(f"{w}{sep}")
+        elif op["type"] == "del":
+            out.append(
+                '<span style="color:#ef4146;text-decoration:line-through;'
+                f'background:rgba(239,68,68,0.12)">{w}</span> '
+            )
+        else:  # add
+            out.append(
+                '<span style="color:#10a37f;font-weight:600;'
+                f'background:rgba(34,197,94,0.12)">{w}</span>{sep}'
+            )
+    return "".join(out).strip()
+
+
+def _diff_markdown(cited: Optional[str], corrected: Optional[str]) -> str:
+    """Plain-text tracked change for Markdown/DOCX: ``~~was~~ **should-be**``.
+    Deletions wrap in ~~strikethrough~~, insertions in **bold** — the closest
+    portable Markdown equivalent of the red/green diff. Falls back to the bare
+    corrected line when there's no cited baseline."""
+    if not corrected:
+        return ""
+    if not cited:
+        return corrected
+    out: List[str] = []
+    for op in word_diff(cited, corrected):
+        if op["type"] == "eq":
+            out.append(f"{op['word']}{op['sep']}")
+        elif op["type"] == "del":
+            out.append(f"~~{op['word']}~~ ")
+        else:  # add
+            out.append(f"**{op['word']}**{op['sep']}")
+    return "".join(out).strip()
+
+
+# --------------------------------------------------------------------------- #
+# Citation-style serializer (mirrors web-ui formatters.exportReferenceAsStyle)  #
+# --------------------------------------------------------------------------- #
+
+# The ordered, contiguous reference list the FE downloads after an Add/renumber.
+# Supported styles match web-ui/src/utils/formatters.js CITATION_STYLES so the
+# server-rendered list reads the same as the in-app per-reference export.
+CITATION_STYLES: Tuple[str, ...] = (
+    "plaintext", "apa", "mla", "chicago", "ieee", "vancouver", "bibtex", "bibitem",
+)
+
+
+def _style_ref_data(ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the values to render for *ref*, preferring the verified
+    ``corrected_reference`` (no fabrication — only fields the verifier actually
+    confirmed) and falling back to the cited values otherwise."""
+    cr = ref.get("corrected_reference") if isinstance(ref, dict) else None
+    cr = cr if isinstance(cr, dict) else {}
+    title = cr.get("title") or ref.get("title") or ""
+    authors = cr.get("authors") or ref.get("authors") or []
+    year = cr.get("year") or ref.get("year") or ""
+    venue = cr.get("journal") or cr.get("venue") or ref.get("venue") or ref.get("journal") or ""
+    doi = cr.get("doi") or ref.get("verified_doi") or ref.get("doi") or ""
+    url = (cr.get("url") or cr.get("verified_url") or ref.get("verified_url")
+           or ref.get("cited_url") or ref.get("url") or "")
+    if not url and doi:
+        url = f"https://doi.org/{doi}"
+    return {
+        "title": str(title or "").strip(),
+        "authors": _authors_list(authors),
+        "year": str(year or "").strip(),
+        "venue": str(venue or "").strip(),
+        "doi": str(doi or "").strip(),
+        "url": str(url or "").strip(),
+    }
+
+
+def _bibtex_key(ref: Dict[str, Any], index: int) -> str:
+    raw = (ref.get("bibtex_key") if isinstance(ref, dict) else None) or f"ref{index + 1}"
+    import re
+    return re.sub(r"[^A-Za-z0-9_-]", "", str(raw))
+
+
+def serialize_reference_as_style(ref: Dict[str, Any], style: str, index: int = 0) -> str:
+    """Render a single reference as a citation in *style*.
+
+    Mirrors the web-ui ``exportReferenceAsStyle`` shapes (APA/MLA/Chicago/IEEE/
+    Vancouver/BibTeX/\\bibitem/plaintext). Uses verified corrected values when
+    present; never invents fields. Returns a one-line string per reference."""
+    d = _style_ref_data(ref)
+    title, year, venue, doi, url = d["title"], d["year"], d["venue"], d["doi"], d["url"]
+    authors = d["authors"]
+    auth_str = ", ".join(authors)
+    style = (style or "plaintext").lower()
+
+    if style == "bibtex":
+        key = _bibtex_key(ref, index)
+        fields = []
+        if auth_str:
+            fields.append(f"  author = {{{' and '.join(authors)}}}")
+        if title:
+            fields.append(f"  title = {{{title}}}")
+        if year:
+            fields.append(f"  year = {{{year}}}")
+        if venue:
+            fields.append(f"  journal = {{{venue}}}")
+        if doi:
+            fields.append(f"  doi = {{{doi}}}")
+        elif url:
+            fields.append(f"  url = {{{url}}}")
+        return "@article{%s,\n%s\n}" % (key, ",\n".join(fields))
+
+    if style == "apa":
+        parts = []
+        if auth_str:
+            parts.append(auth_str + ("" if auth_str.endswith(".") else "."))
+        if year:
+            parts.append(f"({year}).")
+        if title:
+            parts.append(title + ("" if title.endswith(".") else "."))
+        if venue:
+            parts.append(f"{venue}.")
+        if url:
+            parts.append(url)
+        return " ".join(parts)
+
+    if style == "mla":
+        parts = []
+        if auth_str:
+            parts.append(f"{auth_str}.")
+        if title:
+            parts.append(f'"{title}."')
+        tail = ", ".join([p for p in (venue, year) if p])
+        if tail:
+            parts.append(f"{tail}.")
+        if url:
+            parts.append(url)
+        return " ".join(parts)
+
+    if style == "chicago":
+        parts = []
+        if auth_str:
+            parts.append(f"{auth_str}.")
+        if year:
+            parts.append(f"{year}.")
+        if title:
+            parts.append(f'"{title}."')
+        if venue:
+            parts.append(f"{venue}.")
+        if url:
+            parts.append(url)
+        return " ".join(parts)
+
+    if style == "ieee":
+        parts = []
+        if auth_str:
+            parts.append(f"{auth_str},")
+        if title:
+            parts.append(f'"{title},"')
+        tail = ", ".join([p for p in (venue, year) if p])
+        if tail:
+            parts.append(f"{tail}.")
+        if url:
+            parts.append(f"[Online]. Available: {url}")
+        return " ".join(parts)
+
+    if style == "vancouver":
+        parts = []
+        if auth_str:
+            parts.append(f"{auth_str}.")
+        if title:
+            parts.append(f"{title}.")
+        if venue:
+            parts.append(f"{venue}.")
+        if year:
+            parts.append(f"{year}.")
+        if url:
+            parts.append(f"Available from: {url}")
+        return " ".join(parts)
+
+    if style == "bibitem":
+        key = _bibtex_key(ref, index)
+        tail = ", ".join([p for p in (venue, year) if p])
+        body = " ".join([p for p in (
+            f"{auth_str}," if auth_str else "",
+            f'"{title},"' if title else "",
+            f"{tail}." if tail else "",
+            url,
+        ) if p])
+        return f"\\bibitem{{{key}}} {body}"
+
+    # plaintext (ACM-ish): Authors. Title. Venue, Year. URL
+    parts = []
+    if auth_str:
+        parts.append(f"{auth_str}.")
+    if title:
+        parts.append(f"{title}.")
+    tail = ", ".join([p for p in (venue, year) if p])
+    if tail:
+        parts.append(f"{tail}.")
+    if doi:
+        parts.append(f"https://doi.org/{doi}")
+    elif url:
+        parts.append(url)
+    return " ".join(parts)
+
+
+def serialize_reference_list(refs: List[Dict[str, Any]], style: str = "plaintext",
+                             renumber: bool = True) -> List[Dict[str, Any]]:
+    """Serialize a full reference list with NEW CONTIGUOUS numbers.
+
+    Returns a list of ``{number, id, formatted}`` rows in document order. When
+    *renumber* is true (the default), ``number`` is the 1-based position in the
+    list (the contiguous numbering after an insertion), independent of each
+    ref's stored ``index``; otherwise the stored printed index is used."""
+    out: List[Dict[str, Any]] = []
+    for i, r in enumerate(refs):
+        if not isinstance(r, dict):
+            continue
+        number = (i + 1) if renumber else _ref_num(r) or (i + 1)
+        out.append({
+            "number": number,
+            "id": r.get("id"),
+            "formatted": serialize_reference_as_style(r, style, i),
+        })
+    return out
 
 
 def _norm_meta(value: Any) -> str:
@@ -375,6 +683,9 @@ def _model(check: Dict[str, Any], *, corrections: bool, sections: Optional[Set[s
             "minor": minor,
             "inline": bool(ref.get("is_inline_cited") or (ref.get("citation_contexts") or [])),
             "corrected": _corrected_str(ref) if corrections else None,
+            # The original cited line — the "was" side of the tracked-change diff.
+            # Only meaningful when there's a correction to diff against.
+            "cited": _cited_str(ref) if corrections else None,
         })
 
     # Orphan / uncited detector: a bibliography entry never cited in the body.
@@ -567,7 +878,9 @@ def _ref_row_html(r: Dict[str, Any]) -> str:
     for d in r["minor"]:
         issues += f'<div class="issue minor">· {_e(d)} <span class="tag">minor</span></div>'
     if r.get("corrected"):
-        issues += f'<div class="fix">✎ Suggested: {_e(r["corrected"])}</div>'
+        diff = _diff_html(r.get("cited"), r["corrected"])
+        issues += (f'<div class="fix"><span class="fix-lbl">was → should be:</span> '
+                   f'{diff}</div>')
     link = f'<a href="{_e(r["url"])}" target="_blank" rel="noopener">source ↗</a>' if r.get("url") else ""
     cited = ' <span class="cited" title="Cited inline in the paper">✓ cited</span>' if r["inline"] else ""
     return f"""
@@ -726,7 +1039,8 @@ def _html_doc(title: str, inner: str) -> str:
   .issue.warn {{ color:var(--warning); }}
   .issue.minor {{ color:var(--muted); }}
   .issue .tag {{ font-size:10px; border:1px solid var(--border); border-radius:4px; padding:0 4px; color:var(--muted); margin-left:4px; }}
-  .fix {{ font-size:12.5px; margin-top:5px; color:var(--accent); background:var(--success-bg); border:1px solid var(--accent-soft); border-radius:var(--radius-sm); padding:6px 9px; }}
+  .fix {{ font-size:12.5px; margin-top:5px; color:var(--fg); background:var(--success-bg); border:1px solid var(--accent-soft); border-radius:var(--radius-sm); padding:6px 9px; }}
+  .fix-lbl {{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em; margin-right:5px; }}
   a {{ color:var(--link); text-decoration:none; }}
   a:hover {{ text-decoration:underline; }}
   table.batch {{ font-size:13.5px; }}
@@ -801,7 +1115,7 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
             for d in r["major"]:
                 out.append(f"  - ⚠ warning: {d}")
             if r.get("corrected"):
-                out.append(f"  - ✎ suggested correction: {r['corrected']}")
+                out.append(f"  - ✎ was → should be: {_diff_markdown(r.get('cited'), r['corrected'])}")
         out.append("")
     if "references" in sec:
         out.append(f"{h}# All references ({s['total']})")
@@ -895,7 +1209,9 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
         for d in r["minor"]:
             issues += f'<p style="margin:2px 0;color:#8e8ea0;font-size:8.5pt">· {_e(d)} (minor)</p>'
         if r.get("corrected"):
-            issues += f'<p style="margin:2px 0;color:#10a37f;font-size:9pt">✓ Suggested: {_e(r["corrected"])}</p>'
+            diff = _diff_html(r.get("cited"), r["corrected"])
+            issues += (f'<p style="margin:2px 0;font-size:9pt">'
+                       f'<font color="#8e8ea0">was → should be: </font>{diff}</p>')
         rows_html.append(
             f'<tr><td style="padding:6px 8px 6px 0;vertical-align:top;white-space:nowrap;color:{color}">'
             f'<b>{mark} {_e(label)}</b></td>'
@@ -1048,7 +1364,9 @@ def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
             for d in r["major"]:
                 blocks.append(_docx_para(f"   !  {d}", size=20, color="F59E0B", space_after=20))
             if r.get("corrected"):
-                blocks.append(_docx_para(f"   -> Suggested: {r['corrected']}", size=20, color="10A37F"))
+                if r.get("cited"):
+                    blocks.append(_docx_para(f"   was: {r['cited']}", size=20, color="EF4146"))
+                blocks.append(_docx_para(f"   -> should be: {r['corrected']}", size=20, color="10A37F"))
     if "references" in sec:
         blocks.append(_docx_para(f"All references ({s['total']})", size=28, bold=True, color="10A37F"))
         # Status legend — same traffic-light language as the HTML chips / Markdown,

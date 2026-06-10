@@ -3475,6 +3475,175 @@ def _annotate_pdf_highlights(pdf_path, targets, cache_dir, check_id):
         return None
 
 
+def _correction_targets_for_check(check: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Per flagged reference that carries a verified ``corrected_reference``, build
+    a locate target whose ``text`` is the ORIGINAL cited line (so it can be found
+    in the PDF) and whose ``corrected`` is the verified should-be line.
+
+    Honesty contract: a target is produced ONLY when a real ``corrected_reference``
+    exists AND it actually differs from the cited line — never a fabricated
+    correction, never a no-op strikeout. Returns [] when nothing should change."""
+    from backend import export as _export
+    refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+    targets: List[Dict[str, Any]] = []
+    for ref in refs:
+        if not isinstance(ref, dict) or not isinstance(ref.get("corrected_reference"), dict):
+            continue
+        corrected = _export._corrected_str(ref)
+        if not corrected:
+            continue
+        cited = _export._cited_str(ref)
+        if not cited or cited.strip() == corrected.strip():
+            # No baseline to strike, or an identical "correction" — skip (no
+            # fabricated annotation).
+            continue
+        # Locate the cited TITLE in the PDF (the most reliably present anchor),
+        # but carry the full corrected line as the inserted note.
+        anchor = (ref.get("title") or cited).strip()
+        if len(anchor) < 8:
+            anchor = cited
+        targets.append({
+            "text": anchor,
+            "ref_id": ref.get("index") or ref.get("ref_num"),
+            "cited": cited,
+            "corrected": corrected,
+        })
+    return targets
+
+
+def _annotate_pdf_corrections(pdf_path, targets, marker_shifts, cache_dir, check_id):
+    """R19: render the tracked was→should-be changes as REAL PDF annotations.
+
+    For each correction target, locate the cited text via
+    ``locate_text_spans_in_pdf`` (the same locator the highlight path uses),
+    strike it out (``page.add_strikeout_annot``) and attach a text note
+    (``page.add_text_annot``) carrying the verified corrected line. For inline
+    renumber, each ``marker_shifts`` row's OLD marker (e.g. ``[9]``) is located on
+    its page and annotated with its NEW form (e.g. ``[10]``).
+
+    Never fabricates a position: a target/marker that can't be located is simply
+    skipped. Returns the annotated PDF path, or None when nothing was annotated."""
+    try:
+        import fitz
+        from backend.thumbnail import locate_text_spans_in_pdf
+        added = 0
+        doc = fitz.open(pdf_path)
+        try:
+            located = locate_text_spans_in_pdf(pdf_path, targets) if targets else []
+            by_index = {i: t for i, t in enumerate(targets)}
+            for i, r in enumerate(located):
+                if not r.get("found"):
+                    continue
+                t = by_index.get(i, {})
+                corrected = (t.get("corrected") or "").strip()
+                page = doc.load_page(r["page"])
+                pw, ph = float(page.rect.width), float(page.rect.height)
+                note_pt = None
+                for nx0, ny0, nx1, ny1 in r["rects"]:
+                    rect = fitz.Rect(nx0 * pw, ny0 * ph, nx1 * pw, ny1 * ph)
+                    try:
+                        page.add_strikeout_annot(rect)
+                    except Exception:
+                        pass
+                    if note_pt is None:
+                        note_pt = fitz.Point(rect.x1, rect.y0)
+                    added += 1
+                # Attach the corrected line as a sticky text note anchored at the
+                # end of the struck text (the should-be side of the change).
+                if corrected and note_pt is not None:
+                    try:
+                        annot = page.add_text_annot(note_pt, f"Should be: {corrected}")
+                        annot.set_info(title="RefChecker correction")
+                        annot.update()
+                    except Exception:
+                        pass
+            # Inline renumber: annotate each OLD marker with its NEW form.
+            for sm in (marker_shifts or []):
+                if not isinstance(sm, dict):
+                    continue
+                old_m = (sm.get("marker") or "").strip()
+                new_m = (sm.get("new_marker") or "").strip()
+                if not old_m or not new_m or old_m == new_m:
+                    continue
+                for page in doc:
+                    try:
+                        hits = page.search_for(old_m)
+                    except Exception:
+                        hits = []
+                    if not hits:
+                        continue
+                    rect = hits[0]
+                    try:
+                        page.add_strikeout_annot(rect)
+                        annot = page.add_text_annot(
+                            fitz.Point(rect.x1, rect.y0), f"Renumber: {old_m} -> {new_m}")
+                        annot.set_info(title="RefChecker renumber")
+                        annot.update()
+                        added += 1
+                    except Exception:
+                        pass
+                    break  # annotate the first occurrence only (the marker's offset)
+            if not added:
+                return None
+            out_dir = os.path.join(cache_dir or os.path.dirname(pdf_path), "annotated")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{check_id}-corrections.pdf")
+            doc.save(out_path, garbage=3, deflate=True)
+            return out_path
+        finally:
+            doc.close()
+    except Exception as e:
+        logger.warning("PDF correction annotation failed: %s", e)
+        return None
+
+
+@app.get("/api/preview/{check_id}/corrections-annotated-pdf")
+async def get_corrections_annotated_pdf(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """R19 (G2): return the source PDF with the tracked was→should-be corrections
+    rendered as REAL PDF annotations — each corrected reference's cited text is
+    struck through and a note carries the verified corrected line; inline
+    renumber markers are annotated with their new number.
+
+    Returns a clean 404 when the source isn't a PDF or there are no real
+    corrections to render (never a blank/fabricated artifact)."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF source for this check")
+    targets = _correction_targets_for_check(check)
+
+    # Inline-renumber markers to annotate (only when the renumber preview did not
+    # abstain). Best-effort: a failure here must not block the strikeout path.
+    marker_shifts: List[Dict[str, Any]] = []
+    try:
+        text = await _extract_paper_text_for_check(check_id, check)
+        if text:
+            from backend.inline_citation_checker import renumber_preview
+            from backend import export as _export
+            refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+            report = await asyncio.to_thread(renumber_preview, text, refs, None)
+            if isinstance(report, dict) and not report.get("abstained"):
+                marker_shifts = report.get("shifted_markers") or []
+    except Exception as e:
+        logger.debug("renumber preview for corrections-annotated-pdf failed: %s", e)
+
+    if not targets and not marker_shifts:
+        raise HTTPException(status_code=404, detail="No corrections to annotate")
+
+    out_path = await asyncio.to_thread(
+        _annotate_pdf_corrections, pdf_path, targets, marker_shifts, str(cache_dir or ""), check_id)
+    if not out_path or not os.path.exists(out_path):
+        # Nothing could be located on the page -> honest 404, not a 500.
+        raise HTTPException(status_code=404, detail="No corrections could be located in the PDF")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (check.get("paper_title") or f"refchecker-{check_id}"))[:80].strip("-")
+    return FileResponse(out_path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}-corrections.pdf"'})
+
+
 @app.get("/api/text/{check_id}")
 async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
