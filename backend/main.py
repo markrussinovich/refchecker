@@ -8097,6 +8097,207 @@ async def author_profile(req: _AuthorProfileRequest, current_user: UserInfo = De
     return payload
 
 
+# --------------------------------------------------------------------------- #
+# R10 (A3) — ID-less author resolution by name + paper title/year.             #
+#                                                                              #
+# When a reference's author carries NO author id (no s2_author_id / openalex   #
+# id), the hover popover can't fetch a profile. This sibling endpoint resolves #
+# a *single* high-confidence author id from a bare name PLUS the citing        #
+# paper's title (and optional year) — and ONLY returns it when a strong        #
+# corroboration signal exists: the candidate author actually appears on a work #
+# whose title matches the supplied title. Otherwise it returns                 #
+# {available: False, reason: 'no confident match'} — never a guess. This keeps #
+# the "ABSTAIN beats a wrong badge" / no-fabrication contract: a wrong author  #
+# profile is worse than none.                                                  #
+# --------------------------------------------------------------------------- #
+
+class _AuthorFindRequest(BaseModel):
+    name: str                              # bare author name (no id)
+    title: Optional[str] = None            # the citing paper's title (corroboration anchor)
+    year: Optional[int] = None             # optional year, tightens the corroboration
+
+
+# Separate, shorter-lived cache from the by-id profile cache: keyed on the
+# (name, title, year) triple so the same ID-less author on the same paper isn't
+# re-resolved across re-hovers.
+_AUTHOR_FIND_CACHE: dict = {}
+_AUTHOR_FIND_TTL = 6 * 60 * 60  # 6 hours
+
+
+def _normalize_person_name(name: str) -> str:
+    """Lowercase, strip diacritics + punctuation, collapse whitespace. Mirrors
+    the FE AuthorsLine `norm()` so 'Bössuyt' / 'Bossuyt,' both reduce to one
+    canonical token sequence for corroboration matching."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(name or ""))
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9\-' ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _name_tokens(name: str) -> set:
+    """Surname + given-name tokens (length >= 2; drops lone initials so 'J.' on
+    one side and 'John' on the other don't spuriously block a match)."""
+    return {t for t in _normalize_person_name(name).split(" ") if len(t) >= 2}
+
+
+def _author_corroborated_on_work(query_name: str, authorship_names: list) -> Optional[str]:
+    """Return the work-author display name that corroborates `query_name`, or
+    None. A match requires the surname to be present AND the multi-letter token
+    overlap to be non-empty — i.e. the cited name and the work's author name
+    share their distinctive tokens. Real-data gated: no fuzzy/approximate
+    surname guessing, only exact normalized-token containment."""
+    q_tokens = _name_tokens(query_name)
+    if not q_tokens:
+        return None
+    # The cited surname is (heuristically) the longest token — it must appear
+    # in the work-author's tokens for a corroboration to count.
+    q_surname = max(q_tokens, key=len)
+    for an in authorship_names:
+        a_tokens = _name_tokens(an)
+        if not a_tokens:
+            continue
+        if q_surname in a_tokens and (q_tokens & a_tokens):
+            return an
+    return None
+
+
+@app.post("/api/authors/find")
+async def author_find(req: _AuthorFindRequest,
+                      current_user: UserInfo = Depends(require_user)):
+    """R10: resolve a SINGLE high-confidence author id for an ID-less author,
+    corroborated by the citing paper's title.
+
+    Strategy (OpenAlex, no fabrication):
+      1. Require both a name and a title — without a corroboration anchor we
+         refuse outright (return empty), because a name-only search across
+         OpenAlex's 90M+ authors is an ambiguity machine.
+      2. Find the work by title (`/works?filter=title.search:<title>`,
+         optionally `,publication_year:<year>`). Pick the work whose title
+         actually matches (normalized) the supplied title.
+      3. In that work's authorships, find the single author whose name
+         corroborates the supplied name (surname + token overlap). That
+         author's OpenAlex id IS the high-confidence match — it's literally an
+         author of the cited paper.
+      4. Return that author's ids + metrics. If no work matches, or no/ambiguous
+         (>1) author on the matching work corroborates the name, return
+         {available: False, reason: 'no confident match'}.
+
+    Soft-fails to {available: False} on any error. Cached (6h TTL).
+    """
+    import time as _time
+    name = (req.name or "").strip()
+    title = (req.title or "").strip()
+    if not name or not title:
+        # No corroboration anchor -> never guess.
+        return {"available": False, "reason": "no confident match"}
+
+    cache_key = f"{_normalize_person_name(name)}|{_normalize_person_name(title)}|{req.year or ''}"
+    cached = _AUTHOR_FIND_CACHE.get(cache_key)
+    if cached and (_time.monotonic() - cached[0]) < _AUTHOR_FIND_TTL:
+        return cached[1]
+
+    import httpx
+    payload = {"available": False, "reason": "no confident match"}
+    norm_title = _normalize_person_name(title)
+    try:
+        filt = f"title.search:{title}"
+        if req.year:
+            filt += f",publication_year:{int(req.year)}"
+        works_fields = "id,title,publication_year,authorships"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.openalex.org/works",
+                params={"filter": filt, "per_page": 5, "select": works_fields},
+            )
+        if r.status_code == 200:
+            results = (r.json() or {}).get("results") or []
+            # Keep only works whose title genuinely matches the supplied one
+            # (exact normalized equality OR one fully contains the other) —
+            # title.search is a loose ranker, so we re-check ourselves.
+            def _title_matches(w):
+                wt = _normalize_person_name(w.get("title") or "")
+                if not wt:
+                    return False
+                return wt == norm_title or norm_title in wt or wt in norm_title
+
+            matching_works = [w for w in results if _title_matches(w)]
+            for w in matching_works:
+                authorships = w.get("authorships") or []
+                names = [((a or {}).get("author") or {}).get("display_name") or "" for a in authorships]
+                # All work-authors whose name corroborates the cited name.
+                corro = [
+                    (a, nm) for (a, nm) in zip(authorships, names)
+                    if nm and _author_corroborated_on_work(name, [nm])
+                ]
+                if len(corro) != 1:
+                    # 0 -> this work doesn't list the cited author; >1 ->
+                    # ambiguous (e.g. two same-surname authors). Either way,
+                    # ABSTAIN on this work.
+                    continue
+                author_obj = (corro[0][0] or {}).get("author") or {}
+                oa_author_id = author_obj.get("id") or ""
+                short_id = oa_author_id.rsplit("/", 1)[-1] if oa_author_id else ""
+                if not short_id.startswith("A"):
+                    continue
+                # Hydrate the resolved author for real metrics (h-index /
+                # citations / ORCID), reusing the same OpenAlex author shape as
+                # author_profile's OpenAlex fallback.
+                metrics = await _fetch_openalex_author_metrics(short_id)
+                payload = {
+                    "available": True,
+                    "name": author_obj.get("display_name") or corro[0][1],
+                    "openalex_id": short_id,
+                    "matched_work_title": w.get("title"),
+                    "matched_work_year": w.get("publication_year"),
+                    "source": "openalex",
+                    **metrics,
+                }
+                break
+    except Exception as e:
+        logger.debug("author_find failed for %s / %s: %s", name, title, e)
+        payload = {"available": False, "reason": "no confident match"}
+
+    _AUTHOR_FIND_CACHE[cache_key] = (_time.monotonic(), payload)
+    return payload
+
+
+async def _fetch_openalex_author_metrics(short_id: str) -> Dict[str, Any]:
+    """Fetch h-index / citations / works-count / ORCID / affiliations + recent
+    papers for a resolved OpenAlex author id. Returns {} on any failure so the
+    caller still reports the (corroborated) id without metrics."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"https://api.openalex.org/authors/{short_id}")
+        if r.status_code != 200:
+            return {}
+        d = r.json() or {}
+        ss = d.get("summary_stats") or {}
+        insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
+                 if isinstance(i, dict) and i.get("display_name")]
+        if not insts:
+            for aff in (d.get("affiliations") or [])[:2]:
+                nm = ((aff or {}).get("institution") or {}).get("display_name")
+                if nm:
+                    insts.append(nm)
+        orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
+        if isinstance(orcid, str):
+            orcid = orcid.rsplit("/", 1)[-1]
+        return {
+            "affiliations": insts,
+            "paperCount": d.get("works_count"),
+            "citationCount": d.get("cited_by_count"),
+            "hIndex": ss.get("h_index"),
+            "homepage": None,
+            "orcid": orcid if isinstance(orcid, str) else None,
+            "papers": [],
+        }
+    except Exception:
+        return {}
+
+
 @app.get("/api/references/seen")
 async def list_seen_references(
     limit: int = 200,

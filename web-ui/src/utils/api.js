@@ -204,6 +204,14 @@ export const fetchAuthorProfile = (idOrOpts) => {
   return api.post('/authors/profile', body, { timeout: 15000 })
 }
 
+// R10 (A3): resolve a SINGLE high-confidence profile for an ID-less author from
+// a bare name PLUS the citing paper's title/year. The backend only returns a
+// match when the author actually appears on a work matching the title — a miss
+// returns { available: false } (never a guess). Used by the AuthorChip "Find
+// profile" action for authors with no s2_author_id / openalex_id.
+export const findAuthorProfile = ({ name, title = null, year = null } = {}) =>
+  api.post('/authors/find', { name, title, year }, { timeout: 15000 })
+
 // Nodes + edges for the 3D Seen-References library graph.
 export const fetchReferenceLibraryGraph = ({ limit = 400, min_times_seen = 1, edge_strategy = 'shared-authors' } = {}) =>
   api.get('/references/library/graph', { params: { limit, min_times_seen, edge_strategy }, timeout: 60000 })

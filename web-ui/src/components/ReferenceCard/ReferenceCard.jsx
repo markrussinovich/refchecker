@@ -15,7 +15,7 @@ import {
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
-import { fetchAuthorProfile, getVenueProfile } from '../../utils/api'
+import { fetchAuthorProfile, findAuthorProfile, getVenueProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
 import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -821,6 +821,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                 <AuthorsLine
                   authors={reference.authors}
                   enrichedAuthors={reference.enrichment?.authors}
+                  paperTitle={reference.title}
+                  paperYear={reference.year}
                 />
               )}
 
@@ -1386,7 +1388,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
  * Falls back gracefully when no enrichment was returned (e.g. the
  * ref verified via DBLP only and has no author IDs).
  */
-function AuthorsLine({ authors, enrichedAuthors }) {
+function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   const citedList = normalizeAuthors(authors)
   // Hooks MUST run before any early return (rules-of-hooks). If a reference's
   // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
@@ -1522,7 +1524,7 @@ function AuthorsLine({ authors, enrichedAuthors }) {
         }
         return (
           <span key={`${name}-${i}`}>
-            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} />
+            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} paperTitle={paperTitle} paperYear={paperYear} />
             {i < visible.length - 1 ? ', ' : ''}
           </span>
         )
@@ -1564,6 +1566,9 @@ function AuthorsLine({ authors, enrichedAuthors }) {
 // Session-scoped cache of S2 author profiles so re-hovering the same author
 // (common across a bibliography) never refetches.
 const _authorProfileCache = new Map()
+// R10: session cache of name+title -> resolved (or missed) ID-less author
+// lookups, so clicking "Find profile" again for the same author/paper is free.
+const _authorFindCache = new Map()
 
 // Initials from a display name ("H.B. Guruprasad" -> "HG", "Jane Doe" -> "JD").
 function _authorInitials(name) {
@@ -1622,13 +1627,21 @@ function ProfileLinkIcon({ icon }) {
   )
 }
 
-function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
+function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, paperYear }) {
   const [open, setOpen] = useState(false)
   // R11: pinned keeps the popover open off-hover until explicitly dismissed
   // (×, outside-click, or Escape) and switches it to the larger, fully-scrollable
   // panel that shows the COMPLETE recent-papers list (no slice(0,3) cap).
   const [pinned, setPinned] = useState(false)
   const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
+  // R10 (A3): an author with NO id (no s2_author_id / openalex_id) can't load a
+  // profile. The "Find profile" action resolves one on demand from the bare
+  // name + the citing paper's title/year — and only when the backend confirms
+  // the author actually appears on a work matching that title (no fabrication).
+  // findState: 'idle' -> not yet attempted; 'loading'; 'found'; 'miss'.
+  const idLess = !!e && !e.s2_author_id && !e.openalex_id
+  const [findState, setFindState] = useState('idle')
+  const [foundProfile, setFoundProfile] = useState(null)
   const wrapperRef = useRef(null)
   const popoverRef = useRef(null)
   const enterTimer = useRef(null)
@@ -1655,6 +1668,30 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
         setProfile(data)
       })
       .catch(() => { /* keep basic card */ })
+  }
+
+  // R10 (A3): on-demand name/title resolution for an ID-less author. Calls the
+  // corroboration-gated backend; a confident hit becomes the popover profile,
+  // a miss flips to a quiet "no confident match". Real-data gated end-to-end —
+  // nothing is shown unless the backend confirmed a single matching author.
+  const runFindProfile = () => {
+    if (findState === 'loading' || findState === 'found') return
+    const fkey = `${name}|${paperTitle || ''}`
+    if (_authorFindCache.has(fkey)) {
+      const cached = _authorFindCache.get(fkey)
+      if (cached?.available) { setFoundProfile(cached); setFindState('found') }
+      else setFindState('miss')
+      return
+    }
+    setFindState('loading')
+    findAuthorProfile({ name, title: paperTitle || null, year: paperYear || null })
+      .then(res => {
+        const data = res?.data || { available: false }
+        _authorFindCache.set(fkey, data)
+        if (data.available) { setFoundProfile(data); setFindState('found') }
+        else setFindState('miss')
+      })
+      .catch(() => { setFindState('miss') })
   }
 
   // 250ms hover delay so brushing past names doesn't flash the popover.
@@ -1737,12 +1774,21 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
     }
   }, [open])
 
+  // R10: a confident "Find profile" hit becomes the effective profile so the
+  // popover renders the resolved author's real metrics / ORCID / id. By-id
+  // profiles (R11/R36) take precedence when present; otherwise the corroborated
+  // found profile drives the card. Real-data gated: foundProfile is only set
+  // after the backend confirmed a single matching author.
+  const effectiveProfile = (profile?.available ? profile : null) || foundProfile || profile
   // R36: honour an ORCID surfaced by the fetched S2/OpenAlex profile too,
   // not just the one carried on the enrichment record `e`. Real-data gated:
   // resolves to a real id or null, never a guess.
-  const resolvedOrcid = (profile?.available && profile?.orcid) || e?.orcid || null
+  const resolvedOrcid = (effectiveProfile?.available && effectiveProfile?.orcid) || e?.orcid || null
   const orcidUrl = resolvedOrcid ? `https://orcid.org/${resolvedOrcid}` : null
-  const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
+  // Fold a found OpenAlex id (R10) into the profile links so the resolved
+  // author's OpenAlex page is reachable even though `e` carried no id.
+  const resolvedOpenalexId = e?.openalex_id || (foundProfile?.available ? foundProfile.openalex_id : null) || null
+  const openalexUrl = resolvedOpenalexId ? `https://openalex.org/${resolvedOpenalexId}` : null
   const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
 
   return (
@@ -1793,10 +1839,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
         const dispName = e.name || name
         const initials = _authorInitials(dispName)
         const avatarBg = _authorColor(dispName)
-        const affs = (profile?.available && Array.isArray(profile.affiliations) && profile.affiliations.length)
-          ? profile.affiliations
+        // R10: prefer a corroborated found profile's affiliations/metrics when
+        // present (effectiveProfile), falling back to the enrichment record.
+        const ep = effectiveProfile
+        const affs = (ep?.available && Array.isArray(ep.affiliations) && ep.affiliations.length)
+          ? ep.affiliations
           : (Array.isArray(e.institutions) ? e.institutions : [])
-        const hasMetrics = profile?.available && (profile.paperCount != null || profile.citationCount != null || profile.hIndex != null)
+        const hasMetrics = ep?.available && (ep.paperCount != null || ep.citationCount != null || ep.hIndex != null)
         const loading = (!!e.s2_author_id || !!e.openalex_id) && !profile
         const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
         const chip = (label, val, title) => (
@@ -1882,16 +1931,16 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
                   the line disappears entirely when neither is known (no
                   invented numbers). Surfaced inline in the header so the
                   h-index is visible immediately, alongside the metric chips. */}
-              {profile?.available && (profile.hIndex != null || profile.citationCount != null) && (
+              {ep?.available && (ep.hIndex != null || ep.citationCount != null) && (
                 <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2 }}>
-                  {profile.hIndex != null && (
-                    <span title="h-index">h-index <span style={{ fontWeight: 700 }}>{fmt(profile.hIndex)}</span></span>
+                  {ep.hIndex != null && (
+                    <span title="h-index">h-index <span style={{ fontWeight: 700 }}>{fmt(ep.hIndex)}</span></span>
                   )}
-                  {profile.hIndex != null && profile.citationCount != null && (
+                  {ep.hIndex != null && ep.citationCount != null && (
                     <span style={{ color: 'var(--color-text-muted)' }}> · </span>
                   )}
-                  {profile.citationCount != null && (
-                    <span title="Total citations">{fmt(profile.citationCount)} citations</span>
+                  {ep.citationCount != null && (
+                    <span title="Total citations">{fmt(ep.citationCount)} citations</span>
                   )}
                 </div>
               )}
@@ -1901,9 +1950,38 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           {/* Metric chips */}
           {hasMetrics && (
             <div className="flex gap-1.5 px-3 pb-2.5">
-              {profile.paperCount != null && chip('papers', fmt(profile.paperCount), 'Publications')}
-              {profile.citationCount != null && chip('citations', fmt(profile.citationCount), 'Total citations')}
-              {profile.hIndex != null && chip('h-index', profile.hIndex, 'h-index')}
+              {ep.paperCount != null && chip('papers', fmt(ep.paperCount), 'Publications')}
+              {ep.citationCount != null && chip('citations', fmt(ep.citationCount), 'Total citations')}
+              {ep.hIndex != null && chip('h-index', ep.hIndex, 'h-index')}
+            </div>
+          )}
+
+          {/* R10 (A3): ID-less author resolution. An author with no s2/openalex
+              id can't load a by-id profile, so offer a corroboration-gated
+              "Find profile" lookup (name + this paper's title). A confident hit
+              flows into `effectiveProfile` above and renders real metrics; a
+              miss shows a quiet "no confident match" — never a fabricated
+              profile. Hidden once a profile has been resolved by id or by find. */}
+          {idLess && !(foundProfile?.available) && (
+            <div className="px-3 pb-2.5" style={{ fontSize: 11 }}>
+              {findState === 'idle' && (
+                <button type="button" onClick={runFindProfile}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md"
+                  title={paperTitle ? 'Look up this author on OpenAlex, corroborated by this paper' : 'A paper title is required to find this author confidently'}
+                  disabled={!paperTitle}
+                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)', cursor: paperTitle ? 'pointer' : 'not-allowed', opacity: paperTitle ? 1 : 0.6, border: 'none' }}>
+                  <ProfileLinkIcon icon="openalex" />
+                  Find profile
+                </button>
+              )}
+              {findState === 'loading' && (
+                <span style={{ color: 'var(--color-text-muted)' }}>Searching for a confident match…</span>
+              )}
+              {findState === 'miss' && (
+                <span style={{ color: 'var(--color-text-muted)' }} title="No author on a matching work corroborated this name — nothing was guessed.">
+                  No confident match
+                </span>
+              )}
             </div>
           )}
 
@@ -1930,13 +2008,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
 
           {/* Recent papers. R11: the hover popover shows the top 3; the pinned
               panel shows the COMPLETE list (the outer container scrolls). */}
-          {profile?.available && Array.isArray(profile.papers) && profile.papers.length > 0 && (
+          {ep?.available && Array.isArray(ep.papers) && ep.papers.length > 0 && (
             <div className="px-3 pb-2.5">
               <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                Recent work{pinned && profile.papers.length > 1 ? ` (${profile.papers.length})` : ''}
+                Recent work{pinned && ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
               </div>
               <div className="space-y-1.5">
-                {(pinned ? profile.papers : profile.papers.slice(0, 3)).map((p, i) => (
+                {(pinned ? ep.papers : ep.papers.slice(0, 3)).map((p, i) => (
                   <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
                     {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
                   </div>
@@ -1950,12 +2028,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           )}
 
           {/* Footer: profile links */}
-          {(profileLinks.length > 0 || (profile?.available && profile.homepage)) && (
+          {(profileLinks.length > 0 || (ep?.available && ep.homepage)) && (
             <div className="flex items-center gap-2 flex-wrap px-3 py-2"
               style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-              {profile?.available && profile.homepage && (
-                <a href={profile.homepage} target="_blank" rel="noopener noreferrer"
-                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(profile.homepage) } }}
+              {ep?.available && ep.homepage && (
+                <a href={ep.homepage} target="_blank" rel="noopener noreferrer"
+                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(ep.homepage) } }}
                   className="px-2 py-0.5 rounded-md" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
                   Homepage
                 </a>
