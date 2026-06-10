@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { exportCheckFile, exportBatchFile, publishCheck } from '../../utils/api'
 import ShareAnimationCanvas from './ShareAnimationCanvas'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -45,27 +45,18 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
 
-  // Walkthrough animation control. The canvas loops internally, but here we
-  // want it to PLAY ONCE each time the share banner is opened and then settle
-  // (no perpetual autoloop). `animKey` forces a fresh canvas mount so the
-  // animation re-triggers from frame zero every time the modal opens; once a
-  // single play-through has elapsed we unmount the live canvas (`animActive`
-  // → false) so the requestAnimationFrame loop stops. One play, no loop.
-  // The canvas's own DUR is 5200ms — give it that plus a small tail so the
-  // final frame lands before we freeze it.
-  const ANIM_PLAY_MS = 5200 + 400
+  // Walkthrough animation control. R23: the canvas now PLAYS ONCE and FREEZES
+  // on its final frame (loop=false is its default), so it must STAY MOUNTED —
+  // we no longer unmount it after a timer (that blanked the top of the banner).
+  // `animKey` forces a fresh canvas mount so the animation re-triggers from
+  // frame zero every time the modal opens; ShareModal is conditionally rendered
+  // by its parent, so it mounts fresh on every open and `animKey` bumps once
+  // per open (close+reopen replays once, then holds). No record/download button:
+  // it's a live, self-contained preview.
   const [animKey, setAnimKey] = useState(0)
-  const [animActive, setAnimActive] = useState(true)
-  const animTimerRef = useRef(null)
   useEffect(() => {
-    // Re-trigger on open: remount the canvas and run one pass.
+    // Mount-only: fires exactly once per open.
     setAnimKey((k) => k + 1)
-    setAnimActive(true)
-    animTimerRef.current = setTimeout(() => setAnimActive(false), ANIM_PLAY_MS)
-    return () => { if (animTimerRef.current) clearTimeout(animTimerRef.current) }
-    // Mount-only: ShareModal is conditionally rendered by its parent, so it
-    // mounts fresh on every open and this fires exactly once per open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Best-effort summary for the included-scans state + the build animation.
@@ -204,21 +195,22 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
         </div>
 
         <div className="px-5 py-4 space-y-4">
-          {/* Walkthrough video — the animated summary for THIS check, shown at
-              the top (auto-generated per check, reflects its real numbers).
-              No record/download button: it's a live preview. Plays ONCE each
-              time this banner is opened — `animKey` remounts the canvas so the
-              animation restarts from frame zero on open, and once a single
-              play-through has elapsed the canvas is unmounted (`animActive`
-              → false) so it doesn't autoloop or keep burning frames. */}
-          {!isBatch && summary.stats.total > 0 && animActive && (
+          {/* Walkthrough video — the animated summary for THIS check, shown in
+              the download banner (auto-generated per check, reflects its real
+              per-article numbers — identical to the Summary bar). No record /
+              download button: it's a live preview. R23: plays ONCE and then
+              FREEZES on its final frame, and STAYS MOUNTED so the top never
+              blanks. `animKey` remounts the canvas on each open so the
+              animation restarts from frame zero (close+reopen replays once,
+              then holds). */}
+          {!isBatch && summary.stats.total > 0 && (
             <ShareAnimationCanvas
               key={animKey}
               title={title}
               stats={summary.stats}
               aiBand={summary.ai?.band}
               aiScore={summary.ai?.overall_score}
-              height={232}
+              height={248}
             />
           )}
 

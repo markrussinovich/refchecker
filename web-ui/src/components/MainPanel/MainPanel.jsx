@@ -325,6 +325,9 @@ export default function MainPanel() {
             references={displayRefs}
             paperTitle={displayPaperTitle}
             paperSource={displayPaperSource}
+            aiBand={displayAiDetection?.band}
+            aiScore={displayAiDetection?.overall_score}
+            videoKey={`statvid-${selectedCheckId}`}
             healthBadge={
               <>
                 <HealthBadge references={displayRefs} />

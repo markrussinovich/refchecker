@@ -24,6 +24,16 @@ vi.mock('../../stores/useCheckStore', () => {
   return { useCheckStore }
 })
 
+// Capture the props the per-article walkthrough "video" (R24) is fed without
+// drawing on a (jsdom-less) canvas. Each render records the latest props.
+const animationProps = []
+vi.mock('../Modals/ShareAnimationCanvas', () => ({
+  default: (props) => {
+    animationProps.push(props)
+    return <div data-testid="stats-video" />
+  },
+}))
+
 // Helper to build a reference object
 const makeRef = (status, { errors = [], warnings = [], ...rest } = {}) => ({
   status,
@@ -369,5 +379,82 @@ describe('StatsSection hallucination count', () => {
     )
 
     expect(screen.queryByTitle(/likely hallucinated/i)).toBeNull()
+  })
+})
+
+// R24 (Q4): the per-article walkthrough "video" rendered on the stats page must
+// be fed the SAME counts StatsSection computes (so the animation EQUALS the
+// Summary bar) plus the article's AI band/score.
+describe('StatsSection per-article video receives the StatsSection counts (R24)', () => {
+  // 3 error refs (2 also warn), 2 warning-only, 1 verified, 1 hallucinated.
+  // Chips => verified 1, errors 3, warnings 2, hallucinated 1.
+  // The video groups errors+hallucinated like ShareModal: errors = 3 + 1 = 4.
+  const references = [
+    makeRef('error', {
+      errors: [{ error_type: 'author', message: 'author mismatch' }],
+      warnings: [{ message: 'year is approximate' }],
+    }),
+    makeRef('error', {
+      errors: [{ error_type: 'title', message: 'title mismatch' }],
+      warnings: [{ message: 'venue differs' }],
+    }),
+    makeRef('error', {
+      errors: [{ error_type: 'year', message: 'wrong year' }],
+    }),
+    makeRef('warning', { warnings: [{ message: 'year off by 1' }] }),
+    makeRef('warning', { warnings: [{ message: 'venue not found' }] }),
+    makeRef('verified'),
+    makeRef('hallucination', {
+      title: 'A fabricated paper that does not exist',
+      authors: ['Nobody'],
+      hallucination_assessment: { verdict: 'LIKELY' },
+    }),
+  ]
+
+  it('feeds the canvas counts that match the chips, plus aiBand/aiScore', () => {
+    animationProps.length = 0
+    render(
+      <StatsSection
+        stats={{ total_refs: 7, processed_refs: 7 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Video Paper"
+        paperSource="https://example.com/video"
+        aiBand="high"
+        aiScore={0.91}
+        videoKey="statvid-42"
+      />
+    )
+
+    // The video is rendered.
+    expect(screen.getByTestId('stats-video')).toBeTruthy()
+    const props = animationProps[animationProps.length - 1]
+
+    // Read the chip values straight off the rendered Summary so the assertion
+    // is anchored to what the user actually sees.
+    const verChip = screen.getByTitle(/references? fully verified/i)
+    const warnChip = screen.getByTitle(/references? with warnings only/i)
+    const errChips = screen.getAllByTitle(/references? with errors/i)
+    const verCount = Number(within(verChip).getByText(/^\d+$/).textContent)
+    const warnCount = Number(within(warnChip).getByText(/^\d+$/).textContent)
+    // The row-1 errors chip carries the references-with-errors count.
+    const errCount = errChips
+      .map(c => within(c).queryByText(/^\d+$/))
+      .filter(Boolean)
+      .map(n => Number(n.textContent))[0]
+
+    expect(verCount).toBe(1)
+    expect(warnCount).toBe(2)
+    expect(errCount).toBe(3)
+
+    // The canvas stats mirror the chips (with errors+hallucinated grouped).
+    expect(props.stats.total).toBe(7)
+    expect(props.stats.verified).toBe(verCount)        // 1
+    expect(props.stats.warnings).toBe(warnCount)       // 2
+    expect(props.stats.errors).toBe(errCount + 1)      // 3 errors + 1 hallucinated
+    // AI band/score threaded through from the selected check.
+    expect(props.aiBand).toBe('high')
+    expect(props.aiScore).toBe(0.91)
+    expect(props.title).toBe('Video Paper')
   })
 })

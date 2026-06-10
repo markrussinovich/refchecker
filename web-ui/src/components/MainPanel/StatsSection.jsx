@@ -16,6 +16,7 @@ import {
   downloadAsFile
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
+import ShareAnimationCanvas from '../Modals/ShareAnimationCanvas'
 
 /**
  * Per-stage extraction breakdown chip — Regex / LLM / Hallucination LLM.
@@ -86,7 +87,7 @@ function PerStageChip({ stats, references }) {
  * Stats section showing reference check summary with clickable filters
  * Compact design with refs summary and individual issue counts
  */
-export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource, healthBadge, usageChip }) {
+export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource, healthBadge, usageChip, aiBand, aiScore, videoKey }) {
   const statusFilter = useCheckStore(s => s.statusFilter)
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -218,6 +219,18 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsHallucinated = summaryCounts.references.hallucinated
   const processedRefs = summaryCounts.processedRefs
   const totalRefs = summaryCounts.totalRefs
+
+  // R24: per-article "video" stats fed to ShareAnimationCanvas. Derived from
+  // the SAME `summaryCounts` (buildReferenceSummary) the chips use, so the
+  // animation's reference / warning / error counts EQUAL this article's
+  // Summary bar. `errors` groups error + hallucinated references — identical to
+  // ShareModal's grouping — so the "problem" count lines up with the gauge.
+  const videoStats = useMemo(() => ({
+    total: processedRefs,
+    verified: refsVerified,
+    warnings: refsWithWarningsOnly,
+    errors: refsWithErrors + refsHallucinated,
+  }), [processedRefs, refsVerified, refsWithWarningsOnly, refsWithErrors, refsHallucinated])
 
   // Count REFERENCES per issue type (not raw issue items) so these chips agree
   // with the "References" status badges above — clicking a chip filters to
@@ -466,6 +479,24 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           </div>
         </div>
       </div>
+
+      {/* Per-article walkthrough "video" (R24). Rendered alongside this
+          article's stats, fed the SAME summaryCounts the chips use (so its
+          counts EQUAL the Summary bar) plus the article's AI band/score.
+          Keyed on the selected check (`videoKey`) so switching articles
+          replays once then freezes on the final frame — never blanks. */}
+      {videoStats.total > 0 && (
+        <div className="mb-3">
+          <ShareAnimationCanvas
+            key={videoKey}
+            title={paperTitle}
+            stats={videoStats}
+            aiBand={aiBand}
+            aiScore={aiScore}
+            height={240}
+          />
+        </div>
+      )}
 
       {/* Reference counts row */}
       <div className="flex items-center gap-2 flex-wrap">

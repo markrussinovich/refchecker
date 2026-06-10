@@ -3,12 +3,18 @@ import { forwardRef, useEffect, useRef } from 'react'
 /**
  * An in-modal animated walkthrough of the check results, drawn live on a
  * <canvas> — a "walkthrough video" feel without any recording. Shown in the
- * share dialog (and while the shareable report is generated) as a looping
- * preview; loops until unmounted. Pure canvas + requestAnimationFrame, no
- * MediaRecorder/captureStream.
+ * share dialog and alongside an article's stats. Pure canvas +
+ * requestAnimationFrame, no MediaRecorder/captureStream.
+ *
+ * R23: PLAY ONCE, THEN FREEZE. By default (`loop=false`) the animation runs a
+ * single pass — the progress `t` is CLAMPED to `min(1, …)` (no modulo) and the
+ * rAF loop is cancelled once `t === 1`, holding the final fully-drawn frame so
+ * the top of the share banner never blanks. Re-mounting the component (via a
+ * `key` change on open) replays it once, then holds again. Pass `loop` to keep
+ * the old continuous-loop behaviour.
  *
  * Counts are NOT recomputed here — they are read verbatim from the `stats`
- * prop, which both call sites derive from the SAME authoritative summary the
+ * prop, which every call site derives from the SAME authoritative summary the
  * app's Summary bar shows (buildReferenceSummary). So the numbers on the
  * animation always match the numbers in the summary bar.
  */
@@ -19,7 +25,7 @@ const C = {
 }
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 
-const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, stats = {}, aiBand, aiScore, height = 232 }, fwdRef) {
+const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, stats = {}, aiBand, aiScore, height = 248, loop = false }, fwdRef) {
   const ref = useRef(null)
   const rafRef = useRef(0)
   const startRef = useRef(0)
@@ -33,10 +39,13 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
     const canvas = ref.current
     if (!canvas) return undefined
     const ctx = canvas.getContext('2d')
+    if (!ctx) return undefined
     // Render at devicePixelRatio for a crisp, high-quality result (the logical
-    // drawing coords stay W x H; the backing store is scaled up).
-    const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-    const W = 460, H = height
+    // drawing coords stay W x H; the backing store is scaled up). R23: raise
+    // the dpr cap to 3 and use a larger logical width for a sharper, more
+    // legible "video".
+    const dpr = Math.min(3, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
+    const W = 560, H = height
     canvas.width = Math.round(W * dpr)
     canvas.height = Math.round(H * dpr)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -86,12 +95,15 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
 
     const frame = (now) => {
       if (!startRef.current) startRef.current = now
-      const t = ((now - startRef.current) % DUR) / DUR
+      // R23: clamp to a single pass (no modulo). When `loop` is set keep the
+      // old continuous behaviour; otherwise `t` saturates at 1 and we freeze.
+      const elapsed = (now - startRef.current) / DUR
+      const t = loop ? (elapsed % 1) : Math.min(1, elapsed)
       ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H)
 
       // Brand mark
       ctx.fillStyle = C.accent; ctx.textAlign = 'left'
-      ctx.font = '700 15px -apple-system,Segoe UI,Roboto,sans-serif'
+      ctx.font = '700 17px -apple-system,Segoe UI,Roboto,sans-serif'
       ctx.fillText('RefChecker', PAD, headerY)
 
       // Document title (clipped to the canvas width so it never overruns)
@@ -99,8 +111,8 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
       ctx.save()
       ctx.beginPath(); ctx.rect(PAD, titleY - 22, W - PAD * 2, 30); ctx.clip()
       ctx.fillStyle = C.fg; ctx.globalAlpha = s1
-      ctx.font = '700 20px -apple-system,Segoe UI,Roboto,sans-serif'
-      ctx.fillText((title || 'Reference report').slice(0, 46), PAD, titleY - (1 - s1) * 10)
+      ctx.font = '700 22px -apple-system,Segoe UI,Roboto,sans-serif'
+      ctx.fillText((title || 'Reference report').slice(0, 52), PAD, titleY - (1 - s1) * 10)
       ctx.restore()
       ctx.globalAlpha = 1
 
@@ -118,9 +130,9 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
       chips.forEach((c, i) => {
         const a = Math.max(0, Math.min(1, (s3 * 3) - i)); ctx.globalAlpha = a
         const y = chipsTop + i * chipGap
-        ctx.fillStyle = c[2]; ctx.font = '700 20px -apple-system,Segoe UI,Roboto,sans-serif'; ctx.textAlign = 'left'
+        ctx.fillStyle = c[2]; ctx.font = '700 22px -apple-system,Segoe UI,Roboto,sans-serif'; ctx.textAlign = 'left'
         ctx.fillText(String(c[0]), chipNumX, y)
-        ctx.fillStyle = C.muted; ctx.font = '13px -apple-system,Segoe UI,Roboto,sans-serif'
+        ctx.fillStyle = C.muted; ctx.font = '14px -apple-system,Segoe UI,Roboto,sans-serif'
         ctx.fillText(c[1], chipLblX, y - 1)
         ctx.globalAlpha = 1
       })
@@ -129,22 +141,29 @@ const ShareAnimationCanvas = forwardRef(function ShareAnimationCanvas({ title, s
       if (hasAi) {
         const s4 = ease(Math.max(0, Math.min(1, (t - 0.66) / 0.3))); ctx.globalAlpha = s4
         const yAi = H - PAD - 6
-        ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.font = '12px -apple-system,Segoe UI,Roboto,sans-serif'
+        ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.font = '13px -apple-system,Segoe UI,Roboto,sans-serif'
         ctx.fillText('AI-text likelihood', PAD, yAi)
-        ctx.fillStyle = bandColor; ctx.font = '700 14px -apple-system,Segoe UI,Roboto,sans-serif'
-        ctx.fillText(`${aiBand.toUpperCase()}${aiPct != null ? ` · ${aiPct}` : ''}`, PAD + 122, yAi)
+        ctx.fillStyle = bandColor; ctx.font = '700 15px -apple-system,Segoe UI,Roboto,sans-serif'
+        ctx.fillText(`${aiBand.toUpperCase()}${aiPct != null ? ` · ${aiPct}` : ''}`, PAD + 132, yAi)
         ctx.globalAlpha = 1
+      }
+      // R23: once a single pass has completed, hold the final frame and STOP
+      // the rAF loop — the canvas stays mounted so the banner never blanks.
+      if (!loop && t >= 1) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = 0
+        return
       }
       rafRef.current = requestAnimationFrame(frame)
     }
     rafRef.current = requestAnimationFrame(frame)
     return () => { cancelAnimationFrame(rafRef.current); startRef.current = 0 }
-  }, [title, stats, aiBand, aiScore, height])
+  }, [title, stats, aiBand, aiScore, height, loop])
 
   return (
     <canvas
       ref={setCanvas}
-      width={460}
+      width={560}
       height={height}
       style={{ width: '100%', borderRadius: 10, border: '1px solid var(--color-border)', display: 'block' }}
     />
