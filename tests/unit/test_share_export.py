@@ -132,7 +132,9 @@ def test_render_export_empty_or_odd_check(fmt):
 # --------------------------------------------------------------------------- #
 
 def _patch_check(monkeypatch, check):
-    async def _fake_get_check_by_id(check_id, user_id=None):
+    # Mirror the real db.get_check_by_id signature, which gained an optional
+    # team_ids kwarg for team-aware reads (R26).
+    async def _fake_get_check_by_id(check_id, user_id=None, team_ids=None):
         return check
     monkeypatch.setattr(backend_main.db, "get_check_by_id", _fake_get_check_by_id)
 

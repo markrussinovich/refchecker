@@ -100,7 +100,7 @@ def _gaps_test_client(monkeypatch):
         ],
     }
 
-    async def _fake_get_check_by_id(check_id, user_id=None):
+    async def _fake_get_check_by_id(check_id, user_id=None, team_ids=None):
         return fake_check if check_id == 42 else None
 
     monkeypatch.setattr(backend_main.db, "get_check_by_id", _fake_get_check_by_id)

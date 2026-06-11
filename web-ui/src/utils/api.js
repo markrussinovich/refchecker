@@ -75,6 +75,10 @@ export const removeTeamMember = (teamId, userId) =>
   api.delete(`/teams/${teamId}/members/${userId}`)
 export const leaveTeam = (teamId) => api.post(`/teams/${teamId}/leave`)
 export const getTeamActivity = (teamId) => api.get(`/teams/${teamId}/activity`)
+// R26: checks shared with a team, and sharing a single check / whole batch.
+export const getTeamChecks = (teamId) => api.get(`/teams/${teamId}/checks`)
+export const shareCheckWithTeam = (checkId, teamId) =>
+  api.post(`/checks/${checkId}/share`, { team_id: teamId })
 
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
@@ -124,6 +128,9 @@ export const getCheckDetail = (id) => api.get(`/history/${id}`)
 export const deleteCheck = (id) => api.delete(`/history/${id}`)
 export const updateCheckLabel = (id, label) => api.patch(`/history/${id}`, { custom_label: label })
 export const updateBatchLabel = (batchId, label) => api.patch(`/batch/${batchId}`, { batch_label: label })
+// R26: share the whole batch with a team (team_id 0 unshares) via the extended PATCH.
+export const shareBatchWithTeam = (batchId, teamId) =>
+  api.patch(`/batch/${batchId}`, { team_id: teamId })
 export const recheck = (id) => api.post(`/recheck/${id}`)
 
 // Admin operations
