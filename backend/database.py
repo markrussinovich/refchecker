@@ -1489,6 +1489,224 @@ class Database:
             await db.commit()
             return cursor.rowcount
 
+    @staticmethod
+    def _is_check_stale(
+        results: List[Dict[str, Any]],
+        total_refs: int,
+        last_activity: Optional[str],
+        stale_after_seconds: float,
+    ) -> bool:
+        """Decide whether an orphaned in_progress row is safe to finalize.
+
+        A row is stale when either:
+          • its references are all in (processed >= total_refs > 0) — the run
+            finished the work but never wrote the terminal status (the classic
+            "59/43 stuck forever" symptom, where the AI-detection await or a
+            server restart killed run_check between the last ref and the
+            'completed' emit); OR
+          • its last-activity timestamp is older than ``stale_after_seconds``
+            — covers checks that died mid-extraction with no usable refs.
+
+        Time is the *fallback*, never the only signal, so a finished-but-stuck
+        check unsticks immediately on the next poll instead of waiting out the
+        clock. Callers MUST already have excluded rows present in the live
+        active_checks map — those are genuinely running and must be left alone.
+        """
+        processed = 0
+        if isinstance(results, list):
+            for fallback_index, ref in enumerate(results):
+                status = str((ref or {}).get("status") or "").strip().lower()
+                if not status or status in {
+                    "pending", "checking", "in_progress", "queued", "processing", "started"
+                }:
+                    continue
+                processed += 1
+        if total_refs and processed >= total_refs:
+            return True
+
+        if not last_activity:
+            # No timestamp to reason about — only the processed-count signal
+            # above can finalize it; otherwise leave it alone.
+            return False
+        from datetime import timezone as _tz
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                ts = datetime.strptime(str(last_activity)[:26], fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return False
+        now = datetime.now(_tz.utc).replace(tzinfo=None)
+        return (now - ts).total_seconds() >= stale_after_seconds
+
+    async def find_stale_in_progress_checks(
+        self,
+        active_check_ids: Optional[set] = None,
+        stale_after_seconds: float = 180.0,
+    ) -> List[Dict[str, Any]]:
+        """Find orphaned in_progress checks that are safe to finalize.
+
+        Returns rows whose status is ``in_progress``, whose id is NOT in the
+        live ``active_check_ids`` set (so a genuinely-running check is never
+        returned), and that are stale per :meth:`_is_check_stale`. Used by the
+        reconciler at startup (sweep all) and on the /history/{id} GET path
+        (unstick a single polling check on demand)."""
+        active = {int(cid) for cid in (active_check_ids or set())}
+        candidates: List[Dict[str, Any]] = []
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, total_refs, results_json, ai_detection_json, "
+                "COALESCE(completed_at, started_at, timestamp) AS last_activity "
+                "FROM check_history WHERE status = 'in_progress'"
+            ) as cursor:
+                rows = [dict(r) async for r in cursor]
+
+        for row in rows:
+            if int(row["id"]) in active:
+                continue
+            try:
+                results = json.loads(row.get("results_json") or "[]")
+            except (ValueError, TypeError):
+                results = []
+            if not isinstance(results, list):
+                results = []
+            if self._is_check_stale(
+                results,
+                int(row.get("total_refs") or 0),
+                row.get("last_activity"),
+                stale_after_seconds,
+            ):
+                candidates.append(row)
+        return candidates
+
+    async def finalize_stale_check(
+        self,
+        check_id: int,
+        reason: str = "reconciled (orphaned session)",
+    ) -> Optional[str]:
+        """Finalize a single orphaned in_progress check to a terminal status.
+
+        Computes the terminal status from the stored references (reusing the
+        same bucket logic the live path uses): ``completed`` when there is at
+        least one processed reference, ``error`` when there are none (the run
+        died before producing any usable result). Writes ``completed_at``, a
+        ``cancel_reason`` of ``reason``, and the recomputed aggregate count
+        columns so history cards/Summary render correct numbers. If
+        AI-detection was never attached, marks it ``unavailable`` so the FE
+        stops waiting for an analysis that will never arrive.
+
+        Idempotent and race-safe: returns ``None`` (no-op) if the row is not
+        (or no longer) ``in_progress`` — so it can never clobber a check that
+        a concurrent live run just finalized, or downgrade an already-terminal
+        row. Returns the terminal status string on success."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT status, total_refs, results_json, ai_detection_json "
+                "FROM check_history WHERE id = ?",
+                (check_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return None
+            if str(row["status"] or "").strip().lower() != "in_progress":
+                # Already terminal (or a live run finalized it first) — never
+                # overwrite a genuine terminal status.
+                return None
+
+            try:
+                results = json.loads(row["results_json"] or "[]")
+            except (ValueError, TypeError):
+                results = []
+            if not isinstance(results, list):
+                results = []
+
+            buckets = _compute_reference_buckets_from_results(results, is_complete=True)
+            terminal_status = "completed" if buckets["processed_refs"] > 0 else "error"
+            total_refs = int(row["total_refs"] or 0) or buckets["processed_refs"]
+
+            from datetime import timezone as _tz
+            completed_at = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            updates = [
+                "status = ?",
+                "completed_at = ?",
+                "cancel_reason = ?",
+                "total_refs = ?",
+                "errors_count = ?",
+                "warnings_count = ?",
+                "suggestions_count = ?",
+                "unverified_count = ?",
+                "hallucination_count = ?",
+                "refs_with_errors = ?",
+                "refs_with_warnings_only = ?",
+                "refs_with_suggestions_only = ?",
+                "refs_verified = ?",
+            ]
+            params: List[Any] = [
+                terminal_status,
+                completed_at,
+                reason,
+                total_refs,
+                buckets["errors_count"],
+                buckets["warnings_count"],
+                buckets["suggestions_count"],
+                buckets["unverified_count"],
+                buckets["hallucination_count"],
+                buckets["refs_with_errors"],
+                buckets["refs_with_warnings_only"],
+                buckets["refs_with_suggestions_only"],
+                buckets["refs_verified"],
+            ]
+
+            # AI detection never attached → record an honest 'unavailable' so a
+            # polling FE stops waiting for an analysis the dead run never made.
+            if not (row["ai_detection_json"] or "").strip():
+                try:
+                    from refchecker.ai_detection.base import make_unavailable
+                    ai_payload = make_unavailable("reconciled", "local").to_dict()
+                except Exception:  # noqa: BLE001 — ai_detection is optional
+                    ai_payload = {"status": "unavailable", "reason": "reconciled"}
+                updates.append("ai_detection_json = ?")
+                params.append(json.dumps(ai_payload))
+                updates.append("ai_detection_band = ?")
+                params.append(ai_payload.get("band"))
+
+            params.append(check_id)
+            await db.execute(
+                f"UPDATE check_history SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            await db.commit()
+            return terminal_status
+
+    async def reconcile_stale_in_progress(
+        self,
+        active_check_ids: Optional[set] = None,
+        stale_after_seconds: float = 180.0,
+        reason: str = "reconciled (orphaned session)",
+    ) -> int:
+        """Sweep all orphaned in_progress checks and finalize each.
+
+        Returns the number of rows actually finalized. Safe to call repeatedly
+        (each finalize is idempotent and guards on still being in_progress)."""
+        stale = await self.find_stale_in_progress_checks(
+            active_check_ids=active_check_ids,
+            stale_after_seconds=stale_after_seconds,
+        )
+        finalized = 0
+        for row in stale:
+            try:
+                if await self.finalize_stale_check(int(row["id"]), reason=reason):
+                    finalized += 1
+            except Exception as e:  # noqa: BLE001 — one bad row mustn't abort the sweep
+                logger.warning("Failed to finalize stale check %s: %s", row.get("id"), e)
+        return finalized
+
     # LLM Configuration methods
 
     async def get_llm_configs(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:

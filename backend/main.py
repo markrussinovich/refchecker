@@ -1049,12 +1049,21 @@ async def _run_startup_tasks() -> None:
         logger.warning(f"Failed to load concurrency setting, using default: {e}")
         await init_limiter(DEFAULT_MAX_CONCURRENT)
 
+    # Reconcile orphaned in_progress checks left behind by a previous process
+    # (a run_check task that died — or the server restarted — between the last
+    # reference and the terminal 'completed' write, so the row stayed
+    # 'in_progress' forever and a polling FE never unstuck). At startup nothing
+    # is genuinely running yet, but pass the (empty) live map's ids anyway so
+    # this path is identical to the on-demand one. Each row is finalized to a
+    # status computed from its stored references (completed, or error if zero).
     try:
-        stale = await db.cancel_stale_in_progress()
-        if stale:
-            logger.info(f"Cancelled {stale} stale in-progress checks on startup")
+        active_ids = {meta.get("check_id") for meta in active_checks.values()
+                      if meta.get("check_id") is not None}
+        reconciled = await db.reconcile_stale_in_progress(active_check_ids=active_ids)
+        if reconciled:
+            logger.info(f"Reconciled {reconciled} orphaned in-progress checks on startup")
     except Exception as e:
-        logger.error(f"Failed to cancel stale checks: {e}")
+        logger.error(f"Failed to reconcile stale checks: {e}")
     logger.info("Database initialized")
 
 
@@ -2569,7 +2578,30 @@ async def get_check_detail(
         if check.get("status") == "in_progress":
             session_id = _session_id_for_check(check_id)
             if session_id:
+                # A genuinely running check — hand the FE its live session so
+                # it can keep streaming. NEVER reconcile this one.
                 check["session_id"] = session_id
+            else:
+                # Orphaned: in_progress but not in the live active_checks map.
+                # If it's also stale (refs done, or last activity too old),
+                # finalize it now so the polling FE unsticks on this very GET
+                # instead of looping forever. The active-ids guard (re-checked
+                # inside finalize_stale_check) keeps a check that started
+                # running between these two lines untouched.
+                active_ids = {m.get("check_id") for m in active_checks.values()
+                              if m.get("check_id") is not None}
+                try:
+                    stale = await db.find_stale_in_progress_checks(active_check_ids=active_ids)
+                    if any(int(r["id"]) == check_id for r in stale):
+                        finalized = await db.finalize_stale_check(check_id)
+                        if finalized:
+                            logger.info(
+                                "Reconciled orphaned in-progress check %s on read (-> %s)",
+                                check_id, finalized,
+                            )
+                            check = await _get_accessible_check_or_404(check_id, current_user)
+                except Exception as e:  # noqa: BLE001 — read must still return
+                    logger.warning("On-demand reconcile failed for check %s: %s", check_id, e)
         return check
     except HTTPException:
         raise

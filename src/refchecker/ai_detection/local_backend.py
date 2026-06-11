@@ -481,7 +481,14 @@ class _TorchEngine:
         # second layer of defence; see the spec's `.py` datas block.)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
+            # local_files_only: the model is verified installed on disk before
+            # we ever build an engine (LocalDetectorBackend.detect guards on
+            # is_model_installed). Forcing offline here means from_pretrained can
+            # NEVER reach out to the Hugging Face hub to "check for a newer
+            # revision" — a network call that, on a flaky connection, could hang
+            # this load far past the AI-detection budget. Belt to the existing
+            # asyncio.wait_for(480) suspenders: load is purely local I/O now.
+            self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
 
         # Plain nn.Module — deliberately NOT a transformers PreTrainedModel.
         # Subclassing PreTrainedModel dragged in its version-fragile construction
@@ -530,7 +537,7 @@ class _TorchEngine:
         # removes the source-format step entirely (we do our own strict checks).
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            config = AutoConfig.from_pretrained(model_dir)
+            config = AutoConfig.from_pretrained(model_dir, local_files_only=True)
         state_dict = _load_checkpoint_state_dict(model_dir)
 
         if state_dict is not None and any(k.startswith("classifier") for k in state_dict):
@@ -557,7 +564,9 @@ class _TorchEngine:
             from transformers import AutoModelForSequenceClassification
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                self._std = AutoModelForSequenceClassification.from_pretrained(model_dir)
+                self._std = AutoModelForSequenceClassification.from_pretrained(
+                    model_dir, local_files_only=True
+                )
             self.model = None
             self._std.eval()
             num_labels = int(getattr(self._std.config, "num_labels", 1) or 1)
@@ -612,7 +621,10 @@ class _OnnxEngine:
         # transformers calls so the formatter never reads this module's source.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
+            # local_files_only: the model dir is verified-installed before any
+            # engine is built; never let from_pretrained hit the network (see
+            # the _TorchEngine note — avoids a hung hub call past the budget).
+            self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
         self.session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
         self.input_names = {i.name for i in self.session.get_inputs()}
         # Resolve the AI-positive class index from the config for multi-class
@@ -621,7 +633,7 @@ class _OnnxEngine:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                cfg = AutoConfig.from_pretrained(model_dir)
+                cfg = AutoConfig.from_pretrained(model_dir, local_files_only=True)
             if int(getattr(cfg, "num_labels", 1) or 1) > 1:
                 self._ai_index = _ai_positive_index(getattr(cfg, "id2label", None))
         except Exception:  # noqa: BLE001
