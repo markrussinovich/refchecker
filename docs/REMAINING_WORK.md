@@ -702,3 +702,32 @@ User decisions (locked): push `fix/remaining-p0-viewers` to **origin** (`ArioMon
 ### R60 — Cut the release (autonomous tag push) *(Batch K — LAST)*
 - *Change:* after R59 is green, push the release tags so CI publishes: the desktop tag (per `desktop-release.yml`'s trigger, e.g. `desktop-v0.9.19`) → builds dmg + updater (signed via `refchecker-updater.key`); the PyPI tag (per `release.yml`'s trigger, e.g. `v3.2.0`) → publishes the Python package/CLI. Confirm the exact tag patterns from the workflow `on:` triggers before tagging.
 - *Acceptance:* [ ] tag patterns verified against the workflow triggers; [ ] tags pushed; [ ] `desktop-release.yml` + `release.yml` runs succeed (dmg/updater + PyPI published); [ ] release notes attached. Requires the repo's configured secrets (PyPI token, signing/updater key) — surfaced to the user if any run fails on a missing secret.
+
+---
+
+## 14. Batch I — R61 multi-detector AI detection (RAID-leaderboard-informed) — PRD
+
+**Goal:** let the user install and run **one or more** of the best open-source AI-text detectors, see their results **compared side-by-side**, and **export the ones they select via checkboxes**. Runs after Batch J, before Batch K, so it ships in 0.9.19/3.2.0.
+
+**Detector roster (research-verified, all on HuggingFace; install on demand — never bundled):**
+
+| Key | HF repo | Arch / type | Tier | Notes |
+|---|---|---|---|---|
+| `desklib` | `desklib/ai-text-detector-v1.01` | DeBERTa-v3-large classifier | 1 (default) | ALREADY integrated (`model_manager.py`); RAID leaderboard leader among open models |
+| `superannotate` | `SuperAnnotate/ai-detector` | RoBERTa-Large classifier | 1 | #1 open-source on RAID (late 2024); also `SuperAnnotate/ai-detector-low-fpr` variant |
+| `e5-small-lora` | `MayZhou/e5-small-lora-ai-generated-detector` | e5-small + LoRA classifier | 1 | RAID-optimized, tiny/fast/CPU-friendly (~89% acc; ONNX port exists) |
+| `mage` | `yaful/MAGE` | Longformer classifier | 1 | "Detection in the wild" (ACL 2024), strong out-of-domain |
+| `binoculars` | paired causal LMs | metric-based zero-shot | 2 (heavy) | Best-in-class at low FPR; needs 2 LLMs → explicit resource warning, opt-in |
+| `fast-detectgpt` | GPT-Neo-2.7B scorer | metric-based zero-shot | 2 (heavy) | 340× faster DetectGPT; heavy download warning |
+| `radar` | `TrustSafeAI/RADAR-Vicuna-7B` | adversarially-trained classifier | 2 (heavy) | Robust to paraphrase attacks; 7B-scale warning |
+
+**Engineering (extends the existing pluggable `src/refchecker/ai_detection/`):**
+1. **Registry refactor** — generalize `model_manager.py` from the single `MODEL_REPO` const to a `DETECTOR_REGISTRY` (key → repo, arch, head, size, tier, threshold, RAID note); per-detector install/remove/status (reuse the existing on-demand HF download + `.refcheck_model_info.json` pattern); `local_backend.py` → parameterized `load(detector_key)` with per-arch heads (DeBERTa token-cls head, RoBERTa/e5 seq-cls). Tier-2 metric detectors live behind a `heavy` flag with explicit size/RAM warnings; abstain cleanly if not installed.
+2. **Multi-run + compare API** — extend the detection endpoints (`backend/main.py`) + `detection_mode` plumbing to accept `detectors: [keys]`; run selected detectors (sequentially or bounded-parallel), return per-detector `{score, band, per-sentence/page spans}` plus a comparison summary (agreement/disagreement per sentence). NO synthetic "ensemble truth" — show each detector's own verdict honestly; disagreement is signal, not noise to hide.
+3. **FE — manage + compare + export** — `SettingsPanel`: detector manager (install/remove with size + license shown, progress, tier-2 warnings). `AIDetectionPanel`/`AIDetectionVisuals`: run-with-selected-detectors control; comparison table (per-detector score/band chips + per-sentence agreement view, reusing the existing band colors); **checkbox per detector result + "Export selected"** producing the existing export shapes (MD/CSV/JSON) containing only the checked detectors' results.
+4. **CLI parity** — `--ai-detection` gains `--detectors key1,key2` + `--list-detectors` (after J1 lands, reuse its flag wiring).
+- **TDD:** registry unit tests (install/status/remove mocked HF), per-arch head loading, multi-run aggregation + disagreement math, FE compare-table + checkbox-export vitest, CLI flag tests. **DoD:** lint 0 errors, full vitest+pytest green, build ok, no fabricated scores (a not-installed detector NEVER reports a number), honesty notes in docs (R57 matrix row updated).
+- **Orchestration:** Batch I runs streams I1 (backend registry+multi-run) ∥ I2 (FE manage/compare/export) in PARALLEL (disjoint files), then I3 (CLI + docs wiring) after both, each through the reviewer+watchdog loop; gate; per-stream commits; local merge into `fix/remaining-p0-viewers` (real GitHub PRs become possible after R59 pushes the branch).
+- *Acceptance:* [ ] user can install/remove each Tier-1 detector from Settings with real size/license info; [ ] can run any subset and see per-detector scores + per-sentence agreement side-by-side; [ ] checkbox-export emits only selected detectors' results; [ ] Tier-2 detectors clearly warned + opt-in; [ ] uninstalled detectors abstain (no fabricated numbers); [ ] CLI `--detectors`/`--list-detectors` work; [ ] R57 feature matrix updated.
+
+Sources: [RAID benchmark (ACL 2024)](https://github.com/liamdugan/raid) · [raid-bench.xyz](https://raid-bench.xyz/) · [SuperAnnotate detector](https://huggingface.co/SuperAnnotate/ai-detector) ([blog: #1 open-source on RAID](https://www.superannotate.com/blog/ai-content-detection-superannotate)) · [e5-small-lora](https://huggingface.co/MayZhou/e5-small-lora-ai-generated-detector) · [MAGE](https://huggingface.co/yaful/MAGE) · [desklib](https://huggingface.co/desklib/ai-text-detector-v1.01) · [RAID paper](https://arxiv.org/abs/2405.07940)
