@@ -40,14 +40,29 @@ function aiDetectionValues() {
     const key = useKeyStore.getState().getKey(s.service)
     if (key) out.ai_detection_api_key = key
   }
+  // R61 — the user's chosen multi-detector run set (local backend only). An
+  // empty list is omitted so the backend falls back to the single default
+  // detector (backward compatible — existing desklib users are unaffected).
+  // Sent as a repeated `ai_detection_detectors` form field → a List[str]
+  // server-side, mirroring the wrapper's `ai_detection_detectors` param.
+  if (s.backend === 'local' && Array.isArray(s.selectedDetectors) && s.selectedDetectors.length > 0) {
+    out.ai_detection_detectors = s.selectedDetectors
+  }
   return out
 }
 
 function appendAiDetection(formData) {
   const v = aiDetectionValues()
   if (!v) return
-  Object.entries(v).forEach(([k, val]) =>
-    formData.append(k, typeof val === 'boolean' ? String(val) : val))
+  Object.entries(v).forEach(([k, val]) => {
+    // A list field (ai_detection_detectors) is appended once per element so the
+    // server receives a repeated form field → List[str].
+    if (Array.isArray(val)) {
+      val.forEach((item) => formData.append(k, String(item)))
+      return
+    }
+    formData.append(k, typeof val === 'boolean' ? String(val) : val)
+  })
 }
 
 /**
