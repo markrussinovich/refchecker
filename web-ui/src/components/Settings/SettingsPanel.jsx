@@ -62,6 +62,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     if (isSettingsOpen && activeSection === 'AI Detection') {
       aiDetection.fetchModelStatus()
       aiDetection.fetchRuntimeStatus()
+      // R61 — also load the multi-detector registry so the manager can list the
+      // roster with real size/license/tier + per-detector install state.
+      aiDetection.fetchDetectors()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsOpen, activeSection])
@@ -791,6 +794,144 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* R61 — Multi-detector manager. Lists the DETECTOR_REGISTRY roster with
+            real size/license/tier; install/remove per detector with progress;
+            Tier-2 (heavy) rows show the explicit resource warning and are
+            disabled when unavailable. The single-model card above is preserved
+            for existing users; this is additive. */}
+        {backend === 'local' && aiDetection.detectors.length > 0 && (
+          <div className="rounded-lg p-3 border space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Detectors</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                Install one or more open-source detectors and run them side by side. Each shows its
+                own verdict — there is no blended “ensemble” score. Heavy (Tier-2) detectors download
+                multi-GB models and need extra RAM.
+              </div>
+              {/* R61 — run-selection helper. Only INSTALLED detectors can be put
+                  into the run set (the store guards this); an empty selection
+                  falls back to the single default detector for existing users. */}
+              <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {aiDetection.selectedDetectors.length > 0
+                  ? `Next check will run: ${aiDetection.selectedDetectors.join(', ')}`
+                  : 'Tick “Run” on the installed detectors you want the next check to use. With none ticked, the default detector runs.'}
+              </div>
+            </div>
+            <ul className="space-y-2">
+              {aiDetection.detectors.map((d) => {
+                const busy = !!aiDetection.detectorBusy[d.key]
+                const err = aiDetection.detectorError[d.key]
+                const heavy = d.tier === 2 || d.heavy
+                // A heavy detector with no runtime/host support is disabled.
+                const unavailable = d.available === false
+                const sizeLabel = d.size_bytes ? fmtMB(d.size_bytes) : (d.size || null)
+                return (
+                  <li key={d.key} className="rounded-lg p-2.5 border"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                            {d.label || d.key}
+                          </span>
+                          {heavy && (
+                            <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded"
+                              style={{ color: 'var(--color-warning)', border: '1px solid var(--color-warning)' }}>
+                              Tier 2 · heavy
+                            </span>
+                          )}
+                          {d.installed && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                              style={{ color: 'var(--color-success)', border: '1px solid var(--color-success)' }}>
+                              Installed
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                          {[d.arch, sizeLabel, d.license].filter(Boolean).join(' · ')}
+                        </div>
+                        {d.repo && (
+                          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                            <a
+                              href={`https://huggingface.co/${d.repo}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(`https://huggingface.co/${d.repo}`) } }}
+                              style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+                            >
+                              {d.repo}
+                            </a>
+                          </div>
+                        )}
+                        {d.raid_note && (
+                          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{d.raid_note}</div>
+                        )}
+                        {heavy && (
+                          <div className="text-xs mt-1 rounded p-1.5"
+                            style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)' }}>
+                            ⚠ Heavy detector — {sizeLabel ? `${sizeLabel} download, ` : ''}large RAM footprint. Opt-in only.
+                          </div>
+                        )}
+                        {err && (
+                          <div className="text-xs mt-1 rounded p-1.5 whitespace-pre-wrap"
+                            style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{err}</div>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        {/* R61 — per-detector "Run" toggle (installed only). Adds
+                            the detector to the multi-run set threaded into the
+                            next check request as ai_detection_detectors. */}
+                        {d.installed && (
+                          <label className="flex items-center gap-1.5 text-xs cursor-pointer"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title="Run this detector on the next check (side-by-side with the others ticked)">
+                            <input
+                              type="checkbox"
+                              data-testid={`run-check-${d.key}`}
+                              aria-label={`Run ${d.label || d.key} on the next check`}
+                              checked={aiDetection.selectedDetectors.includes(d.key)}
+                              onChange={() => aiDetection.toggleSelectedDetector(d.key)}
+                              style={{ width: 14, height: 14, accentColor: accent }}
+                            />
+                            Run
+                          </label>
+                        )}
+                        {d.installed ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => aiDetection.removeDetectorByKey(d.key)}
+                            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+                          >
+                            {busy ? 'Removing…' : 'Remove'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy || unavailable}
+                            title={unavailable ? 'This detector is not available on your system.' : undefined}
+                            onClick={() => aiDetection.installDetectorByKey(d.key)}
+                            className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                            style={{ backgroundColor: accent, color: 'white', opacity: (busy || unavailable) ? 0.5 : 1, cursor: (busy || unavailable) ? 'not-allowed' : 'pointer' }}
+                          >
+                            {busy ? 'Installing…' : (unavailable ? 'Unavailable' : 'Install')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {busy && (
+                      <div className="mt-2" style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                        <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         )}
 

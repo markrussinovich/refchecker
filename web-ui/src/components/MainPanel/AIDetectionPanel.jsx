@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import DocumentViewer from './DocumentViewer'
 import AIDetectionVisuals from './AIDetectionVisuals'
 import Button from '../common/Button'
 import IconButton from '../common/IconButton'
 import LabelSizer from '../common/LabelSizer'
 import { isTauri, openExternal } from '../../utils/tauriBridge'
+import { downloadAsFile } from '../../utils/formatters'
+import { normalizeResultsByDetector } from '../../stores/useAiDetectionStore'
 
 // Derive a citation link for the local detection model from its version
 // string (e.g. "local:desklib/ai-text-detector-v1.01" → the HF repo).
@@ -83,6 +85,88 @@ function buildViewerSpans(detection) {
   return { viewerSpans, indexByText }
 }
 
+// R61 — serialize the SELECTED detectors' results into one of the existing
+// export shapes (MD / CSV / JSON). Only the checked detectors' results are
+// emitted, and only real numbers — a detector that abstained writes its band
+// word with no fabricated score. `results` is the { key: result } map; `keys`
+// is the checked subset (caller passes exportSelection).
+function detectorRow(key, res) {
+  const label = res?.label || res?.detector_label || key
+  const band = res?.band || 'unavailable'
+  const score = typeof res?.overall_score === 'number'
+    ? res.overall_score
+    : (typeof res?.score === 'number' ? res.score : null)
+  return { key, label, band, score, model_version: res?.model_version || null }
+}
+
+function serializeDetectorExport(results, keys, fmt = 'json') {
+  const picked = (Array.isArray(keys) ? keys : Object.keys(results || {}))
+    .filter((k) => results && results[k])
+  const rows = picked.map((k) => detectorRow(k, results[k]))
+
+  if (fmt === 'csv') {
+    const head = 'detector_key,label,band,score'
+    const body = rows.map((r) =>
+      [r.key, r.label, r.band, r.score == null ? '' : r.score]
+        .map((c) => {
+          const s = String(c)
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+        })
+        .join(',')
+    )
+    return [head, ...body].join('\n')
+  }
+
+  if (fmt === 'md') {
+    const lines = ['# AI-text detection — selected detectors', '',
+      '| Detector | Band | Score |', '| --- | --- | --- |']
+    rows.forEach((r) => {
+      lines.push(`| ${r.label} | ${r.band} | ${r.score == null ? '—' : Math.round(r.score * 100)} |`)
+    })
+    lines.push('', '_Each detector\'s own verdict — no synthetic ensemble score. A dash means the detector abstained._')
+    return lines.join('\n')
+  }
+
+  // json (default)
+  return JSON.stringify({ detectors: rows }, null, 2)
+}
+
+const EXPORT_MIME = { md: 'text/markdown', csv: 'text/csv', json: 'application/json' }
+
+// R61 — adapt the backend's comparison summary into the per-sentence agreement
+// rows the visuals consume. The backend (src/refchecker/ai_detection/multi_run
+// ._comparison_summary) emits `comparison.per_sentence` as
+//   { text, bands: { detectorKey: band }, detector_count, agreement_count, ... }
+// while DetectorComparison renders `{ text, flagged_by: [keys], detector_count }`
+// and shows "how many detectors flagged this sentence". A detector "flagged" a
+// sentence when its per-sentence band is AI-ish (medium/high). We DERIVE
+// flagged_by from the real per-detector bands — nothing is fabricated; a row
+// where no detector landed AI-ish honestly shows 0/N. Falls back to a legacy
+// `flagged_by` array if a payload already carries one, and to
+// `detection.agreement` for older shapes.
+const AI_ISH_BANDS = new Set(['high', 'medium'])
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildAgreementRows(detection) {
+  const rows = detection?.comparison?.per_sentence
+    || detection?.comparison?.sentences
+    || detection?.agreement
+  if (!Array.isArray(rows) || rows.length === 0) return null
+  return rows.map((r) => {
+    // Already in the expected shape — pass it through untouched.
+    if (Array.isArray(r?.flagged_by)) {
+      return { text: r.text, flagged_by: r.flagged_by, detector_count: r.detector_count }
+    }
+    const bands = (r && typeof r.bands === 'object' && r.bands) ? r.bands : {}
+    const flaggedBy = Object.keys(bands).filter((k) => AI_ISH_BANDS.has(bands[k]))
+    // detector_count = how many detectors ASSESSED the sentence (have a band);
+    // flagged_by = the subset that landed AI-ish. The visuals show flagged/total.
+    const detectorCount = typeof r?.detector_count === 'number'
+      ? r.detector_count
+      : Object.keys(bands).length
+    return { text: r.text, flagged_by: flaggedBy, detector_count: detectorCount }
+  })
+}
+
 /**
  * Document-level AI-generated-text detection result for a single manuscript.
  *
@@ -132,12 +216,26 @@ export default function AIDetectionPanel({ detection, checkId }) {
   const [collapsed, setCollapsed] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [focusIdx, setFocusIdx] = useState(null)
+  const [exportFmt, setExportFmt] = useState('json') // checkbox-export format
   // Combined spans for the viewer: corroborated spans (indices preserved for the
   // flagged-passage buttons) + every flagged sentence made independently
   // locatable, so a "View in document" on any sentence focuses that sentence.
   // Computed before the early return so hooks run in a stable order;
   // buildViewerSpans tolerates a null detection.
   const { viewerSpans, indexByText } = useMemo(() => buildViewerSpans(detection), [detection])
+
+  // R61 — when this detection carries MULTIPLE detectors, build the normalized
+  // { key: result } map for the comparison view. A legacy single-detector
+  // payload yields a one-entry map (and DetectorComparison no-ops on <2), so the
+  // single-detector render path is unchanged.
+  const resultsByDetector = useMemo(() => normalizeResultsByDetector(detection), [detection])
+  const detectorKeys = useMemo(() => Object.keys(resultsByDetector), [resultsByDetector])
+  const isMulti = detectorKeys.length >= 2
+
+  // Checkbox-export selection: every present detector checked by default.
+  const [exportSelection, setExportSelection] = useState(detectorKeys)
+  useEffect(() => { setExportSelection(detectorKeys) }, [detectorKeys.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!detection) return null
 
   const band = detection.band || 'unavailable'
@@ -162,6 +260,37 @@ export default function AIDetectionPanel({ detection, checkId }) {
     setFocusIdx(idx)
     setViewerOpen(true)
   }
+
+  // R61 — checkbox-export: serialize ONLY the checked detectors' results into
+  // the selected shape (MD/CSV/JSON) and download. Exporting exactly the
+  // checked keys means an unchecked detector never lands in the file.
+  const toggleExport = (key) =>
+    setExportSelection((cur) => cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key])
+  const exportSelected = (keys) => {
+    const picked = Array.isArray(keys) ? keys : exportSelection
+    if (!picked.length) return
+    const content = serializeDetectorExport(resultsByDetector, picked, exportFmt)
+    downloadAsFile(content, `ai-detection-detectors.${exportFmt}`, EXPORT_MIME[exportFmt] || 'application/json')
+  }
+
+  // The comparison props are only meaningful with ≥2 detectors. The agreement
+  // array comes from the backend's comparison summary (§14 item 2) — never
+  // synthesized here. The backend (multi_run._comparison_summary) emits
+  // `comparison.per_sentence` rows shaped { text, bands:{key:band},
+  // detector_count, agreement_count }. The visuals expect `flagged_by` (the
+  // detectors that landed AI-ish on that sentence), so we adapt the real shape
+  // here — deriving flagged_by from the per-detector bands, NOT fabricating it.
+  const agreement = isMulti ? buildAgreementRows(detection) : null
+  const comparison = isMulti ? {
+    results: resultsByDetector,
+    order: detectorKeys,
+    selection: exportSelection,
+    onToggle: toggleExport,
+    onExport: exportSelected,
+    exportFmt,
+    onExportFmtChange: setExportFmt,
+    agreement,
+  } : null
 
   return (
     <div
@@ -273,11 +402,16 @@ export default function AIDetectionPanel({ detection, checkId }) {
         )}
       </div>
 
-      {!isAbstain && (
+      {/* The comparison view stands on its own (multi-detector); the single-
+          detector visuals still render when the top-level detection is not an
+          abstain. With ≥2 detectors the comparison shows even if the aggregate
+          band abstains, so the per-detector verdicts are never hidden. */}
+      {(!isAbstain || isMulti) && (
         <AIDetectionVisuals
           detection={detection}
           onViewSentence={openSentence}
           canViewSentence={canViewSentence}
+          comparison={comparison}
         />
       )}
 
@@ -371,7 +505,8 @@ export default function AIDetectionPanel({ detection, checkId }) {
   )
 }
 
-// Exported for unit tests (R29). Co-located with the component per the project's
-// existing pattern (see ExploreGraphView).
+// Exported for unit tests (R29, R61). Co-located with the component per the
+// project's existing pattern (see ExploreGraphView). buildAgreementRows is also
+// exported above; re-listed here for discoverability.
 // eslint-disable-next-line react-refresh/only-export-components
-export { buildViewerSpans }
+export { buildViewerSpans, serializeDetectorExport }

@@ -10,6 +10,166 @@ const SEG = { AI: 'var(--color-error)', Mixed: 'var(--color-warning)', Human: 'v
 const BAND_COLOR = {
   high: 'var(--color-error)', medium: 'var(--color-warning)', low: 'var(--color-success)',
 }
+// R61 — same band palette reused for the per-detector comparison chips. The
+// abstain bands (inconclusive/unavailable) use the muted/neutral surface so an
+// uninstalled or abstaining detector reads as "no number", never a fabricated
+// score. Mirrors AIDetectionPanel's BAND_STYLES so the colors line up exactly.
+const BAND_LABEL = {
+  high: 'High', medium: 'Medium', low: 'Low',
+  inconclusive: 'Inconclusive', unavailable: 'Not analyzed',
+}
+const bandColor = (band) => BAND_COLOR[band] || 'var(--color-text-muted)'
+
+// One detector's score/band chip in the comparison table. Honest: when the
+// detector abstained (no numeric score) it shows the band word and a dash, not
+// a fabricated percentage.
+function DetectorChip({ result }) {
+  const band = result?.band || 'unavailable'
+  const color = bandColor(band)
+  const score = typeof result?.overall_score === 'number'
+    ? result.overall_score
+    : (typeof result?.score === 'number' ? result.score : null)
+  const pct = score != null ? Math.round(score * 100) : null
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs border"
+      style={{ borderColor: color, color: 'var(--color-text-secondary)' }}
+      title="This detector's own band/score — not a probability a human wrote the text"
+    >
+      <span style={{ width: 8, height: 8, borderRadius: 8, background: color, flex: 'none' }} />
+      <span style={{ color }}>{BAND_LABEL[band] || band}</span>
+      <span className="tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+        {pct != null ? pct : '—'}
+      </span>
+    </span>
+  )
+}
+
+// Per-detector comparison table + per-sentence agreement. NO synthetic ensemble
+// row — each detector's own verdict is shown side by side, and disagreement is
+// surfaced as signal (how many detectors flagged each sentence).
+//
+// `results` is the { key: result } map; `order` keeps a stable display order.
+// `selection`/`onToggle` drive the checkbox-export; `onExport` fires "Export
+// selected" with the currently checked keys. `agreement` is the optional
+// per-sentence array [{ text, flagged_by:[keys] }] from the backend's
+// comparison summary.
+function DetectorComparison({
+  results, order, labels, selection, onToggle, onExport, agreement,
+  exportFmt = 'json', onExportFmtChange,
+}) {
+  const keys = (order && order.length) ? order : Object.keys(results || {})
+  if (keys.length < 2) return null
+  const selected = new Set(selection || [])
+  return (
+    <div data-testid="detector-comparison" className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          Detector comparison
+          <span className="ml-1" style={{ color: 'var(--color-text-muted)' }}>
+            ({keys.length} detectors — each verdict shown on its own; disagreement is signal)
+          </span>
+        </div>
+        {typeof onExport === 'function' && (
+          <div className="flex items-center gap-1.5">
+            <select
+              value={exportFmt}
+              onChange={(e) => onExportFmtChange?.(e.target.value)}
+              aria-label="Export format"
+              className="text-xs rounded border px-1.5 py-1"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+            >
+              <option value="md">MD</option>
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => onExport(Array.from(selected))}
+              disabled={selected.size === 0}
+              className="text-xs px-2.5 py-1 rounded-lg border font-medium"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: selected.size === 0 ? 'var(--color-text-muted)' : 'var(--color-text-primary)',
+                opacity: selected.size === 0 ? 0.6 : 1,
+                cursor: selected.size === 0 ? 'not-allowed' : 'pointer',
+              }}
+              title="Export only the checked detectors' results (MD / CSV / JSON)"
+            >
+              Export selected ({selected.size})
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Per-detector score/band chips, each with an export checkbox. */}
+      <ul className="space-y-1.5">
+        {keys.map((k) => {
+          const res = results[k] || {}
+          const label = (labels && labels[k]) || res.label || res.detector_label || k
+          const checked = selected.has(k)
+          return (
+            <li key={k} className="flex items-center gap-2 text-sm">
+              <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid={`export-check-${k}`}
+                  aria-label={`Include ${label} in export`}
+                  checked={checked}
+                  onChange={() => onToggle?.(k)}
+                  style={{ width: 15, height: 15, accentColor: 'var(--color-accent)' }}
+                />
+                <span className="flex-1" style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+              </label>
+              <DetectorChip result={res} />
+            </li>
+          )
+        })}
+      </ul>
+
+      {/* Per-sentence agreement — how many of the run detectors flagged each. */}
+      {Array.isArray(agreement) && agreement.length > 0 && (
+        <div>
+          <div className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
+            Per-sentence agreement · how many detectors flagged each sentence
+          </div>
+          <ul className="space-y-1.5">
+            {agreement.map((s, i) => {
+              // `flagged_by` is the subset of detectors that landed AI-ish on
+              // this sentence (the badge counts FLAGGING, not mere assessment).
+              const flaggedBy = Array.isArray(s.flagged_by) ? s.flagged_by : []
+              const count = flaggedBy.length
+              // Denominator: how many detectors assessed the sentence (have a
+              // band). Falls back to the full run set so an all-assessed row
+              // reads as flagged/total honestly.
+              const total = typeof s.detector_count === 'number' && s.detector_count > 0
+                ? s.detector_count
+                : keys.length
+              // Color the agreement badge by consensus strength: all flagged →
+              // AI red, some → warning, none → muted.
+              const frac = total ? count / total : 0
+              const aColor = count === 0 ? 'var(--color-text-muted)' : (frac >= 1 ? SEG.AI : SEG.Mixed)
+              return (
+                <li key={i} data-testid="agreement-row"
+                  className="flex items-start gap-2 text-sm rounded px-2 py-1.5 border-l-2"
+                  style={{ borderColor: aColor, backgroundColor: 'var(--color-bg-tertiary)' }}>
+                  <span
+                    className="text-xs font-semibold tabular-nums flex-shrink-0 px-1.5 rounded-full"
+                    style={{ color: aColor, border: `1px solid ${aColor}` }}
+                    title={flaggedBy.length ? `Flagged by: ${flaggedBy.join(', ')}` : 'Not flagged by any detector'}
+                  >
+                    {count}/{total}
+                  </span>
+                  <span className="flex-1" style={{ color: 'var(--color-text-secondary)' }}>{s.text}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ConfidenceDonut({ dist, scorePct }) {
   const R = 34, C = 2 * Math.PI * R
@@ -175,7 +335,14 @@ function SentenceList({ sentences, accent, onViewSentence, canViewSentence }) {
   )
 }
 
-export default function AIDetectionVisuals({ detection, onViewSentence, canViewSentence }) {
+export default function AIDetectionVisuals({
+  detection, onViewSentence, canViewSentence,
+  // R61 — when the detection carries multiple detectors, the panel passes the
+  // normalized results map + comparison props so this renders the per-detector
+  // comparison table + checkbox export. Absent these (single-detector path),
+  // the component renders exactly as before — full backward compatibility.
+  comparison = null,
+}) {
   const [tab, setTab] = useState('ai') // 'ai' | 'human'
   const [showSentences, setShowSentences] = useState(false) // collapsed by default
   const dist = detection?.probability_distribution
@@ -183,10 +350,29 @@ export default function AIDetectionVisuals({ detection, onViewSentence, canViewS
   const topAi = detection?.top_ai_sentences || []
   const topHuman = detection?.top_human_sentences || []
   const scorePct = typeof detection?.overall_score === 'number' ? Math.round(detection.overall_score * 100) : null
-  if (!dist && pages.length === 0 && topAi.length === 0 && topHuman.length === 0) return null
+  // Multi-detector comparison takes precedence — it has its own header. Only
+  // render it when there are genuinely ≥2 detectors (DetectorComparison guards
+  // this too) so a single-detector run never shows a degenerate "comparison".
+  const hasComparison = comparison
+    && comparison.results
+    && Object.keys(comparison.results).length >= 2
+  if (!hasComparison && !dist && pages.length === 0 && topAi.length === 0 && topHuman.length === 0) return null
 
   return (
     <div className="px-3 pb-3 space-y-3">
+      {hasComparison && (
+        <DetectorComparison
+          results={comparison.results}
+          order={comparison.order}
+          labels={comparison.labels}
+          selection={comparison.selection}
+          onToggle={comparison.onToggle}
+          onExport={comparison.onExport}
+          exportFmt={comparison.exportFmt}
+          onExportFmtChange={comparison.onExportFmtChange}
+          agreement={comparison.agreement}
+        />
+      )}
       {/* Donut + pills */}
       {dist && (
         <div className="flex items-center gap-3">
@@ -261,3 +447,6 @@ export default function AIDetectionVisuals({ detection, onViewSentence, canViewS
     </div>
   )
 }
+
+// Exported for unit tests (R61). Co-located per the project's existing pattern.
+export { DetectorComparison }

@@ -153,6 +153,22 @@ export const installAIDetectionRuntime = (variant = 'torch') =>
   api.post('/ai-detection/runtime/install', null, { params: { variant } })
 export const getAIDetectionDiagnostics = () => api.get('/ai-detection/diagnostics')
 
+// R61 (I1 endpoints) — multi-detector registry. The backend lands in parallel;
+// these talk to the §14-item-2 endpoint shapes. The registry lists every
+// detector in DETECTOR_REGISTRY with real size/license/tier + per-detector
+// install state; install/remove mirror the existing on-demand HF download
+// lifecycle (returns the refreshed registry row(s)). HONESTY: an uninstalled
+// detector is reported as installed:false so the FE can abstain — it never
+// fabricates a number for a detector that isn't downloaded.
+export const getDetectors = () => api.get('/ai-detection/detectors')
+// Install (download) a single detector by key. No timeout — Tier-2 heavy
+// detectors are large multi-GB downloads handled by a background job the FE
+// polls via getDetectors().
+export const installDetector = (key) =>
+  api.post(`/ai-detection/detectors/${encodeURIComponent(key)}/install`, null, { timeout: 0 })
+export const removeDetector = (key) =>
+  api.delete(`/ai-detection/detectors/${encodeURIComponent(key)}`)
+
 // OpenReview venue scanning
 export const fetchOpenReviewList = (venue, status = 'accepted') =>
   api.post('/openreview/list', { venue, status })

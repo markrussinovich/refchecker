@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import AIDetectionVisuals from './AIDetectionVisuals'
+import AIDetectionVisuals, { DetectorComparison } from './AIDetectionVisuals'
 
 // R03 (O4) — every AI sentence in the page-by-page and top-sentence lists must
 // carry a working per-sentence "view in document" button that routes through
@@ -102,5 +102,103 @@ describe('AIDetectionVisuals per-sentence "view in document" button (R03)', () =
     render(<AIDetectionVisuals detection={detection} />)
     fireEvent.click(screen.getByText('Page 1'))
     expect(screen.queryAllByRole('button', { name: /view this sentence in the document/i })).toHaveLength(0)
+  })
+})
+
+// R61 (I2) — the multi-detector comparison table: per-detector score/band chips
+// reusing the band palette, a per-sentence agreement view, and checkbox-export.
+describe('DetectorComparison — per-detector chips + agreement (R61)', () => {
+  const results = {
+    desklib: { label: 'Desklib', band: 'high', overall_score: 0.92 },
+    superannotate: { label: 'SuperAnnotate', band: 'low', overall_score: 0.08 },
+  }
+  const agreement = [
+    { text: 'A sentence both detectors flagged.', flagged_by: ['desklib', 'superannotate'] },
+    { text: 'A sentence only one flagged.', flagged_by: ['desklib'] },
+  ]
+
+  it('renders a chip per detector with its own band label + score (no synthetic ensemble row)', () => {
+    render(<DetectorComparison results={results} order={['desklib', 'superannotate']} selection={['desklib', 'superannotate']} />)
+    // Both detectors are listed by label.
+    expect(screen.getByText('Desklib')).toBeInTheDocument()
+    expect(screen.getByText('SuperAnnotate')).toBeInTheDocument()
+    // Each detector's own band word + percent is shown.
+    expect(screen.getByText('High')).toBeInTheDocument()
+    expect(screen.getByText('Low')).toBeInTheDocument()
+    expect(screen.getByText('92')).toBeInTheDocument()
+    expect(screen.getByText('8')).toBeInTheDocument()
+  })
+
+  it('shows per-sentence agreement counts (how many detectors flagged each)', () => {
+    render(<DetectorComparison results={results} order={['desklib', 'superannotate']} selection={['desklib', 'superannotate']} agreement={agreement} />)
+    const rows = screen.getAllByTestId('agreement-row')
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]).getByText('2/2')).toBeInTheDocument() // both flagged
+    expect(within(rows[1]).getByText('1/2')).toBeInTheDocument() // one flagged
+  })
+
+  it('an abstaining detector shows a dash, never a fabricated score', () => {
+    const withAbstain = { ...results, mage: { label: 'MAGE', band: 'inconclusive' } }
+    render(<DetectorComparison results={withAbstain} order={['desklib', 'superannotate', 'mage']} selection={[]} />)
+    expect(screen.getByText('MAGE')).toBeInTheDocument()
+    expect(screen.getByText('Inconclusive')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('does not render with fewer than 2 detectors (single-detector path unchanged)', () => {
+    const { container } = render(<DetectorComparison results={{ desklib: results.desklib }} order={['desklib']} selection={['desklib']} />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('"Export selected" fires with exactly the checked detector keys', () => {
+    const onExport = vi.fn()
+    render(
+      <DetectorComparison
+        results={results}
+        order={['desklib', 'superannotate']}
+        selection={['desklib']}   // only desklib checked
+        onExport={onExport}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Export selected/i }))
+    expect(onExport).toHaveBeenCalledWith(['desklib'])
+  })
+
+  it('the export checkbox toggles call onToggle for that detector', () => {
+    const onToggle = vi.fn()
+    render(
+      <DetectorComparison
+        results={results}
+        order={['desklib', 'superannotate']}
+        selection={['desklib', 'superannotate']}
+        onToggle={onToggle}
+        onExport={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('export-check-superannotate'))
+    expect(onToggle).toHaveBeenCalledWith('superannotate')
+  })
+})
+
+// The single-detector visuals render exactly as before when no comparison prop
+// is passed — backward compatibility.
+describe('AIDetectionVisuals — single-detector path unchanged (R61 backward compat)', () => {
+  it('renders no comparison table without the comparison prop', () => {
+    render(<AIDetectionVisuals detection={detection} />)
+    expect(screen.queryByTestId('detector-comparison')).toBeNull()
+  })
+
+  it('renders the comparison table only when ≥2 detectors are passed', () => {
+    render(
+      <AIDetectionVisuals
+        detection={detection}
+        comparison={{
+          results: { desklib: { label: 'Desklib', band: 'high', overall_score: 0.9 }, mage: { label: 'MAGE', band: 'low', overall_score: 0.1 } },
+          order: ['desklib', 'mage'],
+          selection: ['desklib', 'mage'],
+        }}
+      />,
+    )
+    expect(screen.getByTestId('detector-comparison')).toBeInTheDocument()
   })
 })
