@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { getTeams, createTeam, getTeamMembers, addTeamMember, removeTeamMember, leaveTeam, getTeamActivity } from '../../utils/api'
+import { useHistoryStore } from '../../stores/useHistoryStore'
+import { getTeams, createTeam, getTeamMembers, addTeamMember, removeTeamMember, leaveTeam, getTeamActivity, getTeamChecks } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 /**
@@ -13,11 +14,13 @@ import { logger } from '../../utils/logger'
  */
 export default function TeamMenu() {
   const { user, authRequired } = useAuthStore()
+  const selectCheck = useHistoryStore((s) => s.selectCheck)
   const [open, setOpen] = useState(false)
   const [teams, setTeams] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [members, setMembers] = useState([])
   const [activity, setActivity] = useState([])
+  const [teamChecks, setTeamChecks] = useState([])
   const [newTeamName, setNewTeamName] = useState('')
   const [memberEmail, setMemberEmail] = useState('')
   const [busy, setBusy] = useState(false)
@@ -64,12 +67,23 @@ export default function TeamMenu() {
     }
   }, [])
 
+  const loadTeamChecks = useCallback(async (teamId) => {
+    if (!teamId) { setTeamChecks([]); return }
+    try {
+      const resp = await getTeamChecks(teamId)
+      setTeamChecks(resp.data.checks || [])
+    } catch (e) {
+      logger.error('TeamMenu', 'Failed to load team checks', e)
+      setTeamChecks([])
+    }
+  }, [])
+
   // Load teams when the menu opens.
   useEffect(() => { if (open) loadTeams() }, [open, loadTeams])
-  // Load members + activity whenever the selected team changes (while open).
+  // Load members + activity + shared checks whenever the selected team changes (while open).
   useEffect(() => {
-    if (open) { loadMembers(selectedId); loadActivity(selectedId) }
-  }, [open, selectedId, loadMembers, loadActivity])
+    if (open) { loadMembers(selectedId); loadActivity(selectedId); loadTeamChecks(selectedId) }
+  }, [open, selectedId, loadMembers, loadActivity, loadTeamChecks])
 
   if (!authRequired || !user) return null
 
@@ -290,6 +304,30 @@ export default function TeamMenu() {
                       <li key={a.id} className="text-xs flex items-baseline justify-between gap-2">
                         <span className="truncate min-w-0" style={{ color: 'var(--color-text-secondary)' }}>{activityText(a)}</span>
                         <span className="flex-none whitespace-nowrap" style={{ color: 'var(--color-text-muted)' }}>{fmtWhen(a.created_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Shared checks — checks any member shared with this team (R26). */}
+              <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-muted)' }}>Shared checks</p>
+                {teamChecks.length === 0 ? (
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>No checks shared with this team yet.</p>
+                ) : (
+                  <ul className="max-h-40 overflow-y-auto space-y-1">
+                    {teamChecks.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => { setOpen(false); selectCheck?.(c.id) }}
+                          className="w-full text-left text-xs truncate hover:opacity-80"
+                          style={{ color: 'var(--color-text-primary)' }}
+                          title={c.paper_title || c.paper_source || `Check #${c.id}`}
+                        >
+                          {c.paper_title || c.paper_source || `Check #${c.id}`}
+                        </button>
                       </li>
                     ))}
                   </ul>

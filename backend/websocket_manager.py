@@ -232,6 +232,22 @@ class PresenceManager:
             })
         logger.info(f"Presence leave: user {user.get('user_id')} -> room {room_id}")
 
+    async def broadcast_to_room(self, room_id: str, message_type: str, data: dict):
+        """Fan a live event (reference_result / summary_update) out to every
+        socket present in a room, regardless of which session opened it (R26).
+
+        Used so a batch shared with a team streams results to every team member
+        viewing the same ``batch-{id}`` room, not just the owner's session. A
+        no-op when nobody is present in the room."""
+        if room_id not in self._rooms:
+            return
+        message = {"type": message_type, **data}
+        await self._broadcast(room_id, message)
+
+    def has_room(self, room_id: str) -> bool:
+        """Whether anyone is currently present in a room."""
+        return bool(self._rooms.get(room_id))
+
     async def _broadcast(self, room_id: str, message: dict, exclude: WebSocket = None):
         message_json = json.dumps(message)
         for ws in list(self._rooms.get(room_id, {}).keys()):

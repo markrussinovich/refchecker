@@ -399,7 +399,8 @@ class Database:
                     hallucination_provider TEXT,
                     hallucination_model TEXT,
                     extraction_method TEXT,
-                    status TEXT DEFAULT 'completed'
+                    status TEXT DEFAULT 'completed',
+                    team_id INTEGER REFERENCES teams(id)
                 )
             """)
 
@@ -599,6 +600,12 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_check_history_user_timestamp
                 ON check_history(user_id, timestamp DESC)
             """)
+            # R26: index team-shared checks so get_team_checks /
+            # team-member batch reads don't scan the whole table.
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_team_id
+                ON check_history(team_id)
+            """)
             await db.commit()
 
     async def _ensure_columns(self, db: aiosqlite.Connection):
@@ -679,6 +686,12 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_score REAL")
         if "ai_detection_band" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_band TEXT")
+        # Team-scoped sharing (issue #66 / R26). A check (and therefore its
+        # batch) can be shared with one team; non-null means members of that
+        # team may read it in addition to the owner. Nullable so single-user
+        # mode and unshared checks behave exactly as before.
+        if "team_id" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN team_id INTEGER REFERENCES teams(id)")
 
         await db.execute(
             "UPDATE check_history SET started_at = COALESCE(started_at, timestamp) WHERE started_at IS NULL"
@@ -1055,14 +1068,33 @@ class Database:
                     history.append(item)
                 return history
 
-    async def get_check_by_id(self, check_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Get specific check result by ID, optionally enforcing user ownership."""
+    async def get_check_by_id(
+        self,
+        check_id: int,
+        user_id: Optional[int] = None,
+        team_ids: Optional[List[int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get specific check result by ID, optionally enforcing user ownership.
+
+        When ``team_ids`` is provided alongside ``user_id``, a check is also
+        visible if it is shared with one of those teams (``team_id`` in
+        ``team_ids``) — the single-check counterpart of the team-aware batch
+        reads, so a team member can open a check shared with them (R26). With
+        ``user_id`` None there is no scoping (single-user mode)."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
             if user_id is not None:
-                query = "SELECT * FROM check_history WHERE id = ? AND user_id = ?"
-                params = (check_id, user_id)
+                clauses = ["user_id = ?"]
+                params = [check_id, user_id]
+                for tid in (team_ids or []):
+                    clauses.append("team_id = ?")
+                    params.append(tid)
+                query = (
+                    "SELECT * FROM check_history WHERE id = ? AND ("
+                    + " OR ".join(clauses) + ")"
+                )
+                params = tuple(params)
             else:
                 query = "SELECT * FROM check_history WHERE id = ?"
                 params = (check_id,)
@@ -1864,6 +1896,20 @@ class Database:
                 (team_id, user_id),
             ) as cursor:
                 return await cursor.fetchone() is not None
+
+    async def get_user_team_ids(self, user_id: int) -> List[int]:
+        """Return the ids of every team the user belongs to.
+
+        Used to widen batch/check visibility so a team member can read a check
+        shared with a team they belong to (R26). Returns [] for users in no
+        team (and for the single-user pseudo-user, which has no rows)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT team_id FROM team_members WHERE user_id = ?",
+                (user_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [int(row[0]) for row in rows]
 
     async def get_team_members(self, team_id: int) -> List[Dict[str, Any]]:
         """List members of a team joined with their user profile fields."""
@@ -3065,6 +3111,162 @@ class Database:
                 if row:
                     return dict(row)
                 return None
+
+    @staticmethod
+    def _batch_access_clause(user_id: Optional[int], team_ids: Optional[List[int]]) -> tuple[str, list]:
+        """Build the WHERE fragment + params for an access-scoped batch read.
+
+        When ``user_id`` is None (single-user mode) there is no scoping. When it
+        is set, a row is visible if the requester owns it OR it is shared with a
+        team the requester belongs to (``team_id`` in ``team_ids``). Mirrors the
+        owner-only ``user_id = ?`` filter used by the non-team variants (R26)."""
+        if user_id is None:
+            return "", []
+        clauses = ["user_id = ?"]
+        params: list = [user_id]
+        for tid in (team_ids or []):
+            clauses.append("team_id = ?")
+            params.append(tid)
+        return " AND (" + " OR ".join(clauses) + ")", params
+
+    async def get_batch_checks_accessible(
+        self, batch_id: str, user_id: Optional[int], team_ids: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """Like ``get_batch_checks`` but also returns rows shared with one of the
+        requester's teams (R26). Owner rows + team-shared rows, deduped by id."""
+        access_sql, access_params = self._batch_access_clause(user_id, team_ids)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            query = (
+                """
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       hallucination_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
+                      llm_provider, llm_model, hallucination_provider, hallucination_model,
+                      status, source_type, batch_id, batch_label, team_id,
+                      bibliography_source_kind, original_filename,
+                      ai_detection_score, ai_detection_band
+                FROM check_history
+                WHERE batch_id = ?
+                """
+                + access_sql
+                + " ORDER BY timestamp ASC"
+            )
+            async with db.execute(query, (batch_id, *access_params)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_batch_summary_accessible(
+        self, batch_id: str, user_id: Optional[int], team_ids: Optional[List[int]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Like ``get_batch_summary`` but also returns a batch shared with one of
+        the requester's teams (R26)."""
+        access_sql, access_params = self._batch_access_clause(user_id, team_ids)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            query = (
+                """
+                SELECT
+                    batch_id,
+                    batch_label,
+                    MAX(team_id) as team_id,
+                    COUNT(*) as total_papers,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_papers,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_papers,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_papers,
+                    SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_papers,
+                    SUM(total_refs) as total_refs,
+                    SUM(errors_count) as total_errors,
+                    SUM(warnings_count) as total_warnings,
+                    SUM(suggestions_count) as total_suggestions,
+                    SUM(unverified_count) as total_unverified,
+                    SUM(hallucination_count) as total_hallucinated,
+                    SUM(CASE WHEN ai_detection_band = 'high' THEN 1 ELSE 0 END) as ai_detection_high,
+                    SUM(CASE WHEN ai_detection_band = 'medium' THEN 1 ELSE 0 END) as ai_detection_medium,
+                    SUM(CASE WHEN ai_detection_band = 'low' THEN 1 ELSE 0 END) as ai_detection_low,
+                    MIN(timestamp) as started_at
+                FROM check_history
+                WHERE batch_id = ?
+                """
+                + access_sql
+                + " GROUP BY batch_id"
+            )
+            async with db.execute(query, (batch_id, *access_params)) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def set_check_team(self, check_id: int, team_id: Optional[int]) -> bool:
+        """Share (or unshare with ``None``) a check with a team. Returns True if
+        a row was updated. The caller is responsible for verifying that the
+        requester owns the check and belongs to the team (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "UPDATE check_history SET team_id = ? WHERE id = ?",
+                (team_id, check_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def set_batch_team(
+        self, batch_id: str, team_id: Optional[int], user_id: Optional[int] = None
+    ) -> int:
+        """Share every check in a batch with a team (or unshare with ``None``).
+
+        Owner-scoped when ``user_id`` is set so a member can't reassign a batch
+        they only have read access to. Returns the number of rows updated (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            if user_id is not None:
+                cursor = await db.execute(
+                    "UPDATE check_history SET team_id = ? WHERE batch_id = ? AND user_id = ?",
+                    (team_id, batch_id, user_id),
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE check_history SET team_id = ? WHERE batch_id = ?",
+                    (team_id, batch_id),
+                )
+            await db.commit()
+            return cursor.rowcount
+
+    async def get_team_checks(self, team_id: int) -> List[Dict[str, Any]]:
+        """List checks shared with a team, newest first (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       hallucination_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
+                       status, source_type, batch_id, batch_label, team_id, user_id,
+                       ai_detection_score, ai_detection_band
+                FROM check_history
+                WHERE team_id = ?
+                ORDER BY timestamp DESC
+                """,
+                (team_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_check_batch_team(self, check_id: int) -> Optional[Dict[str, Any]]:
+        """Return ``{batch_id, team_id}`` for a check, or None if it doesn't
+        exist. Used by the realtime layer to fan a per-check result out to the
+        batch's presence room (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT batch_id, team_id FROM check_history WHERE id = ?",
+                (check_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
     async def cancel_batch(self, batch_id: str, user_id: Optional[int] = None) -> int:
         """Cancel every non-terminal check in a batch (in_progress, pending,

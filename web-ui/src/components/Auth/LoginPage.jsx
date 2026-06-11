@@ -157,6 +157,18 @@ export default function LoginPage() {
           )}
         </div>
 
+        {/* Sign-up affordance: OAuth first-login creates the account, so there
+            is no separate form — make that explicit instead of leaving "Sign in"
+            looking like an existing-account-only flow (R26). */}
+        {providers.length > 0 && (
+          <p
+            className="text-xs text-center"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            New here? Continue with any provider above — your account is created automatically on first sign-in.
+          </p>
+        )}
+
         <p
           className="text-xs text-center"
           style={{ color: 'var(--color-text-tertiary, #9ca3af)' }}

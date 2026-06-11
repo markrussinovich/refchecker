@@ -502,9 +502,11 @@ def get_user_id_filter(user: UserInfo) -> Optional[int]:
 
 def get_available_providers() -> list[str]:
     """Return the list of configured OAuth providers.
-    
-    Only returns providers when multi-user mode is explicitly enabled
-    via REFCHECKER_MULTIUSER=true in the environment (e.g. .env or docker-compose).
+
+    Reads the *current* module credential globals + ``MULTIUSER_MODE`` (which
+    ``reload_config()`` recomputes), not import-time constants, so enabling
+    accounts/providers from inside the app takes effect without a restart (R27).
+    Only returns providers when multi-user mode is currently enabled.
     """
     if not MULTIUSER_MODE:
         return []
@@ -516,3 +518,45 @@ def get_available_providers() -> list[str]:
     if MS_CLIENT_ID and MS_CLIENT_SECRET:
         providers.append("microsoft")
     return providers
+
+
+# Credential globals re-read from auth_config.env / the environment by
+# reload_config(). Listed here so the reload stays in sync with the import-time
+# block above.
+_RELOADABLE_CREDENTIAL_KEYS = (
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "MS_CLIENT_ID",
+    "MS_CLIENT_SECRET",
+)
+
+
+def reload_config(env_overrides: Optional[Dict[str, str]] = None) -> None:
+    """Re-read auth credentials + multi-user flag into the module globals so the
+    running process reflects an in-app config change without a restart (R27).
+
+    ``env_overrides`` (the freshly-saved auth_config.env values) are pushed into
+    ``os.environ`` first, then the module credential globals and ``MULTIUSER_MODE``
+    are recomputed from the environment. ``is_multiuser_mode()`` /
+    ``get_available_providers()`` already read live values, so callers see the
+    change immediately after this returns. Never invents data — only values that
+    are actually present are applied."""
+    global MULTIUSER_MODE
+    global GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    global GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+    global MS_CLIENT_ID, MS_CLIENT_SECRET
+
+    if env_overrides:
+        for key, value in env_overrides.items():
+            if value is not None:
+                os.environ[key] = str(value)
+
+    GOOGLE_CLIENT_ID = _get_env("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET = _get_env("GOOGLE_CLIENT_SECRET")
+    GITHUB_CLIENT_ID = _get_env("GITHUB_CLIENT_ID")
+    GITHUB_CLIENT_SECRET = _get_env("GITHUB_CLIENT_SECRET")
+    MS_CLIENT_ID = _get_env("MS_CLIENT_ID")
+    MS_CLIENT_SECRET = _get_env("MS_CLIENT_SECRET")
+    MULTIUSER_MODE = is_multiuser_mode()

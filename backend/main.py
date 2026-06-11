@@ -44,6 +44,7 @@ from .cites_refs import fetch_cites_and_refs, normalize_mode as _normalize_overl
 from .auth import (
     SITE_URL,
     is_multiuser_mode,
+    reload_config as reload_auth_config,
     require_user,
     get_current_user,
     get_user_id_filter,
@@ -937,7 +938,11 @@ class CheckLabelUpdate(BaseModel):
 
 
 class BatchLabelUpdate(BaseModel):
-    batch_label: str
+    # Both optional so a caller can update only the label, only the team share,
+    # or both. ``team_id`` of ``None`` is "leave unchanged"; pass 0 to unshare
+    # (R26). ``batch_label`` of ``None`` leaves the label untouched.
+    batch_label: Optional[str] = None
+    team_id: Optional[int] = None
 
 
 class BatchUrlsRequest(BaseModel):
@@ -971,6 +976,13 @@ class BatchUrlsRequest(BaseModel):
 class TeamCreate(BaseModel):
     """Request model for creating a team (issue #66)."""
     name: str
+
+
+class CheckShareRequest(BaseModel):
+    """Request model for sharing a single check with a team (R26).
+
+    ``team_id`` of 0/None unshares the check (clears its team)."""
+    team_id: Optional[int] = None
 
 
 class TeamMemberAdd(BaseModel):
@@ -1212,13 +1224,51 @@ async def _get_owned_check_or_404(check_id: int, current_user: UserInfo) -> dict
     return check
 
 
+async def _get_accessible_check_or_404(check_id: int, current_user: UserInfo) -> dict:
+    """Return a check if the requester owns it OR it is shared with a team the
+    requester belongs to (R26) — the single-check counterpart of
+    ``_get_accessible_batch_or_404``.
+
+    Used by the *read* endpoints so a team member can open a check shared with
+    them (e.g. from TeamMenu's "Shared checks" list) instead of getting a 404.
+    Mutating endpoints stay owner-scoped via ``_get_owned_check_or_404`` /
+    ``get_user_id_filter``. A non-owner non-member gets the same opaque 404 an
+    unknown check returns. In single-user mode (``user_id`` None) there is no
+    scoping, so this is equivalent to the owned variant."""
+    user_id = get_user_id_filter(current_user)
+    team_ids = await db.get_user_team_ids(current_user.id) if user_id is not None else []
+    check = await db.get_check_by_id(check_id, user_id=user_id, team_ids=team_ids)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+    return check
+
+
 async def _get_owned_batch_or_404(batch_id: str, current_user: UserInfo) -> tuple[dict, list[dict]]:
-    """Return a batch summary and checks only if they belong to the current user."""
+    """Return a batch summary and checks only if they belong to the current user.
+
+    Used by the *mutating* batch endpoints (cancel/delete) where only the owner
+    may act. Read endpoints use ``_get_accessible_batch_or_404`` (R26)."""
     user_id = get_user_id_filter(current_user)
     summary = await db.get_batch_summary(batch_id, user_id=user_id)
     if not summary:
         raise HTTPException(status_code=404, detail="Batch not found")
     checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    return summary, checks
+
+
+async def _get_accessible_batch_or_404(batch_id: str, current_user: UserInfo) -> tuple[dict, list[dict]]:
+    """Return a batch summary and checks if the requester is the owner OR a
+    member of the team the batch is shared with (R26).
+
+    In single-user mode (``user_id`` is None) there is no scoping, so this is
+    equivalent to the owned variant. A non-owner non-member gets 404 — the same
+    opaque response an unknown batch returns, so sharing isn't enumerable."""
+    user_id = get_user_id_filter(current_user)
+    team_ids = await db.get_user_team_ids(current_user.id) if user_id is not None else []
+    summary = await db.get_batch_summary_accessible(batch_id, user_id=user_id, team_ids=team_ids)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    checks = await db.get_batch_checks_accessible(batch_id, user_id=user_id, team_ids=team_ids)
     return summary, checks
 
 
@@ -1299,6 +1349,8 @@ async def get_auth_config(current_user: UserInfo = Depends(require_user)):
     return {
         "multiuser_active": is_multiuser_mode(),          # this running process
         "multiuser_configured": want_multiuser,            # what's saved for next start
+        # R27: set_auth_config hot-reloads, so the running process matches the
+        # saved config — no restart needed when these already agree.
         "needs_restart": want_multiuser != is_multiuser_mode(),
         "providers": {
             "google": has("GOOGLE_CLIENT_ID") and has("GOOGLE_CLIENT_SECRET"),
@@ -1367,7 +1419,24 @@ async def set_auth_config(payload: _AuthConfigRequest, current_user: UserInfo = 
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Could not save config: {e}")
 
-    return {"saved": True, "multiuser": payload.multiuser, "has_provider": bool(has_provider), "restart_required": True}
+    # R27: hot-reload the saved config into the running process so accounts /
+    # providers take effect without a backend restart. /api/auth/providers and
+    # the presence gate read live values, so they reflect the change at once.
+    try:
+        reload_auth_config(existing)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auth hot-reload failed (will apply on next restart): %s", e)
+
+    return {
+        "saved": True,
+        "multiuser": payload.multiuser,
+        "has_provider": bool(has_provider),
+        "multiuser_active": is_multiuser_mode(),
+        "providers": get_available_providers(),
+        # No restart needed now — kept for FE back-compat; it can drop its
+        # "please restart" banner since the change is already live.
+        "restart_required": False,
+    }
 
 
 @app.get("/api/auth/login/{provider}")
@@ -1531,6 +1600,44 @@ async def list_team_activity(
     member, and who left. Visible to any member of the team."""
     await _get_team_for_member_or_404(team_id, current_user)
     return {"activity": await db.get_team_activity(team_id, limit=100)}
+
+
+@app.get("/api/teams/{team_id}/checks")
+async def list_team_checks(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """List checks shared with a team. Visible to any member of the team (R26).
+
+    Gated through ``_get_team_for_member_or_404`` so a non-member gets the same
+    opaque 404 a non-existent team returns."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"checks": await db.get_team_checks(team_id)}
+
+
+@app.post("/api/checks/{check_id}/share")
+async def share_check_with_team(
+    check_id: int,
+    payload: CheckShareRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Share (or unshare) a single check with a team (R26).
+
+    Only the check's owner may share it, and only with a team they belong to.
+    ``team_id`` of 0/None clears the share."""
+    user_id = get_user_id_filter(current_user)
+    # Owner-scoped fetch: a non-owner gets the same 404 an unknown check returns.
+    check = await db.get_check_by_id(check_id, user_id=user_id)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+
+    new_team_id: Optional[int] = payload.team_id if payload.team_id else None
+    if new_team_id is not None:
+        if user_id is None or not await db.is_team_member(new_team_id, current_user.id):
+            raise HTTPException(status_code=403, detail="You are not a member of that team")
+
+    await db.set_check_team(check_id, new_team_id)
+    return {"shared": new_team_id is not None, "team_id": new_team_id, "check_id": check_id}
 
 
 @app.post("/api/teams/{team_id}/members")
@@ -1698,6 +1805,51 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.info(f"WebSocket disconnected: {session_id}")
 
 
+async def _can_access_presence_room(room_id: str, user_id: int) -> bool:
+    """Whether ``user_id`` may join a presence room (R26).
+
+    ``batch-{id}`` rooms are gated on owner-or-team-member access to that batch.
+    Any other room id keeps the prior authenticated-only behaviour (the caller
+    has already validated the JWT)."""
+    if not room_id.startswith("batch-"):
+        return True
+    batch_id = room_id[len("batch-"):]
+    if not batch_id:
+        return True
+    try:
+        team_ids = await db.get_user_team_ids(user_id)
+        summary = await db.get_batch_summary_accessible(
+            batch_id, user_id=user_id, team_ids=team_ids
+        )
+        return summary is not None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("presence room access check failed for %s: %s", room_id, e)
+        return False
+
+
+async def _broadcast_check_event_to_batch_room(check_id: int, event_type: str, data: dict) -> None:
+    """Mirror a per-check realtime event (reference_result / summary_update) to
+    the batch's presence room so every team member viewing it gets it live (R26).
+
+    Best-effort + cheap: skips the DB lookup entirely when nobody is present in
+    any batch room, and never raises into the check pipeline."""
+    if event_type not in ("reference_result", "summary_update"):
+        return
+    try:
+        info = await db.get_check_batch_team(check_id)
+        if not info:
+            return
+        batch_id = info.get("batch_id")
+        if not batch_id:
+            return
+        room_id = f"batch-{batch_id}"
+        if not presence.has_room(room_id):
+            return
+        await presence.broadcast_to_room(room_id, event_type, {**data, "check_id": check_id})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("batch-room broadcast failed for check %s: %s", check_id, e)
+
+
 @app.websocket("/api/ws/presence/{room_id}")
 async def presence_endpoint(websocket: WebSocket, room_id: str):
     """Realtime presence for a shared room (batch/check id) — issue #67.
@@ -1718,6 +1870,14 @@ async def presence_endpoint(websocket: WebSocket, room_id: str):
     token_data = decode_access_token(token)
     if not token_data:
         await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Gate batch rooms on accessible-batch membership (R26): a user may only
+    # join a `batch-{id}` room if they own that batch or belong to the team it
+    # is shared with. Non-batch rooms (e.g. a bare check id) keep the prior
+    # authenticated-only behaviour.
+    if not await _can_access_presence_room(room_id, token_data.user_id):
+        await websocket.close(code=4003, reason="Not authorized for this room")
         return
 
     user = {
@@ -2092,7 +2252,12 @@ async def run_check(
             # Always include check_id so the frontend can reliably route messages
             data_with_id = {**data, "check_id": check_id}
             await manager.send_message(session_id, event_type, data_with_id)
-            
+
+            # R26: also fan live per-ref / summary updates out to the batch's
+            # presence room so team members collaborating on the same batch see
+            # them, not just the owner's session. No-op unless someone's present.
+            await _broadcast_check_event_to_batch_room(check_id, event_type, data)
+
             # Save reference results to DB as they come in
             if event_type == "reference_result":
                 accumulated_results.append(data)
@@ -2381,12 +2546,13 @@ async def get_check_detail(
     check_id: int,
     current_user: UserInfo = Depends(require_user),
 ):
-    """Get detailed results for a specific check"""
+    """Get detailed results for a specific check.
+
+    Read access is team-aware (R26): the owner, or any member of the team the
+    check is shared with, can open it. This is what makes TeamMenu's "Shared
+    checks" list openable for members instead of 404."""
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_accessible_check_or_404(check_id, current_user)
 
         if check.get("status") == "in_progress":
             session_id = _session_id_for_check(check_id)
@@ -2401,11 +2567,12 @@ async def get_check_detail(
 
 
 async def _render_check_html(check_id: int, current_user: UserInfo) -> tuple[str, str]:
-    """Resolve a check and render it to standalone HTML. Returns (title, html)."""
-    user_id = get_user_id_filter(current_user)
-    check = await db.get_check_by_id(check_id, user_id=user_id)
-    if not check:
-        raise HTTPException(status_code=404, detail="Check not found")
+    """Resolve a check and render it to standalone HTML. Returns (title, html).
+
+    Team-aware read (R26): a member of the team a check is shared with can export
+    it, mirroring the shared-check detail view (renders only the already-shared
+    references + verdicts, no owner-only raw assets)."""
+    check = await _get_accessible_check_or_404(check_id, current_user)
     from backend.export import serialize_check_to_html
     html_str = serialize_check_to_html(check)
     title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
@@ -2441,10 +2608,9 @@ class _PublishRequest(BaseModel):
 async def get_check_health(check_id: int, current_user: UserInfo = Depends(require_user)):
     """Citation-health score for a check (same formula as the in-app badge)."""
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        # Team-aware read (R26): the health badge must work in the shared-check
+        # detail view for a team member, not just the owner.
+        check = await _get_accessible_check_or_404(check_id, current_user)
         from backend import export as _export
         m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
         return {"check_id": check_id, **m["health"], "stats": m["stats"]}
@@ -2463,10 +2629,9 @@ async def get_check_retractions(check_id: int, current_user: UserInfo = Depends(
     DOIs not found -> 'unknown'; never a fabricated retraction.
     """
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        # Team-aware read (R26): retraction check operates on the already-shared
+        # reference list, so a team member viewing the shared check may run it.
+        check = await _get_accessible_check_or_404(check_id, current_user)
         from backend import export as _export
         from backend.retraction import check_retractions
         refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
@@ -2820,10 +2985,9 @@ async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require
     """"Did you miss these?" — works frequently co-cited by the bibliography's own
     references but absent from it (OpenAlex). Advisory discovery aid, real data only."""
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        # Team-aware read (R26): gap finder operates on the already-shared
+        # reference list, so a team member viewing the shared check may run it.
+        check = await _get_accessible_check_or_404(check_id, current_user)
         from backend import export as _export
         from backend.gap_finder import find_gaps
         refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
@@ -2840,10 +3004,8 @@ async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require
 async def get_check_badge(check_id: int, current_user: UserInfo = Depends(require_user)):
     """A self-contained citation-health SVG badge (embeddable in reports/READMEs)."""
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        # Team-aware read (R26): the badge mirrors the shared-check health score.
+        check = await _get_accessible_check_or_404(check_id, current_user)
         from backend import export as _export
         m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
         h = m["health"]
@@ -2896,10 +3058,10 @@ async def export_check_file(check_id: int, fmt: str = "html", corrections: bool 
                        exactly; falls back to server-side counts when absent.
     """
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        # Team-aware read (R26): a team member can export a shared check, matching
+        # the batch export path and the shared-check detail view (renders only the
+        # already-shared references/verdicts).
+        check = await _get_accessible_check_or_404(check_id, current_user)
         from backend import export as _export
         canonical_summary = _parse_summary_param(summary)
         try:
@@ -2928,14 +3090,16 @@ async def export_batch_file(batch_id: str, fmt: str = "html", corrections: bool 
                             current_user: UserInfo = Depends(require_user)):
     """Multi-format batch report: one-page overview + each paper separately."""
     try:
-        summary, rows = await _get_owned_batch_or_404(batch_id, current_user)
-        user_id = get_user_id_filter(current_user)
+        # Access already gated by team membership here, so per-check fetches
+        # are batch-scoped (not re-scoped to the requester) — a team member
+        # exporting an owner's shared batch needs the owner's check rows (R26).
+        summary, rows = await _get_accessible_batch_or_404(batch_id, current_user)
         checks: list[dict] = []
         for row in rows:
             cid = row.get("id") or row.get("check_id")
             if cid is None:
                 continue
-            full = await db.get_check_by_id(int(cid), user_id=user_id)
+            full = await db.get_check_by_id(int(cid), user_id=None)
             if full:
                 checks.append(full)
         if not checks:
@@ -4728,7 +4892,7 @@ async def start_batch_check_files(
 async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Get batch summary and all checks in the batch"""
     try:
-        summary, checks = await _get_owned_batch_or_404(batch_id, current_user)
+        summary, checks = await _get_accessible_batch_or_404(batch_id, current_user)
         
         # Add session_id for in-progress checks
         for check in checks:
@@ -4761,9 +4925,7 @@ async def get_batch_llm_usage(
     individual children so a single missing snapshot doesn't blank the
     batch number.
     """
-    await _get_owned_batch_or_404(batch_id, current_user)
-    user_id = get_user_id_filter(current_user)
-    checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    summary, checks = await _get_accessible_batch_or_404(batch_id, current_user)
     try:
         import sys as _sys
         from pathlib import Path as _Path
@@ -4909,18 +5071,43 @@ async def delete_batch(batch_id: str, current_user: UserInfo = Depends(require_u
 
 @app.patch("/api/batch/{batch_id}")
 async def update_batch_label(batch_id: str, update: BatchLabelUpdate, current_user: UserInfo = Depends(require_user)):
-    """Update the label for a batch"""
+    """Update a batch's label and/or share it with a team (R26).
+
+    Only the owner may mutate a batch, so this stays on the owner-scoped DB
+    helpers. ``team_id`` semantics: ``None`` leaves the share unchanged; ``0``
+    unshares; a positive id shares the whole batch with that team (the caller
+    must be a member of it)."""
     try:
         user_id = get_user_id_filter(current_user)
-        success = await db.update_batch_label(batch_id, update.batch_label, user_id=user_id)
-        if success:
-            return {"message": "Batch label updated successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Batch not found")
+        touched = False
+
+        if update.batch_label is not None:
+            label_ok = await db.update_batch_label(batch_id, update.batch_label, user_id=user_id)
+            if not label_ok:
+                raise HTTPException(status_code=404, detail="Batch not found")
+            touched = True
+
+        if update.team_id is not None:
+            # Owner must belong to the team they're sharing with. user_id is None
+            # in single-user mode, where there are no teams to share to.
+            new_team_id: Optional[int] = update.team_id if update.team_id else None
+            if new_team_id is not None:
+                if user_id is None or not await db.is_team_member(new_team_id, current_user.id):
+                    raise HTTPException(status_code=403, detail="You are not a member of that team")
+            shared = await db.set_batch_team(batch_id, new_team_id, user_id=user_id)
+            if shared == 0:
+                raise HTTPException(status_code=404, detail="Batch not found")
+            touched = True
+
+        if not touched:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+
+        # Keep the historical message so existing callers/tests stay green.
+        return {"message": "Batch label updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating batch label: {e}", exc_info=True)
+        logger.error(f"Error updating batch: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

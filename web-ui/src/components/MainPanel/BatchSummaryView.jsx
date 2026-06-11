@@ -79,6 +79,12 @@ export default function BatchSummaryView() {
   const [isCancelling, setIsCancelling] = useState(false)
   const [filter, setFilter] = useState('all') // all | error | hallucinated | in_progress | completed
   const [showShare, setShowShare] = useState(false)
+  // R26: teams the current user can share this batch with, and the team the
+  // batch is currently shared with (from the summary). Empty when not in
+  // multi-user mode, which hides the control entirely.
+  const [myTeams, setMyTeams] = useState([])
+  const [sharedTeamId, setSharedTeamId] = useState(null)
+  const [shareBusy, setShareBusy] = useState(false)
 
   const batchId = selectedBatch?.batch_id
   const checks = selectedBatch?.checks || []
@@ -123,6 +129,43 @@ export default function BatchSummaryView() {
   useEffect(() => {
     fetchUsage()
   }, [fetchUsage, agg.completed, agg.errored, agg.cancelled])
+
+  // R26: sync the locally-tracked shared team from the batch summary. The
+  // summary's team_id is null for an unshared batch.
+  useEffect(() => {
+    setSharedTeamId(selectedBatch?.team_id ?? null)
+  }, [selectedBatch?.team_id, batchId])
+
+  // R26: load the teams the user can share with. Soft-fails (and stays empty)
+  // in single-user mode where /api/teams returns nothing actionable.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const resp = await api.getTeams()
+        if (!cancelled) setMyTeams(resp.data?.teams || [])
+      } catch {
+        if (!cancelled) setMyTeams([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [batchId])
+
+  const handleShareWithTeam = useCallback(async (teamIdRaw) => {
+    if (!batchId) return
+    const teamId = Number(teamIdRaw) || 0 // 0 == unshare
+    setShareBusy(true)
+    try {
+      await api.shareBatchWithTeam(batchId, teamId)
+      setSharedTeamId(teamId || null)
+      // Refresh so the summary + child rows reflect the new team_id.
+      await selectBatch(batchId)
+    } catch (e) {
+      logger.warning?.('BatchSummary', 'shareBatchWithTeam failed', e)
+    } finally {
+      setShareBusy(false)
+    }
+  }, [batchId, selectBatch])
 
   // v0.7.57: fan out a `refchecker:check-completed` window event
   // when a poll detects new completions. The 16-WS cap (v0.7.44)
@@ -269,6 +312,28 @@ export default function BatchSummaryView() {
           </div>
           {/* Realtime presence — team members viewing this same batch (#67) */}
           {batchId && <PresenceAvatars roomId={`batch-${batchId}`} />}
+          {/* R26: share the whole batch with a team so its members can open it
+              live. Hidden unless the user belongs to at least one team. */}
+          {myTeams.length > 0 && (
+            <label className="inline-flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="Share this batch with a team — members can open it and collaborate live">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4z" />
+              </svg>
+              <select
+                value={sharedTeamId ?? ''}
+                onChange={(e) => handleShareWithTeam(e.target.value)}
+                disabled={shareBusy}
+                className="text-xs rounded-md px-1.5 py-1"
+                style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
+                aria-label="Share batch with team"
+              >
+                <option value="">Not shared</option>
+                {myTeams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {agg.completed > 0 && (
             <button
               onClick={() => setShowShare(true)}
