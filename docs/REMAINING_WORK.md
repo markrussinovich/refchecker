@@ -667,9 +667,15 @@ Batch-F gate green (`b0b99ee`): lint 0 errors, vitest pass, build ok, pytest pas
 
 Batch-G gate green (`9f0c3a7`): lint 0 errors, vitest pass, build ok, pytest pass.
 
-**⬜ QUEUED (serialized):** H = R26/R27, R32/R34/R38, R49 (R50 deferred — needs design image); J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags).
+| R26/R27 auth/teams: team-scoped shared checks + collaborate + enable-from-app hot-reload | `71a9026` |
+| R34 separate model for Chat-with-PDF vs Summarize | `0563505` |
+| R32/R38/R49 radial DOIs clickable + library 3D polish + gap-finder collapse | `88079e5` |
 
-**Tally:** 47 of the R01–R55 items DONE (R01–R39, R41–R48, R52–R55); remaining: R26/R27/R32/R34/R38/R49 (H), R50 (deferred), R40 (CI), R56–R60 (J/K).
+Batch-H gate green (`642a1fc`, salvaged after a stalled gate agent): lint 0 errors, vitest **340/340**, build ok, pytest **1459** passed/1 skipped.
+
+**⬜ QUEUED (serialized):** J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) deferred — needs the user's design attachment.
+
+**Tally:** 53 of the R01–R55 items DONE (all except R50 deferred + R40 CI-gate); remaining: R40 (K), R50 (deferred), R56–R60 (J/K).
 
 ---
 
