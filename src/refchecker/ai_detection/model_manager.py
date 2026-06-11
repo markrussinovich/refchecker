@@ -24,8 +24,177 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 #: HuggingFace repo for the default local detector (DeBERTa-v3, MIT licence).
+#: Kept as a module-level constant for full backward-compatibility: the
+#: original single-detector code path (the legacy ``model_*`` /
+#: ``start_download`` / ``delete_model`` functions below, the ``local_backend``
+#: engine, and the existing ``/api/ai-detection/model/*`` endpoints) all still
+#: operate on this one repo. The new multi-detector API layers on top via
+#: :data:`DETECTOR_REGISTRY` + the ``detector_*`` functions, and the
+#: ``desklib`` registry entry resolves to the SAME on-disk path, so existing
+#: installs are picked up unchanged.
 MODEL_REPO = "desklib/ai-text-detector-v1.01"
 _MODEL_DIRNAME = "desklib-ai-text-detector-v1.01"
+
+
+# ── Multi-detector registry (R61 / §14) ───────────────────────────────────
+#
+# Each entry describes ONE installable open-source AI-text detector. Tier-1
+# detectors are classifier heads we can actually load + run locally; Tier-2
+# ("heavy") metric/zero-shot detectors are listed for honesty but marked
+# ``installable: False`` until a real runner exists — they are NEVER selectable
+# to run and NEVER report a fabricated number. ``arch``/``head`` drive the
+# per-arch loader in ``local_backend``:
+#   * ``custom_mean_pool`` — desklib's bespoke mean-pooled DeBERTa + 1-logit head
+#   * ``sequence_classification`` — standard ``AutoModelForSequenceClassification``
+#     (RoBERTa / e5 / Longformer), sigmoid for 1 logit else softmax[ai_index].
+#
+# ``threshold`` is this detector's own score→"high" cut point (per-detector, not
+# a shared global) so each model is banded on its own calibration. ``size_mb``
+# and ``license`` are REAL, research-verified values shown to the user before
+# install (no invented numbers). ``raid_note`` is the one-line provenance.
+
+DEFAULT_DETECTOR = "desklib"
+
+DETECTOR_REGISTRY: Dict[str, Dict[str, object]] = {
+    "desklib": {
+        "key": "desklib",
+        "repo": "desklib/ai-text-detector-v1.01",
+        "arch": "deberta-v3-large",
+        "head": "custom_mean_pool",
+        "size_mb": 870,
+        "tier": 1,
+        "threshold": 0.85,
+        "license": "MIT",
+        "raid_note": "RAID leaderboard leader among open models (default).",
+        "installable": True,
+        "heavy": False,
+        "label": "Desklib (DeBERTa-v3-large)",
+        "dirname": _MODEL_DIRNAME,
+    },
+    "superannotate": {
+        "key": "superannotate",
+        "repo": "SuperAnnotate/ai-detector",
+        "arch": "roberta-large",
+        "head": "sequence_classification",
+        "size_mb": 1420,
+        "tier": 1,
+        "threshold": 0.85,
+        "license": "SuperAnnotate (research/eval)",
+        "raid_note": "#1 open-source on RAID (late 2024); a low-FPR variant "
+                     "(SuperAnnotate/ai-detector-low-fpr) also exists.",
+        "installable": True,
+        "heavy": False,
+        "label": "SuperAnnotate (RoBERTa-Large)",
+        "dirname": "superannotate-ai-detector",
+    },
+    "e5-small-lora": {
+        "key": "e5-small-lora",
+        "repo": "MayZhou/e5-small-lora-ai-generated-detector",
+        "arch": "e5-small",
+        "head": "sequence_classification",
+        "size_mb": 130,
+        "tier": 1,
+        "threshold": 0.85,
+        "license": "MIT",
+        "raid_note": "RAID-optimized, tiny/fast/CPU-friendly (~89% acc; "
+                     "ONNX port exists).",
+        "installable": True,
+        "heavy": False,
+        "label": "e5-small + LoRA",
+        "dirname": "e5-small-lora-ai-generated-detector",
+    },
+    "mage": {
+        "key": "mage",
+        "repo": "yaful/MAGE",
+        "arch": "longformer",
+        "head": "sequence_classification",
+        "size_mb": 570,
+        "tier": 1,
+        "threshold": 0.85,
+        "license": "Apache-2.0",
+        "raid_note": "\"Detection in the wild\" (ACL 2024); strong "
+                     "out-of-domain.",
+        "installable": True,
+        "heavy": False,
+        "label": "MAGE (Longformer)",
+        "dirname": "mage-longformer",
+    },
+    # ── Tier-2 heavy metric / zero-shot detectors. Listed for honesty; NOT
+    # runnable in this build → installable=False so the API refuses to install
+    # or select them, and they never report a number. The size/RAM warnings are
+    # real so the FE can show why they are opt-in. ────────────────────────────
+    "binoculars": {
+        "key": "binoculars",
+        "repo": "(paired causal LMs)",
+        "arch": "metric-zeroshot",
+        "head": "metric",
+        "size_mb": 14000,
+        "tier": 2,
+        "threshold": None,
+        "license": "see component models",
+        "raid_note": "Best-in-class at low FPR; needs TWO LLMs loaded "
+                     "simultaneously — heavy RAM/VRAM. Not runnable in this "
+                     "build.",
+        "installable": False,
+        "heavy": True,
+        "label": "Binoculars (zero-shot, 2 LLMs)",
+        "dirname": "binoculars",
+    },
+    "fast-detectgpt": {
+        "key": "fast-detectgpt",
+        "repo": "(GPT-Neo-2.7B scorer)",
+        "arch": "metric-zeroshot",
+        "head": "metric",
+        "size_mb": 11000,
+        "tier": 2,
+        "threshold": None,
+        "license": "see component models",
+        "raid_note": "340x faster than DetectGPT; ~11 GB scorer download. Not "
+                     "runnable in this build.",
+        "installable": False,
+        "heavy": True,
+        "label": "Fast-DetectGPT (zero-shot)",
+        "dirname": "fast-detectgpt",
+    },
+    "radar": {
+        "key": "radar",
+        "repo": "TrustSafeAI/RADAR-Vicuna-7B",
+        "arch": "vicuna-7b",
+        "head": "metric",
+        "size_mb": 13000,
+        "tier": 2,
+        "threshold": None,
+        "license": "see model card",
+        "raid_note": "Adversarially-trained, robust to paraphrase; 7B-scale "
+                     "(~13 GB) download. Not runnable in this build.",
+        "installable": False,
+        "heavy": True,
+        "label": "RADAR (Vicuna-7B)",
+        "dirname": "radar-vicuna-7b",
+    },
+}
+
+#: Detector keys that can actually be installed + run locally (Tier-1).
+def runnable_detector_keys() -> list:
+    return [k for k, v in DETECTOR_REGISTRY.items() if v.get("installable")]
+
+
+def get_detector(key: str) -> Optional[Dict[str, object]]:
+    """Return the registry entry for ``key`` (None if unknown)."""
+    return DETECTOR_REGISTRY.get((key or "").strip().lower())
+
+
+def detector_dir(key: str) -> Path:
+    """On-disk directory for detector ``key``'s weights.
+
+    ``desklib`` resolves to the SAME path the legacy single-detector code uses
+    (``model_path()``), so an already-installed desklib model is picked up by
+    the new API without a re-download.
+    """
+    entry = get_detector(key)
+    if not entry:
+        raise KeyError(f"unknown detector: {key!r}")
+    return model_storage_dir() / str(entry["dirname"])
 
 # Background download state (single global model, single download at a time).
 _lock = threading.Lock()
@@ -508,3 +677,302 @@ def delete_model() -> Dict[str, object]:
             shutil.rmtree(p, ignore_errors=True)
         _status = {"state": "idle", "repo": MODEL_REPO, "message": "Model removed."}
     return model_status()
+
+
+# ── Per-detector install / status / remove (multi-detector layer, R61) ─────
+#
+# These parameterize the on-demand HF download + ``.refcheck_model_info.json``
+# pattern per detector ``key``. They REUSE the same completeness rules
+# (config.json + a real weight artifact + a verified-complete OK marker) as the
+# single-detector path. ``desklib`` delegates to the legacy functions above so
+# its (possibly in-flight) download state and existing on-disk install are
+# preserved byte-for-byte — no behavioural change for existing users.
+
+# Per-key download state (keyed by detector key). Each value mirrors the legacy
+# ``_status`` dict shape. Guarded by ``_lock`` (shared with the legacy state).
+_detector_status: Dict[str, Dict[str, object]] = {}
+_detector_threads: Dict[str, threading.Thread] = {}
+
+
+def _detector_ok_marker(key: str) -> Path:
+    return detector_dir(key) / _OK_MARKER
+
+
+def _detector_info_file(key: str) -> Path:
+    return detector_dir(key) / _MODEL_INFO_FILE
+
+
+def is_detector_installed(key: str) -> bool:
+    """True when detector ``key`` is fully downloaded + verified.
+
+    ``desklib`` reuses the legacy ``is_model_installed()`` so an existing
+    install (which predates this registry) is recognised unchanged.
+    """
+    if (key or "").lower() == DEFAULT_DETECTOR:
+        return is_model_installed()
+    entry = get_detector(key)
+    if not entry:
+        return False
+    p = detector_dir(key)
+    if not (p.is_dir() and (p / "config.json").is_file()):
+        return False
+    if not any((p / f).is_file() for f in _WEIGHT_FILES):
+        return False
+    return (p / _OK_MARKER).is_file()
+
+
+def _detector_complete(key: str, expected_weight_bytes: int) -> bool:
+    p = detector_dir(key)
+    if not (p.is_dir() and (p / "config.json").is_file()):
+        return False
+    weights = [p / f for f in _WEIGHT_FILES if (p / f).is_file()]
+    if not weights:
+        return False
+    try:
+        biggest = max(w.stat().st_size for w in weights)
+    except OSError:
+        return False
+    if expected_weight_bytes > 0:
+        return biggest >= int(expected_weight_bytes * 0.99)
+    return biggest > 50 * 1024 * 1024
+
+
+def detector_status(key: str) -> Dict[str, object]:
+    """Install/download status for ONE detector, including registry metadata.
+
+    Honesty contract: a Tier-2 / non-installable detector reports
+    ``installable: False`` and is NEVER ``installed`` (we don't have a runner),
+    so the FE can show it as unavailable and never offer to run it.
+    """
+    entry = get_detector(key)
+    if not entry:
+        return {"key": key, "state": "unknown", "installed": False,
+                "installable": False, "error": "unknown_detector"}
+    k = str(entry["key"])
+    installable = bool(entry.get("installable"))
+    if k == DEFAULT_DETECTOR:
+        base = model_status()
+        installed = bool(base.get("installed"))
+        state = base.get("state")
+        size = base.get("size_bytes", 0)
+        log = base.get("log", [])
+    else:
+        installed = is_detector_installed(k) if installable else False
+        with _lock:
+            st = _detector_status.get(k, {})
+            state = st.get("state", "idle")
+            log = list(st.get("log", []))[-120:] if isinstance(st.get("log"), list) else []
+        if installed and state not in ("downloading",):
+            state = "installed"
+        size = _dir_size_bytes(detector_dir(k)) if installed else 0
+    return {
+        "key": k,
+        "repo": entry["repo"],
+        "arch": entry["arch"],
+        "head": entry["head"],
+        "tier": entry["tier"],
+        "size_mb": entry["size_mb"],
+        "threshold": entry["threshold"],
+        "license": entry["license"],
+        "raid_note": entry["raid_note"],
+        "label": entry.get("label", k),
+        "heavy": bool(entry.get("heavy")),
+        "installable": installable,
+        "installed": installed,
+        "state": state,
+        "path": str(detector_dir(k)),
+        "size_bytes": size,
+        "deps_available": deps_available(),
+        "log": log,
+    }
+
+
+def registry_status() -> Dict[str, object]:
+    """Full registry + per-detector status for the manager UI / API.
+
+    The default detector is reported first; the order otherwise follows the
+    registry (Tier-1 before Tier-2).
+    """
+    detectors = [detector_status(k) for k in DETECTOR_REGISTRY]
+    return {
+        "default": DEFAULT_DETECTOR,
+        "detectors": detectors,
+        "deps_available": deps_available(),
+    }
+
+
+def _detector_log(key: str, msg: str) -> None:
+    import time
+    stamp = time.strftime("%H:%M:%S")
+    with _lock:
+        st = _detector_status.setdefault(key, {"state": "idle", "log": []})
+        log = st.setdefault("log", [])
+        for line in (str(msg).splitlines() or [""]):
+            log.append(f"{stamp}  {line}")
+        if len(log) > _LOG_CAP:
+            del log[: len(log) - _LOG_CAP]
+
+
+def _fetch_sizes_for(repo: str) -> tuple:
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(repo, files_metadata=True)
+        sizes = [(getattr(s, "size", 0) or 0) for s in (info.siblings or [])]
+        total_mb = sum(sizes) / (1024 * 1024)
+        max_weight = max(sizes) if sizes else 0
+        return total_mb, max_weight
+    except Exception:  # noqa: BLE001
+        return 0.0, 0
+
+
+def _resolve_latest_revision_for(repo: str):
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(repo)
+        return getattr(info, "sha", None) or getattr(info, "lastModified", None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _write_detector_info(key: str) -> None:
+    try:
+        import json
+        from datetime import datetime, timezone
+        entry = get_detector(key) or {}
+        info = {
+            "repo": entry.get("repo"),
+            "resolved_revision": _resolve_latest_revision_for(str(entry.get("repo") or "")),
+            "download_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        _detector_info_file(key).write_text(json.dumps(info))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _detector_download_worker(key: str) -> None:
+    """Background download of a non-default detector via in-process
+    snapshot_download (Xet disabled), mirroring ``_download_in_process``."""
+    entry = get_detector(key)
+    repo = str(entry["repo"])
+    dest = detector_dir(key)
+    _detector_log(key, f"=== downloading {repo} ===")
+    total_mb, expected_weight = _fetch_sizes_for(repo)
+    with _lock:
+        _detector_status[key] = {
+            "state": "downloading",
+            "log": _detector_status.get(key, {}).get("log", []),
+            "message": f"Downloading {repo}…",
+        }
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+    sys.modules.setdefault("hf_xet", None)
+    ok = False
+    try:
+        from . import runtime_manager
+        runtime_manager.ensure_on_path()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id=repo, local_dir=str(dest))
+        ok = _detector_complete(key, expected_weight)
+    except Exception:  # noqa: BLE001
+        import traceback
+        _detector_log(key, "ERROR: download failed:\n" + traceback.format_exc())
+        ok = False
+    with _lock:
+        log = _detector_status.get(key, {}).get("log", [])
+    if ok:
+        try:
+            _detector_ok_marker(key).write_text("ok\n")
+        except OSError:
+            pass
+        _write_detector_info(key)
+        mb = _safe_mb(dest)
+        _detector_log(key, f"SUCCESS: detector installed ({mb:.0f} MB)")
+        with _lock:
+            _detector_status[key] = {"state": "installed", "log": log,
+                                     "message": f"Installed ({mb:.0f} MB)."}
+    else:
+        _detector_log(key, "ERROR: download did not complete — see log.")
+        with _lock:
+            _detector_status[key] = {"state": "error", "log": log,
+                                     "message": "Download failed or incomplete."}
+    try:
+        from . import diagnostics
+        with _lock:
+            stt = _detector_status.get(key, {}).get("state")
+        diagnostics.record({"backend": "detector-download", "outcome": stt,
+                            "reason": f"{key}:{repo}"})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def start_detector_download(key: str) -> Dict[str, object]:
+    """Start (or report) the background download of detector ``key``.
+
+    Refuses non-installable (Tier-2) detectors honestly — they have no runner,
+    so we never download or mark them installable. ``desklib`` delegates to the
+    legacy ``start_download()`` so its state machine is untouched.
+    """
+    entry = get_detector(key)
+    if not entry:
+        return {"key": key, "state": "error", "error": "unknown_detector",
+                "installable": False}
+    if not entry.get("installable"):
+        return {"key": str(entry["key"]), "state": "unavailable",
+                "installable": False,
+                "message": "This detector is heavy and not runnable in this "
+                           "build; it cannot be installed.",
+                "heavy": bool(entry.get("heavy"))}
+    if not deps_available():
+        return {"key": str(entry["key"]), "state": "error",
+                "error": "deps_not_installed", "installable": True,
+                "message": "Local detection runtime not installed (torch + "
+                           "transformers). Install it first."}
+    k = str(entry["key"])
+    if k == DEFAULT_DETECTOR:
+        start_download()
+        return detector_status(k)
+    if is_detector_installed(k):
+        return detector_status(k)
+    with _lock:
+        st = _detector_status.get(k, {})
+        th = _detector_threads.get(k)
+        if st.get("state") == "downloading" and th and th.is_alive():
+            return detector_status(k)
+        _detector_status[k] = {"state": "downloading",
+                               "log": st.get("log", []),
+                               "message": "Download started."}
+        t = threading.Thread(target=_detector_download_worker, args=(k,), daemon=True)
+        _detector_threads[k] = t
+        t.start()
+    return detector_status(k)
+
+
+def delete_detector(key: str) -> Dict[str, object]:
+    """Remove an installed detector from disk (per-key).
+
+    Refuses while that detector's download is in flight. ``desklib`` delegates
+    to the legacy ``delete_model()``.
+    """
+    entry = get_detector(key)
+    if not entry:
+        return {"key": key, "state": "error", "error": "unknown_detector"}
+    k = str(entry["key"])
+    if k == DEFAULT_DETECTOR:
+        delete_model()
+        return detector_status(k)
+    with _lock:
+        th = _detector_threads.get(k)
+        st = _detector_status.get(k, {})
+        if st.get("state") == "downloading" and th and th.is_alive():
+            return {"key": k, "state": "downloading",
+                    "message": "Cannot remove while a download is in progress."}
+        p = detector_dir(k)
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        _detector_status[k] = {"state": "idle", "log": st.get("log", []),
+                               "message": "Detector removed."}
+    return detector_status(k)

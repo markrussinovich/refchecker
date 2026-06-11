@@ -1141,6 +1141,7 @@ class ProgressRefChecker:
                  ai_detection_api_key: Optional[str] = None,
                  ai_detection_consent: bool = False,
                  ai_detection_service: str = "pangram",
+                 ai_detection_detectors: Optional[List[str]] = None,
                  paperclip_api_key: Optional[str] = None,
                  detection_mode: str = "both",
                  enrich_enabled: bool = True):
@@ -1178,6 +1179,14 @@ class ProgressRefChecker:
         self.ai_detection_api_key = ai_detection_api_key
         self.ai_detection_consent = bool(ai_detection_consent)
         self.ai_detection_service = (ai_detection_service or "pangram").lower()
+        # Optional multi-detector selection (R61). When a non-empty list of
+        # detector keys is supplied (local backend only), the AI-detection pass
+        # runs each selected detector and returns a side-by-side comparison
+        # under ``ai_detection["multi"]``. Default (None/empty) preserves the
+        # exact single-detector behaviour — FULL backward compatibility.
+        self.ai_detection_detectors = [
+            str(k).strip().lower() for k in (ai_detection_detectors or []) if str(k).strip()
+        ]
         self.paperclip_api_key = paperclip_api_key
         # Cross-source enrichment backfill is ON by default (mirrors the web/API
         # default). The CLI exposes a `--no-enrich` opt-out which sets this to
@@ -2986,6 +2995,15 @@ class ProgressRefChecker:
         except Exception as e:  # noqa: BLE001
             logger.debug("ai_detection phase emit skipped: %s", e)
 
+        # Multi-detector compare path (R61): only for the local backend and only
+        # when >1 detector was explicitly selected. A single selected detector
+        # (or none) falls through to the existing single-detector path so the
+        # default behaviour is byte-for-byte unchanged.
+        run_multi = (
+            backend == "local"
+            and len(self.ai_detection_detectors) > 1
+        )
+
         try:
             # The local engine serializes inference behind a process-wide lock,
             # so in a BULK run every child's detection queues on the same lock.
@@ -3006,6 +3024,25 @@ class ProgressRefChecker:
                 timeout=480,
             )
             payload = result.to_dict()
+            if run_multi:
+                # Attach the side-by-side comparison under ``multi`` — the
+                # top-level result stays the single configured detector for
+                # full backward compatibility. Best-effort: a failure here
+                # never affects the primary result.
+                try:
+                    from refchecker.ai_detection import run_detectors
+                    multi = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            run_detectors,
+                            paper_text or "",
+                            self.ai_detection_detectors,
+                        ),
+                        timeout=480,
+                    )
+                    payload["multi"] = multi
+                except Exception as me:  # noqa: BLE001
+                    logger.warning("multi-detector compare failed for check %s: %s",
+                                   self.check_id, me)
         except asyncio.TimeoutError:
             # The asyncio wrapper is cancelled, but the underlying OS worker
             # thread keeps running run_detection() to completion (threads can't

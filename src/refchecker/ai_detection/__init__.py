@@ -66,6 +66,18 @@ def build_detector(backend: str, *, check_id=None, **opts) -> Optional[Detection
     return None
 
 
+def run_detectors(text_or_pages, keys):
+    """Run one or more registered detectors and compare them side-by-side.
+
+    Thin re-export of :func:`multi_run.run_detectors` so callers can use
+    ``from refchecker.ai_detection import run_detectors``. Returns the
+    per-detector results + the plain-code comparison summary (no synthetic
+    ensemble). An uninstalled detector abstains — it never reports a number.
+    """
+    from .multi_run import run_detectors as _rd
+    return _rd(text_or_pages, keys)
+
+
 def run_detection(
     text: str,
     *,
@@ -123,5 +135,6 @@ __all__ = [
     "VALID_BACKENDS",
     "build_detector",
     "run_detection",
+    "run_detectors",
     "model_manager",
 ]

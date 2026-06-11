@@ -9389,6 +9389,72 @@ async def ai_detection_model_delete(current_user: UserInfo = Depends(require_use
     return model_manager.delete_model()
 
 
+@app.get("/api/ai-detection/detectors")
+async def ai_detection_list_detectors(current_user: UserInfo = Depends(require_user)):
+    """Multi-detector registry + per-detector install status (R61).
+
+    Returns the full registry (Tier-1 runnable + Tier-2 heavy/opt-in) with real
+    size/license/RAID-note metadata and each detector's install state. Tier-2
+    detectors report ``installable: false`` so the UI shows them as unavailable
+    and never offers to run them (honesty: never a fabricated number).
+    """
+    from refchecker.ai_detection import model_manager
+    return model_manager.registry_status()
+
+
+@app.post("/api/ai-detection/install/{key}")
+async def ai_detection_install_detector(
+    key: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Start (or report) the background download of a specific detector (R61).
+
+    Refuses unknown / non-installable (heavy Tier-2) keys honestly. The model
+    lives at a single shared filesystem path, so admin-gated in multi-user mode.
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    entry = model_manager.get_detector(key)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Unknown detector: {key}")
+    if not entry.get("installable"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Detector '{key}' is a heavy Tier-2 detector that is not "
+                "runnable in this build, so it cannot be installed."
+            ),
+        )
+    if not model_manager.deps_available():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Local detection runtime not installed. Use “Install runtime” "
+                "in Settings → AI Detection (installs torch + transformers)."
+            ),
+        )
+    return model_manager.start_detector_download(key)
+
+
+@app.delete("/api/ai-detection/model/{key}")
+async def ai_detection_delete_detector(
+    key: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Remove a specific installed detector's weights from disk (R61).
+
+    Per-key counterpart of ``DELETE /api/ai-detection/model``. Admin-gated in
+    multi-user mode (detectors are shared across users).
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    if not model_manager.get_detector(key):
+        raise HTTPException(status_code=404, detail=f"Unknown detector: {key}")
+    return model_manager.delete_detector(key)
+
+
 @app.get("/api/ai-detection/runtime/status")
 async def ai_detection_runtime_status(current_user: UserInfo = Depends(require_user)):
     """Status of the optional local-detector inference runtime (torch/onnx)."""

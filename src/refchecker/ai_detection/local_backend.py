@@ -51,6 +51,13 @@ _MAX_TOKENS = 768  # per-window truncation for the encoder
 _engine = None
 _engine_lock = threading.Lock()
 
+# Per-detector engine cache for the multi-detector (R61) path. Keyed by
+# detector key; the default 'desklib' key shares the legacy ``_engine`` above
+# so an already-loaded default model is reused. Same double-checked-locking
+# discipline as _get_engine to avoid loading the same weights twice under a
+# cold-start batch.
+_engines: Dict[str, object] = {}
+
 
 def _ai_positive_index(id2label: Optional[Dict]) -> Optional[int]:
     """Pick the logit index whose label denotes AI/generated text.
@@ -343,6 +350,32 @@ def _format_load_error(exc: Exception) -> str:
     return msg[:500]
 
 
+def _build_engine_at(model_dir_path, head: Optional[str] = None):
+    """Construct an inference engine for the weights at ``model_dir_path``.
+
+    ``head`` is the registry's per-arch head hint ('custom_mean_pool' for
+    desklib's bespoke 1-logit head, 'sequence_classification' for the standard
+    RoBERTa/e5/Longformer ``AutoModelForSequenceClassification`` heads). The
+    engines auto-detect the right path from the checkpoint regardless (so the
+    hint is advisory), but it is threaded through for clarity and future arch
+    branches. Prefers an ONNX runtime when a ``model.onnx`` with a head is
+    present, else torch.
+    """
+    from pathlib import Path as _Path
+    p = _Path(str(model_dir_path))
+    path = str(p)
+    onnx_file = p / "model.onnx"
+    built = None
+    if onnx_file.is_file():
+        try:
+            built = _OnnxEngine(path, str(onnx_file))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ONNX engine unavailable, falling back to torch: %s", exc)
+    if built is None:
+        built = _TorchEngine(path)
+    return built
+
+
 def _get_engine():
     global _engine
     if _engine is not None:
@@ -362,18 +395,45 @@ def _get_engine():
             runtime_manager.ensure_on_path()
         except Exception as exc:  # noqa: BLE001
             logger.debug("ensure_on_path before engine load failed: %s", exc)
-        path = str(model_manager.model_path())
-        onnx_file = model_manager.model_path() / "model.onnx"
-        built = None
-        if onnx_file.is_file():
-            try:
-                built = _OnnxEngine(path, str(onnx_file))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("ONNX engine unavailable, falling back to torch: %s", exc)
-        if built is None:
-            built = _TorchEngine(path)
-        _engine = built
+        _engine = _build_engine_at(model_manager.model_path(), head="custom_mean_pool")
         return _engine
+
+
+def load(detector_key: str):
+    """Load (and cache) the inference engine for a given detector ``key``.
+
+    Per-arch head selection is driven by the registry entry's ``head`` field
+    and the engine's own checkpoint introspection. The default ``desklib`` key
+    reuses the legacy process-wide engine (``_get_engine``) so an already-loaded
+    default model is not re-loaded. Raises if the detector is unknown,
+    not installable (Tier-2 heavy), or not installed — callers MUST treat a
+    raise as "abstain", never fabricate a score.
+    """
+    key = (detector_key or "").strip().lower()
+    entry = model_manager.get_detector(key)
+    if not entry:
+        raise ValueError(f"unknown detector: {detector_key!r}")
+    if not entry.get("installable"):
+        raise ValueError(f"detector {key!r} is not runnable in this build")
+    if key == model_manager.DEFAULT_DETECTOR:
+        return _get_engine()
+    cached = _engines.get(key)
+    if cached is not None:
+        return cached
+    with _engine_lock:
+        cached = _engines.get(key)
+        if cached is not None:
+            return cached
+        if not model_manager.is_detector_installed(key):
+            raise FileNotFoundError(f"detector {key!r} is not installed")
+        try:
+            from . import runtime_manager
+            runtime_manager.ensure_on_path()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ensure_on_path before engine load failed: %s", exc)
+        built = _build_engine_at(model_manager.detector_dir(key), head=str(entry.get("head")))
+        _engines[key] = built
+        return built
 
 
 def _load_checkpoint_state_dict(model_dir: str):
