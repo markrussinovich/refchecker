@@ -678,9 +678,13 @@ Batch-H gate green (`642a1fc`, salvaged after a stalled gate agent): lint 0 erro
 
 Batch-J gate green (`1032602`).
 
-**⬜ QUEUED (serialized):** I (R61 multi-detector AI detection, §14); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) deferred — needs the user's design attachment.
+| R61 multi-detector AI detection: registry+multi-run (`ad79cdb`), FE compare/export (`decf181`, verified green by gate `7a5f742` + direct 40/40 re-run — the "NOT green" wip label was a socket-error artifact), CLI `--detectors`/`--list-detectors` (`edab55e`) | `ad79cdb`..`7a5f742` |
 
-**Tally:** 55 of R01–R57 DONE (all except R50 deferred + R40 CI-gate); remaining: R61 (I), R40/R58–R60 (K), R50 (deferred).
+Batch-I gate green (`7a5f742`): lint 0 errors, vitest **368/368**, build ok, pytest **1510** passed/1 skipped; `--list-detectors` honest (7 detectors, real sizes/licenses, tier-2 flagged, uninstalled abstain).
+
+**⬜ QUEUED:** K — R58 bump 0.9.19+3.2.0 ✓(this commit), R59 push origin + R40 full CI, R60 release tags (desktop draft → publish; PyPI = main-merge trigger, surfaced to user). R50 deferred — needs the user's design attachment.
+
+**Tally:** 56 of R01–R61 DONE (all except R50 deferred); remaining: R40/R58–R60 (K, in progress).
 
 ---
 
