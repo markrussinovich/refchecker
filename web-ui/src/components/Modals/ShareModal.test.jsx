@@ -179,48 +179,35 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('ShareModal vs StatsSection video count parity (R45)', () => {
-  it('feeds ShareAnimationCanvas identical {total,verified,warnings,errors} from both surfaces', () => {
+// Bug B / R45: the share card/video must show the SAME counts the user sees in
+// the StatsSection results bar. StatsSection no longer renders the animation
+// inline (it lives only in the Share popup), so parity is now measured against
+// the VISIBLE bar chips. Crucially, errors are NOT grouped with hallucinated —
+// the bar's errors chip is references.errors only (hallucinated is its own
+// bucket), so grouping made the share read 9 vs the bar's 7.
+describe('ShareModal video counts equal the StatsSection results bar (R45 / Bug-B)', () => {
+  it('feeds ShareAnimationCanvas the SAME {verified,warnings,errors} the bar shows', () => {
+    const { chips } = renderStatsSection(true)
     const shareStats = renderShareStats()
-    const { stats: statsSectionStats } = renderStatsSection()
 
     expect(shareStats).toBeTruthy()
-    expect(statsSectionStats).toBeTruthy()
-
-    // The core assertion: the per-article video stats are byte-for-byte equal
-    // across the two surfaces. If either grouping drifts, this fails.
-    expect(shareStats).toEqual(statsSectionStats)
-
-    // And the grouped values are the expected ones (errors group hallucinated).
-    expect(shareStats).toEqual({
-      total: 7,
-      verified: 1,
-      warnings: 2,
-      errors: 4,
-    })
-  })
-
-  it('keeps parity AND matches the StatsSection chips the user sees', () => {
-    const { stats: statsSectionStats, chips } = renderStatsSection(true)
-    const shareStats = renderShareStats()
-
-    // Share video must equal the StatsSection video AND the visible chips
-    // (errors chip + hallucinated, since the video groups them).
-    expect(shareStats).toEqual(statsSectionStats)
+    // Equal to the visible bar chips — errors un-grouped (3, not 4).
     expect(shareStats.verified).toBe(chips.verified) // 1
     expect(shareStats.warnings).toBe(chips.warnings) // 2
-    expect(shareStats.errors).toBe(chips.errors + 1) // 3 errors + 1 hallucinated
+    expect(shareStats.errors).toBe(chips.errors)     // 3 (hallucinated NOT folded in)
+    expect(shareStats).toEqual({ total: 7, verified: 1, warnings: 2, errors: 3 })
   })
 
-  it('moves in lockstep on both surfaces when the citation style changes', () => {
-    // Under a different active style the two surfaces must still agree — the
-    // point is parity, not the specific style-suppression table. Both consume
-    // the same useStyleStore.format, so a style change applies to both.
+  it('stays equal to the bar when the citation style changes', () => {
+    // Both consume the same useStyleStore.format, so a style change applies to
+    // both surfaces; the share counts must still equal the bar chips.
     styleState = { format: 'apa' }
 
-    const { stats: statsSectionStats } = renderStatsSection()
+    const { chips } = renderStatsSection(true)
     const shareStats = renderShareStats()
 
-    expect(shareStats).toEqual(statsSectionStats)
+    expect(shareStats.verified).toBe(chips.verified)
+    expect(shareStats.warnings).toBe(chips.warnings)
+    expect(shareStats.errors).toBe(chips.errors)
   })
 })

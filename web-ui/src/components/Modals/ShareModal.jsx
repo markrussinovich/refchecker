@@ -97,7 +97,12 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
       total: s.processedRefs || refs.length,
       verified: s.references.verified,
       warnings: s.references.warnings,
-      errors: s.references.errors + s.references.hallucinated,
+      // Mirror the StatsSection results bar EXACTLY: its "errors" chip is
+      // references.errors only — hallucinated refs are a SEPARATE bucket, NOT
+      // folded into errors. Grouping them here made the share card read 9
+      // errors while the bar showed 7 (the user-reported "video doesn't match
+      // the results"). The share video must equal what the bar displays.
+      errors: s.references.errors,
     }
     const aiOn = isBatch || (!!ai && ai.band !== 'unavailable' && ai.band !== 'inconclusive')
     // `canonical` is the full style-aware buildReferenceSummary result handed to
