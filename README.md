@@ -167,6 +167,7 @@ See the [full release list](https://github.com/ArioMoniri/refchecker/releases) f
 
 - [Quick Start](#quick-start)
 - [Features](#features)
+- [Feature Matrix (Web / Desktop / CLI / API)](#feature-matrix-web--desktop--cli--api)
 - [Sample Output](#sample-output)
 - [Install](#install)
 - [Web UI](#web-ui)
@@ -237,6 +238,51 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **Share & export** | **Self-contained HTML report**, **publish-to-web link** (GitHub Gist), an **animated video** walkthrough, and **RIS** export for Zotero / EndNote / Mendeley |
 | **Web UI** | Real-time progress, history sidebar, batch tracking, split extraction/hallucination LLM settings, export (Markdown/text/BibTeX), dark mode |
 | **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
+
+---
+
+## Feature Matrix (Web / Desktop / CLI / API)
+
+RefChecker ships in four access methods that share **one** verification engine
+(`ProgressRefChecker`). The table below shows where each capability is available.
+The **CLI** column lists the exact flag — these match `refchecker-webui check --help`
+([CLI guide](#cli) below). UI-interactive surfaces (in-app viewers, graphs, share
+video, author hovers) are **web/desktop-only** and are documented as such. For
+per-feature guides see [docs/FEATURES.md](docs/FEATURES.md); for multi-user setup
+see [docs/MULTIUSER.md](docs/MULTIUSER.md).
+
+Legend: ✅ available · — not applicable to that surface · 🌐 needs a hosted/multi-user server.
+
+| Capability | Web UI | Desktop (Tauri) | CLI | API | Notes |
+|---|:---:|:---:|:---:|:---:|---|
+| Reference verification (S2 / OpenAlex / CrossRef / DBLP / ACL) | ✅ | ✅ | ✅ | ✅ | Core engine; identical results across surfaces |
+| LLM extraction (Anthropic / OpenAI / Google / Azure / vLLM) | ✅ | ✅ | ✅ `--llm-provider` | ✅ | `--no-llm` for regex/structural only |
+| Hallucination detection (deep web search) | ✅ | ✅ | ✅ `--check-hallucinations` | ✅ | Needs a web-search-capable provider; see [Hallucination Detection](#hallucination-detection) |
+| Inline-citation numbering/ordering check | ✅ | ✅ | ✅ `--check-citation-order` | ✅ | Scheme-aware; **abstains** when unclear |
+| Retraction screening (OpenAlex) | ✅ | ✅ | ✅ `--check-retractions` | ✅ | Flags only references OpenAlex reports retracted |
+| Gap-finder / co-citation suggestions | ✅ | ✅ | ✅ `--suggest-missing` | ✅ | OpenAlex-resolved real works only |
+| Enrichment (counts · abstract · claim/TL;DR · funding · author metrics incl. ORCID · h-index) | ✅ | ✅ | ✅ on by default (`--no-enrich`) | ✅ | Mirrors the web/API default |
+| Add-to-reference-list (dedup + renumbered list + tracked PDF diff) | ✅ | ✅ | — | — | Interactive editing surface |
+| AI-generated-text detection (opt-in, advisory) | ✅ | ✅ | ✅ `--ai-detection {local,api}` + `--ai-detection-consent` | ✅ | Opt-in + consent required; never proof of misconduct |
+| Local databases for offline / faster verification | ✅ | ✅ | ✅ `--database-dir` / `--s2-db` / … | ✅ | Same resolver across surfaces |
+| Structured machine-readable output | ✅ | ✅ | ✅ `--json` | ✅ (JSON responses) | Progress to **stderr**, JSON to **stdout** |
+| Bulk / batch checking | ✅ | ✅ | ✅ (`academic-refchecker --paper-list` / `--openreview`) | ✅ | See [Bulk Checking](#bulk-checking) |
+| Native PDF viewers (find · in-PDF citation links · color coding · pinch-zoom) | ✅ | ✅ | — | — | Interactive UI surface (R02/R28/R42) |
+| Seen-library graphs (radial + Obsidian-style 3D) + per-paper citation graph | ✅ | ✅ | — | — | Interactive UI surface |
+| Similar papers + "Cites & Refs" + common-works view | ✅ | ✅ | — | — | Interactive UI surface |
+| Per-reference chat (full-text grounded, TL;DR fallback) + Summarize | ✅ | ✅ | — | — | Separate model selection per feature |
+| Share / export (HTML · Markdown · PDF · DOCX · RIS · video) | ✅ | ✅ | — | — | Interactive share surface; CLI uses `--report-file`/`--report-format` |
+| Author / journal hover cards (h-index · ORCID · guidelines) | ✅ | ✅ | — | — | Interactive UI surface |
+| Live token / $ telemetry per LLM flow (R47) | ✅ | ✅ | — | ✅ (per-request usage) | UI meter is web/desktop; usage is returned by the API |
+| Accounts · Teams · realtime shared-batch presence (R26/R27) | 🌐 | 🌐 | — | 🌐 | Opt-in multi-user mode; see [Multi-User Server](#multi-user-server-oauth) |
+| Support menu (email + open a GitHub issue) | ✅ | ✅ | — | — | In-app header menu |
+
+> **Single-user vs multi-user.** Web/Desktop/CLI all run **single-user/local by
+> default** — no login, no team, no presence. Accounts, Teams, and shared-batch
+> presence light up only when you enable multi-user mode (set `REFCHECKER_MULTIUSER=true`
+> **and** configure an OAuth provider, or use the in-app **Accounts & Teams** form
+> with hot-reload). The CLI is always single-user and never makes a team/collaboration
+> claim. Full setup: [docs/MULTIUSER.md](docs/MULTIUSER.md).
 
 ---
 
@@ -458,6 +504,54 @@ Output:
 ```
 
 </details>
+
+### `refchecker-webui check` — single-paper checker (web-parity flags)
+
+The `refchecker-webui` command (installed with the `[webui]` extra) has two
+subcommands. With no subcommand it **serves** the Web UI / API (the historical
+behaviour); the `check` subcommand runs the **same** pipeline the web app uses
+(`ProgressRefChecker`) against a single paper from the terminal, exposing the
+web/API feature flags — hallucination check, inline-citation numbering/ordering,
+retraction screening, gap-finder suggestions, enrichment backfill, and opt-in
+AI-text detection. It reuses the real backend implementations (it never forks the
+verification, retraction, gap-finder, inline-citation, or AI-detection logic).
+
+```bash
+# Serve the Web UI / API (default — no subcommand needed)
+refchecker-webui                     # http://localhost:8000
+refchecker-webui serve --port 9000   # explicit subcommand form
+
+# Check a single paper from the terminal (examples match `check --help`)
+refchecker-webui check --paper 2406.01234
+refchecker-webui check --paper ./paper.pdf --json
+refchecker-webui check --paper ./refs.bib --check-retractions --suggest-missing
+refchecker-webui check --paper 2406.01234 --check-hallucinations \
+    --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
+refchecker-webui check --paper ./paper.pdf --ai-detection api \
+    --ai-detection-consent --ai-detection-key $PANGRAM_KEY
+```
+
+**Structured output (`--json`).** A single JSON document is printed to **stdout**;
+all progress logging goes to **stderr**, so stdout stays machine-readable. The
+document always carries `paper_title`, `paper_source`, `source_type`, `summary`,
+and `references`, plus — only when you set the corresponding flag — `citation_order`
+(`--check-citation-order`), `retractions` (`--check-retractions`), `suggestions`
+(`--suggest-missing`), and `ai_detection` (`--ai-detection`).
+
+**Web/desktop-only — not on the CLI.** The native in-app PDF viewers and in-PDF
+citation hyperlinks, the seen-library / similar-papers 3D graphs, the shareable
+per-check "video", and the author hover/pin profile cards are interactive UI
+surfaces, available only in the Web UI and the desktop (Tauri) build. The CLI
+makes no team / collaboration claim — it is always single-user/local.
+
+> **Honesty notes (same as `--help`).** No fabrication — every author / paper /
+> DOI / count comes from a real resolved source, and checks **abstain** rather than
+> emit a wrong badge. Cross-source enrichment backfill is **on by default** (pass
+> `--no-enrich` to opt out). AI-generated-text detection is **opt-in and advisory
+> only** (never proof of misconduct) — it requires `--ai-detection` plus an explicit
+> `--ai-detection-consent` flag.
+
+Run `refchecker-webui check --help` for the full, authoritative flag list.
 
 ---
 
@@ -907,7 +1001,14 @@ The downloader also writes a `latest_snapshot.txt` file next to the SQLite datab
 
 ## Documentation
 
-Detailed project documentation lives under [docs/README.md](docs/README.md), including the Web UI guide and testing guide.
+Detailed project documentation lives under [docs/README.md](docs/README.md):
+
+- [Feature guide & access-method matrix](docs/FEATURES.md) — per-feature guides
+  across web / desktop / CLI / API, with CLI usage examples that match
+  `refchecker-webui check --help`.
+- [Multi-user & Teams setup](docs/MULTIUSER.md) — enable accounts, Teams, and
+  presence from the in-app form (hot-reload) or via environment variables.
+- [Web UI guide](docs/web-ui.md) and [Testing guide](docs/testing.md).
 
 ---
 
