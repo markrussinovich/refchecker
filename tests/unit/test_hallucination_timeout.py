@@ -48,7 +48,9 @@ class _RecordingOpenAIClient:
 
 def test_openai_client_gets_explicit_request_timeout(monkeypatch):
     """_init_openai must build the client with an explicit timeout."""
-    import openai
+    # openai is an optional, lazily-imported LLM-provider dep (see
+    # requirements-dev.txt) — absent on CI, so skip rather than fail there.
+    openai = pytest.importorskip("openai")
     from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
 
     monkeypatch.setattr(openai, "OpenAI", _RecordingOpenAIClient)
@@ -70,7 +72,7 @@ def test_openai_client_gets_explicit_request_timeout(monkeypatch):
 
 def test_openai_responses_call_uses_bounded_per_call_timeout(monkeypatch):
     """The web-search Responses call must thread a bounded per-call timeout."""
-    import openai
+    openai = pytest.importorskip("openai")  # optional provider dep — skip on CI
     from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
 
     monkeypatch.setattr(openai, "OpenAI", _RecordingOpenAIClient)

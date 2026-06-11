@@ -44,6 +44,7 @@ def test_docx_to_text_extracts_paragraphs(tmp_path):
 
 
 def test_docx_to_pdf_produces_real_pdf_with_text(tmp_path):
+    pytest.importorskip("reportlab")  # optional render dep — skip on CI
     src = tmp_path / "sample.docx"
     _make_docx(src, ["The quick brown fox jumps over the lazy dog."])
     out = tmp_path / "out.pdf"
@@ -76,6 +77,7 @@ def test_html_to_text_strips_markup_and_scripts():
 
 
 def test_html_to_pdf_produces_real_pdf_with_text(tmp_path):
+    pytest.importorskip("reportlab")  # optional render dep — skip on CI
     src = tmp_path / "page.html"
     src.write_text(
         "<html><body><h1>Report</h1><p>Hyperlinked citation context here.</p></body></html>",
@@ -92,6 +94,7 @@ def test_html_to_pdf_produces_real_pdf_with_text(tmp_path):
 
 
 def test_convert_to_pdf_dispatches_by_extension(tmp_path):
+    pytest.importorskip("reportlab")  # optional render dep — skip on CI
     # .docx path
     dx = tmp_path / "a.docx"
     _make_docx(dx, ["Docx dispatch content."])
@@ -122,6 +125,7 @@ def test_convert_to_pdf_rejects_unsupported_binary(tmp_path):
 
 
 def test_docx_to_pdf_raises_on_empty_document(tmp_path):
+    pytest.importorskip("reportlab")  # optional render dep — skip on CI
     src = tmp_path / "empty.docx"
     _make_docx(src, [""])
     with pytest.raises(ValueError):
