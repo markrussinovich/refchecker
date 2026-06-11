@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview, getCorrectedReferenceList } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
@@ -39,6 +39,17 @@ const normalizeDoi = (raw) => {
   return m[0].replace(/[.,;)]+$/, '')
 }
 
+// R49 (C3) — persist the gap-finder results collapse per check so re-opening
+// the article (or reloading the app) restores the user's last choice. Keyed by
+// checkId so collapsing one article's results never leaks into another's.
+const collapseKey = (checkId) => `refchecker:gapfinder:collapsed:${checkId}`
+const readCollapsed = (checkId) => {
+  try { return window.localStorage.getItem(collapseKey(checkId)) === '1' } catch { return false }
+}
+const writeCollapsed = (checkId, value) => {
+  try { window.localStorage.setItem(collapseKey(checkId), value ? '1' : '0') } catch { /* best-effort */ }
+}
+
 export default function GapFinder({ checkId, references }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
   // All hooks declared BEFORE the early return so the hook count is stable when
@@ -48,8 +59,13 @@ export default function GapFinder({ checkId, references }) {
   const [info, setInfo] = useState({})         // key -> { insertedIndex } | { existingIndex }
   const [preview, setPreview] = useState({})   // key -> { open, loading, data, error }
   const [diffOpen, setDiffOpen] = useState({}) // key -> bool: per-preview "show renumbering" detail toggle
-  const [collapsed, setCollapsed] = useState(false) // collapse the results panel
+  // R49 — collapse state seeds from the persisted per-check value so the panel
+  // reopens collapsed/expanded exactly as the user last left it.
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(checkId))
   const [dl, setDl] = useState(false)              // R18 — "Download new reference list" busy flag
+  // R49 — persist every collapse toggle (declared before the early return so
+  // the hook count stays stable when `hasDoi` flips — rules-of-hooks).
+  useEffect(() => { writeCollapsed(checkId, collapsed) }, [checkId, collapsed])
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
 

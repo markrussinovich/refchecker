@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchReferenceLibraryGraph } from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
@@ -104,10 +104,19 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
         </g>
       )}
       {/* Article info panel — shows on hover, and stays on the pinned node.
-          Top-left so it never collides with the legend / pinned hint. */}
+          Top-left so it never collides with the legend / pinned hint.
+          R32 (R1): the panel as a whole stays click-through (pointerEvents
+          none) so it never steals hover from the nodes beneath it, but the
+          identifier line re-enables pointer events and renders the DOI / arXiv
+          id as a real <a> link (routed through openExternal inside Tauri, where
+          target="_blank" no-ops). Real-data gated — only when the node actually
+          carries a DOI / arXiv id. */}
       {infoId && pos[infoId] && (() => {
         const nd = pos[infoId].node
-        const ident = nd.doi ? `DOI: ${nd.doi}` : (nd.arxiv_id ? `arXiv: ${nd.arxiv_id}` : '')
+        const identHref = nd.doi
+          ? `https://doi.org/${String(nd.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')}`
+          : (nd.arxiv_id ? `https://arxiv.org/abs/${nd.arxiv_id}` : null)
+        const identLabel = nd.doi ? `DOI: ${nd.doi}` : (nd.arxiv_id ? `arXiv: ${nd.arxiv_id}` : '')
         return (
           <foreignObject x={10} y={10} width={Math.min(330, w - 20)} height={108} pointerEvents="none">
             <div xmlns="http://www.w3.org/1999/xhtml" style={{
@@ -119,9 +128,21 @@ function RadialChordGraph({ data, width, height, onNodeClick }) {
               <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
                 {(nd.venue || '—')}{nd.year ? ` · ${nd.year}` : ''} · seen {nd.times_seen}× · {nd.status}
               </div>
-              {ident && (
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ident}</div>
+              {identHref && (
+                <div style={{ fontSize: 11, marginTop: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <a
+                    href={identHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open ${identHref}`}
+                    style={{ color: 'var(--color-accent)', textDecoration: 'underline',
+                      pointerEvents: 'auto', cursor: 'pointer' }}
+                    onClick={(e) => { e.stopPropagation(); if (isTauri()) { e.preventDefault(); openExternal(identHref) } }}
+                  >
+                    {identLabel}
+                  </a>
+                </div>
               )}
             </div>
           </foreignObject>
@@ -230,6 +251,37 @@ export default function GraphLibraryView({ onClose }) {
     }
   }
   const clearFocus = () => { setHl({ id: null, nodes: new Set(), links: new Set() }); setSelected(null) }
+
+  // R38 (I2) — bring the library 3D graph up to the Explore-graph polish:
+  // tune the d3-force engine once the graph mounts AND whenever the data
+  // changes (charge repulsion + link distance so the library doesn't pile up
+  // into a tight ball), then re-energise the layout so the new forces take
+  // effect without a manual recreate. Mirrors ExploreGraphView.
+  useEffect(() => {
+    if (viewMode !== '3d') return
+    const fg = fgRef.current
+    if (!fg || graphData.nodes.length <= 1) return
+    fg.d3Force('charge')?.strength(-220).distanceMax(800)
+    fg.d3Force('link')?.distance(70).strength(0.18)
+    fg.d3ReheatSimulation?.()
+  }, [graphData, viewMode])
+
+  // Auto-frame the whole graph once it settles so the user never lands on an
+  // empty / off-screen scene (Explore parity).
+  const handleEngineStop = useCallback(() => {
+    fgRef.current?.zoomToFit?.(500, 80)
+  }, [])
+
+  // Pin on drag end (Obsidian behaviour): while dragging react-force-graph
+  // already fixes the node; on release we PERSIST that position by writing
+  // fx/fy/fz so the node stays exactly where the user parked it instead of
+  // springing back.
+  const handleNodeDragEnd = useCallback((node) => {
+    if (!node) return
+    node.fx = node.x
+    node.fy = node.y
+    node.fz = node.z
+  }, [])
 
   // Obsidian-style bloom/glow on the 3D scene (lazy — three stays out of the
   // initial bundle). Retries until the post-processing composer is ready, and
@@ -359,11 +411,13 @@ export default function GraphLibraryView({ onClose }) {
               linkDirectionalParticleWidth={2}
               linkDirectionalParticleSpeed={0.006}
               linkDirectionalParticleColor={() => 'rgba(147,197,253,0.95)'}
-              enableNodeDrag={false}
+              enableNodeDrag
+              onNodeDragEnd={handleNodeDragEnd}
               onNodeClick={focusNode}
               onBackgroundClick={clearFocus}
               warmupTicks={40}
               cooldownTicks={120}
+              onEngineStop={handleEngineStop}
             />
           </Suspense>
         )}

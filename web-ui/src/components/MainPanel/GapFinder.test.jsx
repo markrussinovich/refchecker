@@ -157,6 +157,54 @@ describe('GapFinder — R17 dedup/validity guard', () => {
   })
 })
 
+describe('GapFinder — R49 persistent collapse toggle', () => {
+  // setup.js stubs window.localStorage with bare vi.fn()s; back them with a
+  // real Map for this suite so we can assert the persisted value round-trips.
+  let store
+  beforeEach(() => {
+    store = new Map()
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation((k) => (store.has(k) ? store.get(k) : null))
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation((k, v) => { store.set(k, String(v)) })
+  })
+
+  it('persists the collapse choice to localStorage and restores it on remount', async () => {
+    getCheckGaps.mockResolvedValue({
+      data: { suggestions: [{ openalex_id: 'W1', title: 'A co-cited work', co_citations: 4 }] },
+    })
+    const { unmount } = render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText(/work your references cite/i)
+
+    // Starts expanded; collapsing via the chevron persists '1' under the
+    // per-check key so the choice survives a remount (article re-open / reload).
+    expect(document.querySelector('.rc-collapse').className).not.toContain('rc-collapsed')
+    fireEvent.click(document.querySelector('.rc-iconbtn-chevron'))
+    await waitFor(() => expect(document.querySelector('.rc-collapse').className).toContain('rc-collapsed'))
+    expect(window.localStorage.setItem).toHaveBeenCalledWith(
+      `refchecker:gapfinder:collapsed:${CHECK_ID}`, '1',
+    )
+
+    // Remount: the persisted '1' seeds the panel collapsed without re-clicking.
+    unmount()
+    render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText(/work your references cite/i)
+    expect(document.querySelector('.rc-collapse').className).toContain('rc-collapsed')
+  })
+
+  it('scopes the persisted collapse per checkId (one article does not leak into another)', async () => {
+    getCheckGaps.mockResolvedValue({
+      data: { suggestions: [{ openalex_id: 'W1', title: 'A co-cited work', co_citations: 4 }] },
+    })
+    // Pre-seed check 9 as collapsed; a DIFFERENT check must still open expanded.
+    store.set(`refchecker:gapfinder:collapsed:${CHECK_ID}`, '1')
+    render(<GapFinder checkId={CHECK_ID + 1} references={refsWithDoi} />)
+    fireEvent.click(screen.getByRole('button'))
+    await screen.findByText(/work your references cite/i)
+    expect(document.querySelector('.rc-collapse').className).not.toContain('rc-collapsed')
+  })
+})
+
 describe('GapFinder — R18 commit renumber + download new list', () => {
   it('passes insert_at_index derived from new_printed_number when the preview has numeric shifts', async () => {
     getCheckGaps.mockResolvedValue({
