@@ -5,6 +5,9 @@ import * as api from '../utils/api'
 const EXTRACTION_SELECTION_KEY = 'refchecker_selected_extraction_llm'
 const HALLUCINATION_SELECTION_KEY = 'refchecker_selected_hallucination_llm'
 const CHAT_SELECTION_KEY = 'refchecker_selected_chat_llm'
+// R34 — Chat-with-PDF and Summarize each get their own model selection.
+// Summarize falls back to the chat → extraction/default chain when unset.
+const SUMMARY_SELECTION_KEY = 'refchecker_selected_summary_llm'
 const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
 
 function getStoredSelection(key) {
@@ -37,6 +40,7 @@ export const useConfigStore = create((set, get) => ({
   selectedExtractionConfigId: getStoredSelection(EXTRACTION_SELECTION_KEY),
   selectedHallucinationConfigId: getStoredSelection(HALLUCINATION_SELECTION_KEY),
   selectedChatConfigId: getStoredSelection(CHAT_SELECTION_KEY),
+  selectedSummaryConfigId: getStoredSelection(SUMMARY_SELECTION_KEY),
   isLoading: false,
   error: null,
 
@@ -62,6 +66,7 @@ export const useConfigStore = create((set, get) => ({
         const storedExtractionId = get().selectedExtractionConfigId
         const storedHallucinationId = get().selectedHallucinationConfigId
         const storedChatId = get().selectedChatConfigId
+        const storedSummaryId = get().selectedSummaryConfigId
         const extractionConfigId = configs.some(c => c.id === storedExtractionId)
           ? storedExtractionId
           : defaultConfigId
@@ -69,15 +74,22 @@ export const useConfigStore = create((set, get) => ({
         const hallucinationConfigId = configs.some(c => c.id === storedHallucinationId && hallucinationCapableProviders.includes(c.provider))
           ? storedHallucinationId
           : hallucinationConfig?.id || null
-        // Chat & Summarize works with any configured provider; default to the
+        // Chat (with PDF) works with any configured provider; default to the
         // extraction/default config when nothing is stored.
         const chatConfigId = configs.some(c => c.id === storedChatId)
           ? storedChatId
           : defaultConfigId
+        // Summarize works with any configured provider too. It keeps its own
+        // selection (R34); fall back to the chat selection — then the
+        // extraction/default config — when nothing summary-specific is stored.
+        const summaryConfigId = configs.some(c => c.id === storedSummaryId)
+          ? storedSummaryId
+          : chatConfigId
 
         setStoredSelection(EXTRACTION_SELECTION_KEY, extractionConfigId)
         setStoredSelection(HALLUCINATION_SELECTION_KEY, hallucinationConfigId)
         setStoredSelection(CHAT_SELECTION_KEY, chatConfigId)
+        setStoredSelection(SUMMARY_SELECTION_KEY, summaryConfigId)
 
         set({
           configs,
@@ -85,6 +97,7 @@ export const useConfigStore = create((set, get) => ({
           selectedExtractionConfigId: extractionConfigId,
           selectedHallucinationConfigId: hallucinationConfigId,
           selectedChatConfigId: chatConfigId,
+          selectedSummaryConfigId: summaryConfigId,
           isLoading: false,
           error: null
         })
@@ -197,15 +210,20 @@ export const useConfigStore = create((set, get) => ({
         const newChatId = state.selectedChatConfigId === id
           ? (newConfigs[0]?.id || null)
           : state.selectedChatConfigId
+        const newSummaryId = state.selectedSummaryConfigId === id
+          ? (newConfigs[0]?.id || null)
+          : state.selectedSummaryConfigId
         setStoredSelection(EXTRACTION_SELECTION_KEY, newExtractionId)
         setStoredSelection(HALLUCINATION_SELECTION_KEY, newHallucinationId)
         setStoredSelection(CHAT_SELECTION_KEY, newChatId)
+        setStoredSelection(SUMMARY_SELECTION_KEY, newSummaryId)
         return {
           configs: newConfigs,
           selectedConfigId: newSelectedId,
           selectedExtractionConfigId: newExtractionId,
           selectedHallucinationConfigId: newHallucinationId,
           selectedChatConfigId: newChatId,
+          selectedSummaryConfigId: newSummaryId,
           isLoading: false
         }
       })
@@ -252,6 +270,12 @@ export const useConfigStore = create((set, get) => ({
     set({ selectedChatConfigId: id })
   },
 
+  selectSummaryConfig: (id) => {
+    logger.info('ConfigStore', `Selecting summary config ${id}`)
+    setStoredSelection(SUMMARY_SELECTION_KEY, id)
+    set({ selectedSummaryConfigId: id })
+  },
+
   getSelectedConfig: () => {
     const { configs, selectedConfigId } = get()
     return configs.find(c => c.id === selectedConfigId) || null
@@ -269,10 +293,19 @@ export const useConfigStore = create((set, get) => ({
     return configs.find(c => hallucinationCapableProviders.includes(c.provider)) || null
   },
 
-  // Chat & Summarize accepts any configured provider; fall back to the
+  // Chat-with-PDF accepts any configured provider; fall back to the
   // extraction/default config when no chat-specific selection exists.
   getSelectedChatConfig: () => {
     const { configs, selectedChatConfigId, selectedExtractionConfigId, selectedConfigId } = get()
     return configs.find(c => c.id === (selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)) || null
+  },
+
+  // Summarize accepts any configured provider too (R34). It has its own
+  // selection but falls back to the chat selection, then the
+  // extraction/default config, so existing single-selection users are
+  // unaffected until they explicitly pick a Summarize model.
+  getSelectedSummaryConfig: () => {
+    const { configs, selectedSummaryConfigId, selectedChatConfigId, selectedExtractionConfigId, selectedConfigId } = get()
+    return configs.find(c => c.id === (selectedSummaryConfigId || selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)) || null
   },
 }))

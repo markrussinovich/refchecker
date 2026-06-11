@@ -199,9 +199,13 @@ function ReferenceGroundingBanner({ grounding, fetching, hasFullText }) {
  * @param {string} [props.label]  Optional custom trigger-button label.
  */
 export default function ArticleAssistant({ checkId, reference = null, label = null }) {
+  // R34 — Chat-with-PDF and Summarize route to independently-selectable models.
+  // sendChat uses the chat config; runSummary uses the summary config (which
+  // falls back to the chat → extraction/default chain when unset).
   const getSelectedChatConfig = useConfigStore(s => s.getSelectedChatConfig)
-  // Reactively track whether any chat-capable LLM is configured. The resolved
-  // chat config falls back to the extraction/default config, so this is null
+  const getSelectedSummaryConfig = useConfigStore(s => s.getSelectedSummaryConfig)
+  // Reactively track whether any chat/summarize-capable LLM is configured. The
+  // resolved configs fall back to the extraction/default config, so this is null
   // only when no LLM is configured at all (subscribe to configs so the
   // empty-state clears the moment a model is added in Settings).
   const hasChatModel = useConfigStore(s => (s.configs?.length || 0) > 0)
@@ -263,8 +267,15 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   // the button entirely rather than offer a chat that would have to fabricate.
   if (isRefMode && !refContext) return null
 
-  const configPayload = () => {
+  // Per-feature model routing (R34): Chat-with-PDF and Summarize each resolve
+  // their own selected config. The backend accepts a per-call llm_config_id, so
+  // each feature can run on a different model.
+  const chatConfigPayload = () => {
     const c = getSelectedChatConfig?.()
+    return c ? { llm_config_id: c.id } : {}
+  }
+  const summaryConfigPayload = () => {
+    const c = getSelectedSummaryConfig?.()
     return c ? { llm_config_id: c.id } : {}
   }
 
@@ -316,12 +327,12 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
             'addresses, its approach, and its key findings. Use ONLY the text above; ' +
             'omit anything not stated rather than guessing.',
         }]
-        const res = await postArticleChat(checkId, msgs, configPayload())
+        const res = await postArticleChat(checkId, msgs, summaryConfigPayload())
         const d = res.data || {}
         setSum({ loading: false, data: { summary: d.answer || '', source: refGroundingSource }, error: null })
         return
       }
-      const res = await getArticleSummary(checkId, configPayload())
+      const res = await getArticleSummary(checkId, summaryConfigPayload())
       setSum({ loading: false, data: res.data, error: null })
     } catch (e) {
       setSum({ loading: false, data: null, error: e?.response?.data?.detail || e?.message || 'Summarize failed' })
@@ -344,7 +355,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
       // turn (not shown in the visible thread) so the grounded assistant has
       // the reference text to answer from.
       const wireMessages = isRefMode ? [...groundingPreamble(), ...nextMessages] : nextMessages
-      const res = await postArticleChat(checkId, wireMessages, configPayload())
+      const res = await postArticleChat(checkId, wireMessages, chatConfigPayload())
       const d = res.data || {}
       setChatSource(d.source || null)
       if (d.source === 'none') {

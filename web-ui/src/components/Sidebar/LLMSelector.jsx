@@ -9,7 +9,7 @@ import { logger } from '../../utils/logger'
 /**
  * LLM configuration selector with dropdown
  * @param {Object} props
- * @param {string} props.mode - extraction or hallucination
+ * @param {string} props.mode - extraction | hallucination | chat | summarize
  */
 export default function LLMSelector({ mode = 'extraction' }) {
   const {
@@ -18,10 +18,12 @@ export default function LLMSelector({ mode = 'extraction' }) {
     selectedExtractionConfigId,
     selectedHallucinationConfigId,
     selectedChatConfigId,
+    selectedSummaryConfigId,
     selectConfig,
     selectExtractionConfig,
     selectHallucinationConfig,
     selectChatConfig,
+    selectSummaryConfig,
     deleteConfig,
     isLoading,
   } = useConfigStore()
@@ -30,6 +32,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
   const isHallucinationMode = mode === 'hallucination'
   const isChatMode = mode === 'chat'
+  const isSummaryMode = mode === 'summarize'
   const visibleConfigs = isHallucinationMode
     ? configs.filter(config => hallucinationCapableProviders.includes(config.provider))
     : configs
@@ -37,7 +40,11 @@ export default function LLMSelector({ mode = 'extraction' }) {
     ? selectedHallucinationConfigId
     : isChatMode
       ? (selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)
-      : (selectedExtractionConfigId || selectedConfigId)
+      // Summarize falls back through the chat selection, then extraction/default,
+      // mirroring getSelectedSummaryConfig (R34).
+      : isSummaryMode
+        ? (selectedSummaryConfigId || selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)
+        : (selectedExtractionConfigId || selectedConfigId)
 
   // A config is "valid" (selectable) if it has a key:
   //   single-user: has_key flag from DB
@@ -131,6 +138,8 @@ export default function LLMSelector({ mode = 'extraction' }) {
       selectHallucinationConfig(config.id)
     } else if (isChatMode) {
       selectChatConfig(config.id)
+    } else if (isSummaryMode) {
+      selectSummaryConfig(config.id)
     } else if (selectExtractionConfig) {
       selectExtractionConfig(config.id)
     } else {

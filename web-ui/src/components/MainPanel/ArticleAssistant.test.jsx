@@ -8,9 +8,15 @@ const postArticleChat = vi.hoisted(() => vi.fn())
 const postReferenceFulltext = vi.hoisted(() => vi.fn())
 vi.mock('../../utils/api', () => ({ getArticleSummary, postArticleChat, postReferenceFulltext }))
 
-// Config store: `configs` drives whether a Chat & Summarize model is
-// considered configured; `getSelectedChatConfig` resolves the chosen config.
-const configState = vi.hoisted(() => ({ configs: [], getSelectedChatConfig: vi.fn(() => null) }))
+// Config store: `configs` drives whether a Chat/Summarize model is considered
+// configured; `getSelectedChatConfig`/`getSelectedSummaryConfig` resolve the
+// per-feature chosen config (R34 — Chat-with-PDF and Summarize route
+// independently).
+const configState = vi.hoisted(() => ({
+  configs: [],
+  getSelectedChatConfig: vi.fn(() => null),
+  getSelectedSummaryConfig: vi.fn(() => null),
+}))
 vi.mock('../../stores/useConfigStore', () => ({
   useConfigStore: (selector) => selector(configState),
 }))
@@ -35,6 +41,7 @@ beforeEach(() => {
   openSettings.mockReset()
   configState.configs = []
   configState.getSelectedChatConfig = vi.fn(() => null)
+  configState.getSelectedSummaryConfig = vi.fn(() => null)
 })
 
 function open() {
@@ -103,6 +110,47 @@ describe('ArticleAssistant — model configured', () => {
 
     await waitFor(() => expect(getArticleSummary).toHaveBeenCalled())
     await screen.findByText(/No document text is available for this article/i)
+  })
+})
+
+// R34 — Chat-with-PDF and Summarize route to independently-selected models.
+// Summarize must use getSelectedSummaryConfig; Chat must use
+// getSelectedChatConfig; the per-call llm_config_id sent to the backend must
+// reflect each feature's own selection.
+describe('ArticleAssistant — per-feature model routing (R34)', () => {
+  beforeEach(() => {
+    configState.configs = [
+      { id: 1, provider: 'openai', model: 'gpt-4o' },
+      { id: 2, provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    ]
+    // Distinct configs per feature so we can prove they don't cross-wire.
+    configState.getSelectedChatConfig = vi.fn(() => ({ id: 1 }))
+    configState.getSelectedSummaryConfig = vi.fn(() => ({ id: 2 }))
+  })
+
+  it('Summarize sends the Summarize config id (not the Chat config id)', async () => {
+    getArticleSummary.mockResolvedValue({ data: { source: 'pdf', summary: 'A summary.' } })
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /Summarize this article/i }))
+
+    await waitFor(() => expect(getArticleSummary).toHaveBeenCalled())
+    // Routed through the Summarize selection (id 2), proving the split.
+    expect(getArticleSummary).toHaveBeenCalledWith(CHECK_ID, { llm_config_id: 2 })
+    expect(configState.getSelectedSummaryConfig).toHaveBeenCalled()
+  })
+
+  it('Chat sends the Chat config id (not the Summarize config id)', async () => {
+    postArticleChat.mockResolvedValue({ data: { source: 'pdf', answer: 'An answer.' } })
+    open()
+    fireEvent.click(screen.getByRole('tab', { name: /^Chat$/i }))
+    fireEvent.change(screen.getByPlaceholderText(/Ask about the article/i), { target: { value: 'Hi?' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Send$/i }))
+
+    await waitFor(() => expect(postArticleChat).toHaveBeenCalled())
+    // Chat routes through the Chat selection (id 1), independent of Summarize.
+    const [, , cfg] = postArticleChat.mock.calls[0]
+    expect(cfg).toEqual({ llm_config_id: 1 })
+    expect(configState.getSelectedChatConfig).toHaveBeenCalled()
   })
 })
 

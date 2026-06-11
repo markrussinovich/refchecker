@@ -1657,13 +1657,25 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
-          Chat &amp; Summarize LLM
+          Chat-with-PDF LLM
         </div>
         <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-          Used to summarize and answer questions about an article, grounded only in its own text. Works with any configured provider.
+          Used to answer questions about an article, grounded only in its own text. Works with any configured provider.
         </div>
         <div className="mt-3 max-w-sm">
           <LLMSelector mode="chat" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Summarize LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used to summarize an article, grounded only in its own text. Choose a different model from Chat if you prefer. Defaults to the Chat-with-PDF model until you pick one.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="summarize" />
         </div>
       </div>
 
