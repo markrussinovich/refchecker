@@ -120,7 +120,10 @@ export default function AdditionalInfoBar({ reference, checkId }) {
   if (e.tldr) badges.push(<Pill key="cl" onClick={() => toggle('tldr')} title="One-line claim (Semantic Scholar TL;DR)" color="var(--color-warning)">Claim</Pill>)
   if (e.is_preprint) badges.push(<Pill key="pp" title="Preprint / posted content (not yet a journal article)" color="var(--color-warning)">Preprint</Pill>)
   if (topics.length > 0) badges.push(<Pill key="fos" title={`Fields of study (OpenAlex concepts): ${topics.join(', ')}`}>Topics: {topics.slice(0, 3).join(', ')}{topics.length > 3 ? ` +${topics.length - 3}` : ''}</Pill>)
-  if (funders.length > 0) badges.push(<Pill key="fund" title={`Funding (OpenAlex grants): ${funders.join(', ')}`}>Funding: {funders.slice(0, 2).join(', ')}{funders.length > 2 ? ` +${funders.length - 2}` : ''}</Pill>)
+  // Funding is an ACTIONABLE button (like Abstract / Claim): click to open a
+  // panel listing the real funder/grant data. Real-data-gated — only shown when
+  // OpenAlex actually returned funders; never fabricated.
+  if (funders.length > 0) badges.push(<Pill key="fund" onClick={() => toggle('funding')} title="Show the funding / grant data for this reference" color="var(--color-accent)">Funding</Pill>)
 
   const actions = []
   if (oaUrl) actions.push(<Pill key="vp" href={oaUrl} title="Open the open-access full text / PDF" color="var(--color-accent)">View full text ↗</Pill>)
@@ -207,6 +210,15 @@ export default function AdditionalInfoBar({ reference, checkId }) {
         <div className="mt-1.5 text-xs rounded-md p-2.5" style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', lineHeight: 1.55 }}>
           <span style={{ fontWeight: 700 }}>Claim (TL;DR): </span>{e.tldr}
           <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>Machine-generated summary (Semantic Scholar) — verify against the article.</div>
+        </div>
+      )}
+      {panel === 'funding' && funders.length > 0 && (
+        <div className="mt-1.5 text-xs rounded-md p-2.5" style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)', lineHeight: 1.55 }}>
+          <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Funding</span>
+          <ul className="mt-1 pl-4" style={{ listStyleType: 'disc' }}>
+            {funders.map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+          <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>Funders / grants (OpenAlex) — verify against the article.</div>
         </div>
       )}
     </div>

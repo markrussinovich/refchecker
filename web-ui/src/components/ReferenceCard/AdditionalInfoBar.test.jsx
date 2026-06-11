@@ -134,4 +134,20 @@ describe('AdditionalInfoBar real-data gating', () => {
     // State settles to the honest "Removed" pill (no stale "✓ In Library").
     await screen.findByText('Removed')
   })
+
+  it('Funding: shows a clickable Funding button only when funders exist, and toggles a panel listing them', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { funders: ['National Institutes of Health', 'Wellcome Trust'] } }} />)
+    const fundBtn = screen.getByRole('button', { name: 'Funding' })
+    expect(fundBtn).toBeInTheDocument()
+    // Panel is closed until clicked (like Abstract / Claim).
+    expect(screen.queryByText('National Institutes of Health')).toBeNull()
+    fireEvent.click(fundBtn)
+    expect(screen.getByText('National Institutes of Health')).toBeInTheDocument()
+    expect(screen.getByText('Wellcome Trust')).toBeInTheDocument()
+  })
+
+  it('omits the Funding button when there are no funders (real-data-gated)', () => {
+    render(<AdditionalInfoBar reference={{ enrichment: { abstract: 'x' } }} />)
+    expect(screen.queryByRole('button', { name: 'Funding' })).toBeNull()
+  })
 })
