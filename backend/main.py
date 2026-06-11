@@ -970,6 +970,9 @@ class BatchUrlsRequest(BaseModel):
     ai_detection_api_key: Optional[str] = None
     ai_detection_consent: bool = False
     ai_detection_service: str = "pangram"
+    # R61: the FE's chosen multi-detector run-set. >1 key routes through
+    # multi_run.run_detectors (compare); empty/1 keeps the single-detector path.
+    ai_detection_detectors: Optional[List[str]] = None
     detection_mode: str = "both"
 
 
@@ -1005,6 +1008,9 @@ class TeamMemberAdd(BaseModel):
     ai_detection_api_key: Optional[str] = None
     ai_detection_consent: bool = False
     ai_detection_service: str = "pangram"
+    # R61: the FE's chosen multi-detector run-set. >1 key routes through
+    # multi_run.run_detectors (compare); empty/1 keeps the single-detector path.
+    ai_detection_detectors: Optional[List[str]] = None
     detection_mode: str = "both"
 
 
@@ -1919,6 +1925,9 @@ async def start_check(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    # R61: repeated form field — one value per chosen detector key. FastAPI
+    # collects the repeats into a list; >1 routes through the compare path.
+    ai_detection_detectors: Optional[List[str]] = Form(None),
     detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
@@ -2156,6 +2165,7 @@ async def start_check(
                 ai_detection_api_key=ai_detection_api_key,
                 ai_detection_consent=ai_detection_consent,
                 ai_detection_service=ai_detection_service,
+                ai_detection_detectors=ai_detection_detectors,
                 paperclip_api_key=paperclip_api_key,
                 detection_mode=detection_mode,
             )
@@ -2203,6 +2213,7 @@ async def run_check(
     ai_detection_api_key: Optional[str] = None,
     ai_detection_consent: bool = False,
     ai_detection_service: str = "pangram",
+    ai_detection_detectors: Optional[List[str]] = None,
     paperclip_api_key: Optional[str] = None,
     detection_mode: str = "both",
 ):
@@ -2331,6 +2342,7 @@ async def run_check(
             ai_detection_api_key=ai_detection_api_key,
             ai_detection_consent=ai_detection_consent,
             ai_detection_service=ai_detection_service,
+            ai_detection_detectors=ai_detection_detectors,
             paperclip_api_key=paperclip_api_key,
             detection_mode=detection_mode,
         )
@@ -4570,6 +4582,7 @@ async def start_batch_check(
                     ai_detection_api_key=request.ai_detection_api_key,
                     ai_detection_consent=request.ai_detection_consent,
                     ai_detection_service=request.ai_detection_service,
+                    ai_detection_detectors=getattr(request, 'ai_detection_detectors', None),
                     detection_mode=getattr(request, 'detection_mode', 'both'),
                     paperclip_api_key=request.paperclip_api_key,
                 )
@@ -4624,6 +4637,9 @@ async def start_batch_check_files(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    # R61: repeated form field — one value per chosen detector key. FastAPI
+    # collects the repeats into a list; >1 routes through the compare path.
+    ai_detection_detectors: Optional[List[str]] = Form(None),
     detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
@@ -4842,6 +4858,7 @@ async def start_batch_check_files(
                     ai_detection_api_key=ai_detection_api_key,
                     ai_detection_consent=ai_detection_consent,
                     ai_detection_service=ai_detection_service,
+                    ai_detection_detectors=ai_detection_detectors,
                     paperclip_api_key=paperclip_api_key,
                     detection_mode=detection_mode,
                 )
