@@ -43,6 +43,7 @@ Legend: ✅ available · — not applicable to that surface · 🌐 needs a host
 | Seen-library graphs (radial + Obsidian-style 3D) | ✅ | ✅ | — | — | Interactive UI surface |
 | Native PDF viewers (find · in-PDF citation links · color coding · pinch-zoom) | ✅ | ✅ | — | — | Interactive UI surface |
 | AI-generated-text detection (opt-in, advisory) | ✅ | ✅ | ✅ `--ai-detection {local,api}` + `--ai-detection-consent` | ✅ | Consent required; never proof of misconduct |
+| Multi-detector compare (RAID-informed roster, checkbox export) | ✅ | ✅ | ✅ `--detectors key1,key2` · `--list-detectors` | ✅ | Per-detector scores shown honestly; no synthetic ensemble; uninstalled ⇒ abstains |
 | Per-reference chat (full-text grounded, TL;DR fallback) + Summarize | ✅ | ✅ | — | — | Separate model selection per feature |
 | Share / export (HTML · Markdown · PDF · DOCX · RIS · video) | ✅ | ✅ | — (CLI uses report files) | — | Interactive share surface; CLI emits report files |
 | Live token / $ telemetry per LLM flow | ✅ | ✅ | — | ✅ (per-request usage) | UI meter is web/desktop; usage returned by API |
@@ -198,6 +199,45 @@ refchecker-webui check --paper ./paper.pdf --ai-detection api \
 
 `--ai-detection` **requires** `--ai-detection-consent`; without it the CLI exits
 with an error. The CLI never runs detection unless you opt in.
+
+#### Multi-detector compare (RAID-leaderboard-informed roster)
+
+You can install **one or more** open-source detectors and run them
+**side-by-side** — each detector's verdict is shown on its own. There is **no
+synthetic "ensemble truth"**: disagreement between detectors is signal, not noise
+to hide. Detectors are **installed on demand** (never bundled), and an
+**uninstalled detector abstains — it never reports a number**. Heavy Tier-2
+metric/zero-shot detectors are listed for honesty but are **opt-in and not
+runnable in this build** (real size / RAM warnings shown).
+
+| Key | Model | Arch | Tier | Size | License | Note |
+|---|---|---|:---:|---|---|---|
+| `desklib` *(default)* | `desklib/ai-text-detector-v1.01` | DeBERTa-v3-large | 1 | ~870 MB | MIT | RAID leaderboard leader among open models |
+| `superannotate` | `SuperAnnotate/ai-detector` | RoBERTa-Large | 1 | ~1.4 GB | research/eval | #1 open-source on RAID (late 2024) |
+| `e5-small-lora` | `MayZhou/e5-small-lora-ai-generated-detector` | e5-small + LoRA | 1 | ~130 MB | MIT | tiny/fast/CPU-friendly (~89% acc) |
+| `mage` | `yaful/MAGE` | Longformer | 1 | ~570 MB | Apache-2.0 | "Detection in the wild" (ACL 2024) |
+| `binoculars` | paired causal LMs | metric zero-shot | 2 (heavy) | ~14 GB | see models | best at low FPR; **opt-in, not runnable here** |
+| `fast-detectgpt` | GPT-Neo-2.7B scorer | metric zero-shot | 2 (heavy) | ~11 GB | see models | 340× faster DetectGPT; **opt-in, not runnable here** |
+| `radar` | `TrustSafeAI/RADAR-Vicuna-7B` | adversarial classifier | 2 (heavy) | ~13 GB | see card | robust to paraphrase; **opt-in, not runnable here** |
+
+Roster informed by the [RAID benchmark (ACL 2024)](https://github.com/liamdugan/raid)
+([leaderboard](https://raid-bench.xyz/), [paper](https://arxiv.org/abs/2405.07940)).
+In the Web UI / Desktop you install/remove each detector from **Settings → AI
+Detection** (real size + license shown), run any subset, see per-detector scores
+and per-sentence agreement, and **checkbox-export** only the detectors you select.
+
+```bash
+# List the roster (installed vs. available, sizes/tiers/licenses) — no paper needed
+refchecker-webui check --list-detectors
+refchecker-webui check --list-detectors --json   # machine-readable
+
+# Run a subset side-by-side (only INSTALLED detectors run; the rest abstain)
+refchecker-webui check --paper ./paper.pdf \
+    --ai-detection local --ai-detection-consent \
+    --detectors desklib,e5-small-lora
+# Naming an unknown or not-installed detector exits with a clear
+# "installed vs. available" error — never a fabricated number.
+```
 
 ### Per-reference chat (full-text grounded) & Summarize
 

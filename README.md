@@ -264,6 +264,7 @@ Legend: ✅ available · — not applicable to that surface · 🌐 needs a host
 | Enrichment (counts · abstract · claim/TL;DR · funding · author metrics incl. ORCID · h-index) | ✅ | ✅ | ✅ on by default (`--no-enrich`) | ✅ | Mirrors the web/API default |
 | Add-to-reference-list (dedup + renumbered list + tracked PDF diff) | ✅ | ✅ | — | — | Interactive editing surface |
 | AI-generated-text detection (opt-in, advisory) | ✅ | ✅ | ✅ `--ai-detection {local,api}` + `--ai-detection-consent` | ✅ | Opt-in + consent required; never proof of misconduct |
+| Multi-detector compare + checkbox export (RAID-informed roster) | ✅ | ✅ | ✅ `--detectors key1,key2` · `--list-detectors` | ✅ | Per-detector scores shown honestly; no synthetic ensemble; uninstalled ⇒ abstains |
 | Local databases for offline / faster verification | ✅ | ✅ | ✅ `--database-dir` / `--s2-db` / … | ✅ | Same resolver across surfaces |
 | Structured machine-readable output | ✅ | ✅ | ✅ `--json` | ✅ (JSON responses) | Progress to **stderr**, JSON to **stdout** |
 | Bulk / batch checking | ✅ | ✅ | ✅ (`academic-refchecker --paper-list` / `--openreview`) | ✅ | See [Bulk Checking](#bulk-checking) |
@@ -529,6 +530,12 @@ refchecker-webui check --paper 2406.01234 --check-hallucinations \
     --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
 refchecker-webui check --paper ./paper.pdf --ai-detection api \
     --ai-detection-consent --ai-detection-key $PANGRAM_KEY
+
+# Multi-detector AI-text compare (only INSTALLED detectors run; rest abstain)
+refchecker-webui check --list-detectors            # roster: installed vs. available
+refchecker-webui check --paper ./paper.pdf \
+    --ai-detection local --ai-detection-consent \
+    --detectors desklib,e5-small-lora
 ```
 
 **Structured output (`--json`).** A single JSON document is printed to **stdout**;
@@ -617,6 +624,29 @@ When enabled (Settings → AI Detection), each checked article's **body text** i
 | **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
 
 The local model needs an inference runtime (`torch` + `transformers`) that is **not** bundled, to keep the desktop app small. Click **Install runtime** under Settings → AI Detection to fetch it on demand (installed into the app's data folder and used without a restart), or install it yourself with `pip install torch transformers`. The LLM-judge and External-API engines need no runtime.
+
+### Multi-detector compare (RAID-leaderboard-informed roster)
+
+Beyond the default `desklib` model you can install **one or more** open-source detectors and run them **side-by-side**. Each detector's verdict is shown **on its own** — there is **no synthetic "ensemble truth"**; disagreement between detectors is surfaced as signal. Detectors are **installed on demand** (never bundled), and an **uninstalled detector abstains — it never reports a number**. Heavy Tier-2 metric/zero-shot detectors are listed for honesty but are **opt-in and not runnable in this build** (real size / RAM warnings are shown so you understand why).
+
+| Key | Model | Arch | Tier | Size | License | Note |
+|---|---|---|:---:|---|---|---|
+| `desklib` *(default)* | [`desklib/ai-text-detector-v1.01`](https://huggingface.co/desklib/ai-text-detector-v1.01) | DeBERTa-v3-large | 1 | ~870 MB | MIT | RAID leaderboard leader among open models |
+| `superannotate` | [`SuperAnnotate/ai-detector`](https://huggingface.co/SuperAnnotate/ai-detector) | RoBERTa-Large | 1 | ~1.4 GB | research/eval | [#1 open-source on RAID](https://www.superannotate.com/blog/ai-content-detection-superannotate) (late 2024) |
+| `e5-small-lora` | [`MayZhou/e5-small-lora-ai-generated-detector`](https://huggingface.co/MayZhou/e5-small-lora-ai-generated-detector) | e5-small + LoRA | 1 | ~130 MB | MIT | tiny/fast/CPU-friendly (~89% acc) |
+| `mage` | [`yaful/MAGE`](https://huggingface.co/yaful/MAGE) | Longformer | 1 | ~570 MB | Apache-2.0 | "Detection in the wild" (ACL 2024) |
+| `binoculars` | paired causal LMs | metric zero-shot | 2 (heavy) | ~14 GB | see models | best at low FPR; **opt-in, not runnable here** |
+| `fast-detectgpt` | GPT-Neo-2.7B scorer | metric zero-shot | 2 (heavy) | ~11 GB | see models | 340× faster DetectGPT; **opt-in, not runnable here** |
+| `radar` | [`TrustSafeAI/RADAR-Vicuna-7B`](https://huggingface.co/TrustSafeAI/RADAR-Vicuna-7B) | adversarial classifier | 2 (heavy) | ~13 GB | see card | robust to paraphrase; **opt-in, not runnable here** |
+
+Roster informed by the **[RAID benchmark (ACL 2024)](https://github.com/liamdugan/raid)** ([leaderboard](https://raid-bench.xyz/) · [paper](https://arxiv.org/abs/2405.07940)). In **Settings → AI Detection** you install/remove each detector (real size + license shown), run any subset, compare per-detector scores + per-sentence agreement, and **checkbox-export** only the detectors you select (MD / CSV / JSON). From the CLI:
+
+```bash
+refchecker-webui check --list-detectors            # roster: installed vs. available
+refchecker-webui check --paper ./paper.pdf \
+    --ai-detection local --ai-detection-consent \
+    --detectors desklib,e5-small-lora              # only INSTALLED run; rest abstain
+```
 
 ### Usage & cost tracking
 

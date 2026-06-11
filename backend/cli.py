@@ -139,6 +139,20 @@ class ConsentRequiredError(Exception):
     """Raised when an opt-in feature is requested without its explicit consent."""
 
 
+class DetectorSelectionError(Exception):
+    """Raised when ``--detectors`` names an unknown or not-installed detector.
+
+    Carries the resolved ``installed`` / ``available`` rosters so the handler
+    can print a clear, honest message (what is installed vs. what exists) and
+    never silently drop or fabricate a detector.
+    """
+
+    def __init__(self, message, installed=None, available=None):
+        super().__init__(message)
+        self.installed = list(installed or [])
+        self.available = list(available or [])
+
+
 CHECK_EPILOG = """\
 examples:
   refchecker-webui check --paper 2406.01234
@@ -148,6 +162,9 @@ examples:
       --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
   refchecker-webui check --paper ./paper.pdf --ai-detection api \\
       --ai-detection-consent --ai-detection-key $PANGRAM_KEY
+  refchecker-webui check --paper ./paper.pdf --ai-detection local \\
+      --ai-detection-consent --detectors desklib,e5-small-lora
+  refchecker-webui check --list-detectors
 
 structured output:
   --json prints a single JSON document to stdout with keys:
@@ -170,6 +187,11 @@ honesty notes:
   * AI-generated-text detection is OPT-IN and ADVISORY ONLY (never proof of
     misconduct) — it requires --ai-detection plus an explicit
     --ai-detection-consent flag.
+  * Multi-detector AI-text compare is honest: only INSTALLED detectors run, an
+    uninstalled detector NEVER reports a number (it abstains), and there is no
+    synthetic "ensemble truth" — each detector's verdict is shown on its own.
+    Run --list-detectors to see what is installed vs. available (incl. real
+    size / tier / license and the heavy Tier-2 detectors that are opt-in only).
 """
 
 
@@ -194,12 +216,18 @@ def build_check_parser(subparsers=None):
         )
 
     # --- input -------------------------------------------------------------
+    # NOTE: ``--paper`` is required for an actual check, but NOT for the
+    # registry-only ``--list-detectors`` query (which needs no paper). We
+    # therefore validate its presence in ``run_check`` rather than via
+    # ``required=True`` so ``--list-detectors`` can run standalone.
     parser.add_argument(
         "--paper",
-        required=True,
+        required=False,
+        default=None,
         help=(
             "Paper to check: an arXiv id / URL, or a local file path "
-            "(PDF, LaTeX .tex, BibTeX .bib, or a text file of references)"
+            "(PDF, LaTeX .tex, BibTeX .bib, or a text file of references). "
+            "Required unless --list-detectors is given."
         ),
     )
 
@@ -275,6 +303,16 @@ def build_check_parser(subparsers=None):
                         help="External AI-detection service for --ai-detection api (default: pangram)")
     parser.add_argument("--ai-detection-key", default=None,
                         help="API key for the external AI-detection service")
+    parser.add_argument("--detectors", default=None, metavar="key1,key2",
+                        help="Comma-separated local AI-text detector keys to run + compare "
+                             "side-by-side (e.g. desklib,e5-small-lora). Only INSTALLED "
+                             "detectors run; an uninstalled detector abstains (never a "
+                             "fabricated number). Use with --ai-detection local. See "
+                             "--list-detectors for the roster.")
+    parser.add_argument("--list-detectors", action="store_true",
+                        help="List the AI-text detector registry (installed / size / tier / "
+                             "license, honest about un-runnable heavy Tier-2 detectors) and "
+                             "exit. Honors --json. Needs no --paper.")
 
     # --- output ------------------------------------------------------------
     parser.add_argument("--json", action="store_true",
@@ -294,6 +332,133 @@ def _infer_source_type(paper: str):
     if candidate.exists() and candidate.is_file():
         return "file", str(candidate)
     return "url", paper
+
+
+def _split_detector_keys(raw):
+    """Parse a ``--detectors key1,key2`` value into an ordered, de-duped list of
+    lowercased keys (drops empties; preserves first-seen order)."""
+    out = []
+    seen = set()
+    for tok in (raw or "").split(","):
+        k = tok.strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _resolve_selected_detectors(raw):
+    """Validate the ``--detectors`` selection against the live registry.
+
+    Returns the ordered list of selected keys to run. RAISES
+    :class:`DetectorSelectionError` (with the installed-vs-available rosters)
+    when a key is unknown or not currently installed — so the CLI never runs a
+    detector that would have to fabricate a number, and the user gets a clear
+    "installed vs available" message.
+
+    Honesty contract: only INSTALLED, runnable (Tier-1) detectors are accepted;
+    heavy Tier-2 detectors are not runnable in this build and are rejected with
+    the same clear roster.
+    """
+    keys = _split_detector_keys(raw)
+    if not keys:
+        return []
+
+    from refchecker.ai_detection import model_manager as mm
+
+    available = list(mm.DETECTOR_REGISTRY.keys())
+    installed = [k for k in available if mm.is_detector_installed(k)]
+
+    unknown = [k for k in keys if mm.get_detector(k) is None]
+    not_installed = [
+        k for k in keys
+        if k not in unknown and not mm.is_detector_installed(k)
+    ]
+    if unknown or not_installed:
+        parts = []
+        if unknown:
+            parts.append("unknown detector(s): " + ", ".join(unknown))
+        if not_installed:
+            parts.append("not installed: " + ", ".join(not_installed))
+        msg = (
+            "Cannot run --detectors — " + "; ".join(parts) + ". "
+            "Installed: " + (", ".join(installed) or "(none)") + ". "
+            "Available: " + ", ".join(available) + ". "
+            "Install a detector from Settings → AI Detection (heavy Tier-2 "
+            "detectors are not runnable in this build)."
+        )
+        raise DetectorSelectionError(msg, installed=installed, available=available)
+    return keys
+
+
+def _detector_registry_listing():
+    """Build the registry roster (sorted: default first, then by tier) as a list
+    of JSON-able dicts with REAL size / tier / license / installed status and the
+    honest 'installable' flag for heavy Tier-2 detectors."""
+    from refchecker.ai_detection import model_manager as mm
+
+    rows = []
+    for key, entry in mm.DETECTOR_REGISTRY.items():
+        installable = bool(entry.get("installable"))
+        rows.append({
+            "key": key,
+            "label": entry.get("label", key),
+            "repo": entry.get("repo"),
+            "arch": entry.get("arch"),
+            "tier": entry.get("tier"),
+            "size_mb": entry.get("size_mb"),
+            "license": entry.get("license"),
+            "heavy": bool(entry.get("heavy")),
+            "installable": installable,
+            "installed": bool(mm.is_detector_installed(key)) if installable else False,
+            "default": key == mm.DEFAULT_DETECTOR,
+            "raid_note": entry.get("raid_note"),
+        })
+    rows.sort(key=lambda r: (not r["default"], r["tier"], r["key"]))
+    return rows
+
+
+def run_list_detectors(args):
+    """Handler for ``check --list-detectors``: print the detector registry and
+    exit. Honors ``--json``; needs no ``--paper``."""
+    try:
+        rows = _detector_registry_listing()
+    except Exception as e:  # noqa: BLE001
+        print(f"Error listing detectors: {e}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        json.dump({"detectors": rows}, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+        return 0
+
+    print("AI-text detectors (install on demand — never bundled):")
+    print()
+    for r in rows:
+        if not r["installable"]:
+            state = "heavy / not runnable in this build (opt-in only)"
+        elif r["installed"]:
+            state = "INSTALLED"
+        else:
+            state = "available (not installed)"
+        flags = []
+        if r["default"]:
+            flags.append("default")
+        if r["heavy"]:
+            flags.append("heavy")
+        suffix = f"  [{', '.join(flags)}]" if flags else ""
+        size = r.get("size_mb")
+        size_str = f"~{size} MB" if size else "size unknown"
+        print(f"  {r['key']}{suffix}")
+        print(f"      {r['label']} · tier {r['tier']} · {size_str} · {r['license']}")
+        print(f"      {state}")
+        if r.get("raid_note"):
+            print(f"      {r['raid_note']}")
+        print()
+    print("An uninstalled detector ABSTAINS — it never reports a fabricated number.")
+    print("Run a subset with:  --ai-detection local --ai-detection-consent "
+          "--detectors key1,key2")
+    return 0
 
 
 def _resolve_db_paths(args):
@@ -337,6 +502,12 @@ def _build_checker(args):
     ai_enabled = args.ai_detection is not None
     detection_mode = "both" if ai_enabled else "references"
 
+    # Multi-detector selection (R61). Validated against the live registry in
+    # ``_analyze_paper`` BEFORE we get here, so by this point the list contains
+    # only installed, runnable detector keys (or is empty → single-detector
+    # default path). An empty list keeps the byte-for-byte default behaviour.
+    selected_detectors = getattr(args, "_selected_detectors", None) or []
+
     return ProgressRefChecker(
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
@@ -362,6 +533,7 @@ def _build_checker(args):
         ai_detection_api_key=args.ai_detection_key,
         ai_detection_consent=bool(args.ai_detection_consent),
         ai_detection_service=args.ai_detection_service,
+        ai_detection_detectors=selected_detectors,
         detection_mode=detection_mode,
         enrich_enabled=(not args.no_enrich),
     )
@@ -382,6 +554,19 @@ async def _analyze_paper(args):
             "--ai-detection requires the explicit --ai-detection-consent flag "
             "(AI-text detection is opt-in and advisory only)."
         )
+
+    # Resolve + validate the multi-detector selection against the live registry
+    # (raises DetectorSelectionError listing installed vs available on a miss).
+    # ``--detectors`` only applies to the local backend; warn but don't fail if
+    # paired with a different backend so the run still proceeds honestly.
+    selected = _resolve_selected_detectors(getattr(args, "detectors", None))
+    if selected and args.ai_detection != "local":
+        sys.stderr.write(
+            "Note: --detectors only applies to --ai-detection local; "
+            "ignoring the multi-detector selection for this run.\n"
+        )
+        selected = []
+    args._selected_detectors = selected
 
     source_type, paper_source = _infer_source_type(args.paper)
 
@@ -494,13 +679,37 @@ def _print_human_report(output):
         score = ai.get("score")
         print(f"AI-text detection (advisory): band={band} score={score} "
               f"backend={ai.get('backend')}")
+        # Multi-detector compare (R61): show each detector's OWN verdict — no
+        # synthetic ensemble; an uninstalled detector shows no score.
+        multi = ai.get("multi")
+        if isinstance(multi, dict) and multi.get("detectors"):
+            print("  Detectors compared (each verdict shown honestly):")
+            for d in multi.get("detectors") or []:
+                dscore = d.get("score") if d.get("score") is not None else "—"
+                dband = d.get("band") or "n/a"
+                print(f"    - {d.get('key')}: band={dband} score={dscore}")
+            comp = multi.get("comparison") or {}
+            if comp.get("band_agreement") is not None:
+                agree = "agree" if comp.get("band_agreement") else "DISAGREE"
+                print(f"    (document-band: {agree})")
 
 
 def run_check(args):
     """Handler for the ``check`` subcommand."""
+    # Registry-only query: no paper, no pipeline. Honors --json.
+    if getattr(args, "list_detectors", False):
+        return run_list_detectors(args)
+
+    if not getattr(args, "paper", None):
+        print("Error: --paper is required (or use --list-detectors).", file=sys.stderr)
+        return 1
+
     try:
         output = asyncio.run(_analyze_paper(args))
     except ConsentRequiredError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except DetectorSelectionError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

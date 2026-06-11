@@ -86,8 +86,12 @@ def test_check_defaults_mirror_web():
 
 
 def test_check_requires_paper():
-    with pytest.raises(SystemExit):
-        cli.parse_args(["check"])
+    # ``--paper`` is no longer enforced at the argparse layer (so the
+    # registry-only ``--list-detectors`` query can stand alone). The requirement
+    # is now enforced in ``run_check``: a bare ``check`` parses but exits 1.
+    args = cli.parse_args(["check"])
+    assert args.paper is None
+    assert cli.run_check(args) == 1
 
 
 def test_ai_detection_choices_validated():
@@ -316,3 +320,201 @@ def test_human_report_renders(monkeypatch, tmp_path):
     assert "A Test Paper" in out
     assert "Summary" in out
     assert "Retractions:" in out
+
+
+# ---------------------------------------------------------------------------
+# R61 — multi-detector AI detection: --detectors + --list-detectors
+# ---------------------------------------------------------------------------
+
+def test_detectors_and_list_flags_parse():
+    args = cli.parse_args([
+        "check", "--paper", "x",
+        "--ai-detection", "local", "--ai-detection-consent",
+        "--detectors", "desklib,e5-small-lora",
+    ])
+    assert args.detectors == "desklib,e5-small-lora"
+    assert args.list_detectors is False
+
+    args2 = cli.parse_args(["check", "--list-detectors"])
+    assert args2.list_detectors is True
+    # --list-detectors needs no --paper
+    assert args2.paper is None
+
+
+def test_list_detectors_needs_no_paper_and_does_not_require_it():
+    # --paper is no longer required at the argparse layer (so --list-detectors
+    # can stand alone); the requirement is enforced in run_check instead.
+    args = cli.parse_args(["check", "--list-detectors"])
+    assert args.command == "check"
+
+
+def test_split_detector_keys_dedups_and_lowercases():
+    assert cli._split_detector_keys("Desklib, e5-small-lora ,desklib,") == [
+        "desklib", "e5-small-lora",
+    ]
+    assert cli._split_detector_keys("") == []
+    assert cli._split_detector_keys(None) == []
+
+
+def _patch_registry(monkeypatch, installed):
+    """Patch model_manager so the registry has a known shape and a controllable
+    installed set, without touching disk / HuggingFace."""
+    from refchecker.ai_detection import model_manager as mm
+
+    registry = {
+        "desklib": {"key": "desklib", "label": "Desklib", "repo": "desklib/x",
+                    "arch": "deberta-v3-large", "tier": 1, "size_mb": 870,
+                    "license": "MIT", "heavy": False, "installable": True,
+                    "raid_note": "leader"},
+        "e5-small-lora": {"key": "e5-small-lora", "label": "e5", "repo": "MayZhou/x",
+                          "arch": "e5-small", "tier": 1, "size_mb": 130,
+                          "license": "MIT", "heavy": False, "installable": True,
+                          "raid_note": "tiny"},
+        "binoculars": {"key": "binoculars", "label": "Binoculars", "repo": "(LMs)",
+                       "arch": "metric-zeroshot", "tier": 2, "size_mb": 14000,
+                       "license": "see models", "heavy": True, "installable": False,
+                       "raid_note": "heavy"},
+    }
+    monkeypatch.setattr(mm, "DETECTOR_REGISTRY", registry, raising=True)
+    monkeypatch.setattr(mm, "DEFAULT_DETECTOR", "desklib", raising=True)
+    monkeypatch.setattr(mm, "get_detector",
+                        lambda k: registry.get((k or "").strip().lower()),
+                        raising=True)
+    monkeypatch.setattr(mm, "is_detector_installed",
+                        lambda k: (k or "").strip().lower() in set(installed),
+                        raising=True)
+    return mm
+
+
+def test_resolve_selected_detectors_ok_when_installed(monkeypatch):
+    _patch_registry(monkeypatch, installed={"desklib", "e5-small-lora"})
+    sel = cli._resolve_selected_detectors("desklib,e5-small-lora")
+    assert sel == ["desklib", "e5-small-lora"]
+
+
+def test_resolve_selected_detectors_rejects_not_installed(monkeypatch):
+    _patch_registry(monkeypatch, installed={"desklib"})
+    with pytest.raises(cli.DetectorSelectionError) as ei:
+        cli._resolve_selected_detectors("desklib,e5-small-lora")
+    err = ei.value
+    assert "not installed" in str(err)
+    # the message lists installed vs available honestly
+    assert "desklib" in err.installed
+    assert "e5-small-lora" in err.available
+    assert "e5-small-lora" not in err.installed
+
+
+def test_resolve_selected_detectors_rejects_unknown(monkeypatch):
+    _patch_registry(monkeypatch, installed={"desklib"})
+    with pytest.raises(cli.DetectorSelectionError) as ei:
+        cli._resolve_selected_detectors("desklib,bogus")
+    assert "unknown detector" in str(ei.value)
+
+
+def test_resolve_selected_detectors_rejects_heavy_tier2(monkeypatch):
+    # binoculars is in the registry but not installable (heavy / no runner):
+    # selecting it must be rejected, never silently run with a fabricated number.
+    _patch_registry(monkeypatch, installed={"desklib"})
+    with pytest.raises(cli.DetectorSelectionError):
+        cli._resolve_selected_detectors("binoculars")
+
+
+def test_selected_detectors_wired_into_checker(monkeypatch, tmp_path):
+    _patch_checker_and_analyses(monkeypatch)
+    _patch_registry(monkeypatch, installed={"desklib", "e5-small-lora"})
+    bib = tmp_path / "refs.bib"
+    bib.write_text("@article{a}", encoding="utf-8")
+
+    args = cli.parse_args([
+        "check", "--paper", str(bib),
+        "--ai-detection", "local", "--ai-detection-consent",
+        "--detectors", "desklib,e5-small-lora", "--json",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.run_check(args)
+    assert rc == 0
+    assert _FakeChecker.last_kwargs["ai_detection_detectors"] == [
+        "desklib", "e5-small-lora",
+    ]
+
+
+def test_detectors_ignored_without_local_backend(monkeypatch, tmp_path):
+    # --detectors only applies to --ai-detection local; with no/other backend it
+    # is dropped (and a note is printed to stderr) rather than mis-wired.
+    _patch_checker_and_analyses(monkeypatch)
+    _patch_registry(monkeypatch, installed={"desklib", "e5-small-lora"})
+    bib = tmp_path / "refs.bib"
+    bib.write_text("@article{a}", encoding="utf-8")
+
+    args = cli.parse_args([
+        "check", "--paper", str(bib),
+        "--ai-detection", "api", "--ai-detection-consent", "--ai-detection-key", "k",
+        "--detectors", "desklib,e5-small-lora", "--json",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.run_check(args)
+    assert rc == 0
+    assert _FakeChecker.last_kwargs["ai_detection_detectors"] == []
+
+
+def test_detector_selection_error_surfaces_nonzero(monkeypatch, tmp_path):
+    _patch_checker_and_analyses(monkeypatch)
+    _patch_registry(monkeypatch, installed={"desklib"})
+    bib = tmp_path / "refs.bib"
+    bib.write_text("@article{a}", encoding="utf-8")
+
+    args = cli.parse_args([
+        "check", "--paper", str(bib),
+        "--ai-detection", "local", "--ai-detection-consent",
+        "--detectors", "desklib,e5-small-lora", "--json",
+    ])
+    rc = cli.run_check(args)
+    assert rc == 1  # DetectorSelectionError surfaced as a non-zero exit
+
+
+def test_run_check_requires_paper_or_list(monkeypatch):
+    # check with neither --paper nor --list-detectors is a clean error, not a crash.
+    args = cli.parse_args(["check"])
+    rc = cli.run_check(args)
+    assert rc == 1
+
+
+def test_list_detectors_human_report(monkeypatch):
+    _patch_registry(monkeypatch, installed={"desklib"})
+    args = cli.parse_args(["check", "--list-detectors"])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.run_check(args)
+    assert rc == 0
+    out = buf.getvalue()
+    assert "desklib" in out
+    assert "INSTALLED" in out               # desklib is installed
+    assert "available (not installed)" in out  # e5-small-lora is not
+    assert "heavy" in out.lower()           # binoculars Tier-2 noted
+    assert "default" in out.lower()         # desklib flagged default
+    # honesty note about abstaining is present
+    assert "ABSTAINS" in out or "abstain" in out.lower()
+
+
+def test_list_detectors_json(monkeypatch):
+    _patch_registry(monkeypatch, installed={"desklib", "e5-small-lora"})
+    args = cli.parse_args(["check", "--list-detectors", "--json"])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.run_check(args)
+    assert rc == 0
+    doc = json.loads(buf.getvalue())
+    assert "detectors" in doc
+    by_key = {d["key"]: d for d in doc["detectors"]}
+    # real metadata surfaced, honest installed flags
+    assert by_key["desklib"]["installed"] is True
+    assert by_key["desklib"]["default"] is True
+    assert by_key["e5-small-lora"]["installed"] is True
+    # heavy Tier-2 is never reported installed (no runner)
+    assert by_key["binoculars"]["installable"] is False
+    assert by_key["binoculars"]["installed"] is False
+    assert by_key["binoculars"]["tier"] == 2
+    # default sorts first
+    assert doc["detectors"][0]["key"] == "desklib"
