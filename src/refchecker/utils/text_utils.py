@@ -3233,7 +3233,69 @@ def _vancouver_fullname_match(name1: str, name2: str) -> bool:
         for given_initials in positions:
             if _initials_match(initials, given_initials, n):
                 return True
+
+    # ------------------------------------------------------------------
+    # Fallback: cited surname is a NON-FINAL compound run (Brazilian/Iberian
+    # and tussenvoegsel names), e.g. 'de Oliveira SD' ↔ 'Danilo de Oliveira
+    # Silva' or 'van der Berg JK' ↔ 'Jan Klaas van der Berg'. The strict
+    # TAIL/HEAD checks above anchor the surname only at the ends, so a cited
+    # surname that sits as a CONSECUTIVE INNER run is missed.
+    #
+    # Conservative precision guard — fire only when BOTH hold:
+    #   (1) every cited surname word appears in the actual name as a
+    #       CONSECUTIVE token run (particles included; the tokens are already
+    #       diacritic/case-normalised by the helpers above), AND
+    #   (2) every cited initial is the first letter of a DISTINCT actual token
+    #       that is NOT part of that surname run — a bijective cover, each
+    #       actual token used at most once.
+    # If any initial has no covering token the fallback does NOT match, so a
+    # wrong/extra initial ('de Oliveira XY') or an absent surname ('Smith AB')
+    # is rejected. The cited side must be Vancouver INITIALS (no full given
+    # name); a full given name still needs the normal agreement checks above.
+    for v, f in ((name1, name2), (name2, name1)):
+        surname, initials = _parse_vancouver_surname_initials(v)
+        if surname is None or not initials:
+            continue
+        f_tokens = _full_name_tokens(f)
+        n = len(surname)
+        if len(f_tokens) <= n:
+            continue
+        for start in range(0, len(f_tokens) - n + 1):
+            if f_tokens[start:start + n] != surname:
+                continue
+            # Remaining actual tokens (everything outside the surname run).
+            rest = f_tokens[:start] + f_tokens[start + n:]
+            if _initials_cover_distinct_tokens(initials, rest):
+                return True
     return False
+
+
+def _initials_cover_distinct_tokens(initials, tokens) -> bool:
+    """True iff every initial is the first letter of a DISTINCT token —
+    a bijective cover where each token is used at most once. Solved as a
+    bipartite matching so initial→token assignment never double-books a token.
+    Returns False if any initial has no available covering token, which keeps
+    the compound-surname fallback conservative (no uncovered-initial matches).
+    """
+    if not initials:
+        return False
+    cover_tokens = [t for t in tokens if t]
+    if len(initials) > len(cover_tokens):
+        return False
+    used = [False] * len(cover_tokens)
+
+    def assign(i: int) -> bool:
+        if i == len(initials):
+            return True
+        for j, tok in enumerate(cover_tokens):
+            if not used[j] and tok[0] == initials[i]:
+                used[j] = True
+                if assign(i + 1):
+                    return True
+                used[j] = False
+        return False
+
+    return assign(0)
 
 
 def enhanced_name_match(name1: str, name2: str) -> bool:

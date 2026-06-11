@@ -50,6 +50,18 @@ def test_different_person_same_initial_not_overmatched():
     assert enhanced_name_match('Smith J', 'Jane Doe') is False
 
 
+def test_non_final_compound_surname_inner_run_matches():
+    # Brazilian/Iberian inner-compound surname: 'de Oliveira' is a CONSECUTIVE
+    # inner run of 'Danilo de Oliveira Silva' and S, D are covered by Silva,
+    # Danilo. See test_compound_surname_match.py for the full positive/negative
+    # matrix; this guards the integration through the public matcher.
+    assert enhanced_name_match('de Oliveira SD', 'Danilo de Oliveira Silva') is True
+    assert enhanced_name_match('van der Berg JK', 'Jan Klaas van der Berg') is True
+    # Precision: uncovered initials / absent surname still mismatch.
+    assert enhanced_name_match('de Oliveira XY', 'Danilo de Oliveira Silva') is False
+    assert enhanced_name_match('Smith AB', 'Danilo de Oliveira Silva') is False
+
+
 # ── author: the v0.7.85 batch of reported false-positives ─────────────────
 
 def test_initial_glued_to_particle_is_split():
