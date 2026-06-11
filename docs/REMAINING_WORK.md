@@ -673,9 +673,14 @@ Batch-G gate green (`9f0c3a7`): lint 0 errors, vitest pass, build ok, pytest pas
 
 Batch-H gate green (`642a1fc`, salvaged after a stalled gate agent): lint 0 errors, vitest **340/340**, build ok, pytest **1459** passed/1 skipped.
 
-**⬜ QUEUED (serialized):** J (R56/R57 CLI parity + help/guides); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) deferred — needs the user's design attachment.
+| R56 CLI feature parity (flags + --json + --help) | `928ff5d` |
+| R57 help & guides: README feature matrix + docs/FEATURES.md + docs/MULTIUSER.md | `dadf03b` |
 
-**Tally:** 53 of the R01–R55 items DONE (all except R50 deferred + R40 CI-gate); remaining: R40 (K), R50 (deferred), R56–R60 (J/K).
+Batch-J gate green (`1032602`).
+
+**⬜ QUEUED (serialized):** I (R61 multi-detector AI detection, §14); K (R58 bump 0.9.19+3.2.0, R59 push origin + R40 full CI, R60 release tags). R50 (Similar-papers redesign) deferred — needs the user's design attachment.
+
+**Tally:** 55 of R01–R57 DONE (all except R50 deferred + R40 CI-gate); remaining: R61 (I), R40/R58–R60 (K), R50 (deferred).
 
 ---
 
