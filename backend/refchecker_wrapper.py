@@ -1142,7 +1142,8 @@ class ProgressRefChecker:
                  ai_detection_consent: bool = False,
                  ai_detection_service: str = "pangram",
                  paperclip_api_key: Optional[str] = None,
-                 detection_mode: str = "both"):
+                 detection_mode: str = "both",
+                 enrich_enabled: bool = True):
         """
         Initialize the progress-aware refchecker
 
@@ -1178,6 +1179,10 @@ class ProgressRefChecker:
         self.ai_detection_consent = bool(ai_detection_consent)
         self.ai_detection_service = (ai_detection_service or "pangram").lower()
         self.paperclip_api_key = paperclip_api_key
+        # Cross-source enrichment backfill is ON by default (mirrors the web/API
+        # default). The CLI exposes a `--no-enrich` opt-out which sets this to
+        # False so verification results carry no backfilled counts/abstract/tldr.
+        self.enrich_enabled = bool(enrich_enabled)
         # Detection mode: "references" (verify refs only — the default behaviour),
         # "ai_only" (skip reference extraction + verification, just analyze the
         # body text for AI-generated content), or "both". AI-only implies the
@@ -1545,20 +1550,25 @@ class ProgressRefChecker:
         # try/except because this is a display nicety — failing here
         # must not break the verification result.
         enrichment_payload: Dict[str, Any] = {}
-        try:
-            from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
-            # Cross-source backfill (R21/R22): when a non-S2 source won the
-            # verification race, its payload often lacks counts / abstract /
-            # tldr / funding. Backfill the MISSING-ONLY signals by DOI from
-            # OpenAlex / Crossref / S2 before projecting — never overwrites a
-            # real value, never fabricates, soft-fails, and is bounded
-            # (per-DOI TTL cache + 1 retry + short timeout + concurrency cap)
-            # so a 30+ ref bibliography doesn't stall.
-            if isinstance(verified_data, dict):
-                backfill_enrichment(verified_data, reference)
-            enrichment_payload = build_enrichment(verified_data) or {}
-        except Exception as e:
-            logger.debug("enrichment build failed: %s", e)
+        # `--no-enrich` opt-out (CLI): skip cross-source backfill and the
+        # enrichment projection entirely. The reference is still fully verified;
+        # only the display-nicety enrichment strip is omitted. ON by default to
+        # mirror the web/API behaviour.
+        if getattr(self, "enrich_enabled", True):
+            try:
+                from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
+                # Cross-source backfill (R21/R22): when a non-S2 source won the
+                # verification race, its payload often lacks counts / abstract /
+                # tldr / funding. Backfill the MISSING-ONLY signals by DOI from
+                # OpenAlex / Crossref / S2 before projecting — never overwrites a
+                # real value, never fabricates, soft-fails, and is bounded
+                # (per-DOI TTL cache + 1 retry + short timeout + concurrency cap)
+                # so a 30+ ref bibliography doesn't stall.
+                if isinstance(verified_data, dict):
+                    backfill_enrichment(verified_data, reference)
+                enrichment_payload = build_enrichment(verified_data) or {}
+            except Exception as e:
+                logger.debug("enrichment build failed: %s", e)
 
         # Recover the FULL author list when the cited names were truncated to
         # "<Author> et al." at parse time. enrichment.authors carries the real,
