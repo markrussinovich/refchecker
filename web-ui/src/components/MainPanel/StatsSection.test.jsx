@@ -382,6 +382,45 @@ describe('StatsSection hallucination count', () => {
   })
 })
 
+// Z3 (BUTTON_DESIGN §1.0/§4.7/§1.3, R33/R52): the "Filter by issue" chips must
+// read as part of the action-control family — the ONE 8px radius (never
+// 9999px / rounded-full), and click-state stability (no scale/shadow/ring that
+// reflows the chip on hover or select). They are toggles, so they expose
+// aria-pressed for assistive tech.
+describe('StatsSection filter chips follow the control design system (Z3)', () => {
+  const references = [
+    makeRef('error', { errors: [{ error_type: 'author', message: 'author mismatch' }] }),
+    makeRef('error', { errors: [{ error_type: 'title', message: 'title mismatch' }] }),
+    makeRef('warning', { warnings: [{ message: 'venue differs' }] }),
+    makeRef('verified'),
+  ]
+
+  it('renders 8px-radius, aria-pressed chips with no scale/shadow hover geometry', () => {
+    render(
+      <StatsSection
+        stats={{ total_refs: 4, processed_refs: 4 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Filter Chip Paper"
+        paperSource="https://example.com/chips"
+      />
+    )
+    // The toggle filter chips are the buttons carrying aria-pressed.
+    const chips = screen.getAllByRole('button').filter(b => b.hasAttribute('aria-pressed'))
+    expect(chips.length).toBeGreaterThan(0)
+    for (const chip of chips) {
+      // The ONE radius — never the old pill 9999px.
+      expect(chip.style.borderRadius).toBe('var(--control-radius)')
+      expect(chip.className).not.toMatch(/rounded-full/)
+      // No geometry/shadow change on state (R52): only colours transition.
+      expect(chip.className).not.toMatch(/scale-/)
+      expect(chip.className).not.toMatch(/shadow/)
+      // Resting (unselected) toggle state is exposed honestly.
+      expect(chip.getAttribute('aria-pressed')).toBe('false')
+    }
+  })
+})
+
 // The animated walkthrough "video" must live ONLY in the Share popup, never
 // inline in the Summary stats (reverts R24's stats-page placement per user
 // request). The mocked ShareAnimationCanvas renders a `stats-video` testid, so

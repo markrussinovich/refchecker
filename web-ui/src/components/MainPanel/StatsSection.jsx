@@ -679,17 +679,21 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             return (
               <button
                 key={filter.id}
+                type="button"
                 onClick={() => handleFilterClick(filter.id)}
-                className={`group flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer border hover:scale-105 hover:shadow-sm ${
-                  isSelected ? 'ring-1 shadow-sm' : ''
-                }`}
-                style={{ 
+                aria-pressed={isSelected}
+                // Filter chips read as part of the action-control family
+                // (BUTTON_DESIGN §1.0/§4.7 / R33): the ONE 8px radius, never
+                // 9999px. Click-state stability (R52/§1.3): selecting or
+                // hovering swaps ONLY the background/border colour — never
+                // scale, shadow, or a ring box — so the chip never reflows or
+                // jumps under the cursor. The 1px border is always present.
+                className="group flex items-center gap-1 px-2 py-0.5 text-xs transition-colors cursor-pointer border rc-control"
+                style={{
+                  borderRadius: 'var(--control-radius)',
                   backgroundColor: isSelected ? filter.bgColor : 'transparent',
                   borderColor: isSelected ? filter.color : 'var(--color-border)',
                   color: filter.color,
-                  '--hover-bg': filter.bgColor,
-                  '--hover-border': filter.color,
-                  ringColor: isSelected ? filter.color : undefined,
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected) {

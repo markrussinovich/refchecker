@@ -397,7 +397,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
               <SegmentedTab label="Summarize" active={tab === 'summarize'} onClick={() => setTab('summarize')} />
               <SegmentedTab label="Chat" active={tab === 'chat'} onClick={() => setTab('chat')} />
             </div>
-            <IconButton onClick={() => setOpen(false)} title="Close" className="ml-auto"
+            <IconButton onClick={() => setOpen(false)} title="Close" aria-label="Close assistant" className="ml-auto"
               style={{ color: 'var(--color-text-muted)' }}>
               {CLOSE_ICON}
             </IconButton>
