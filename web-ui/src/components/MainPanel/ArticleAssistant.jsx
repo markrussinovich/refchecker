@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useActionGrid } from './ActionPanelGrid'
+
+const GRID_ID = 'assistant'
 import { getArticleSummary, postArticleChat, postReferenceFulltext } from '../../utils/api'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
@@ -211,6 +215,14 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   const hasChatModel = useConfigStore(s => (s.configs?.length || 0) > 0)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('summarize')
+  // In the 2×2 action grid the open/close state is owned by the grid
+  // coordinator (accordion); standalone (reference-card mode) it uses local
+  // `open`. The reference-grounding effect below is reference-mode-only, so it
+  // never fires in grid (article) mode — driving open via the grid is safe.
+  const grid = useActionGrid()
+  const isOpen = grid ? grid.isOpen(GRID_ID) : open
+  const openPanel = () => { if (grid) grid.open(GRID_ID); else setOpen(true) }
+  const closePanel = () => { if (grid) grid.close(); else setOpen(false) }
 
   // Per-reference mode: real, no-fabrication context block built from the
   // reference's own metadata + abstract/claim (whatever we honestly have).
@@ -378,17 +390,18 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
   const summary = sum.data
   const summaryNone = summary && summary.source === 'none'
 
-  return (
-    <div>
-      {!open ? (
-        <Button size="pill" variant="outline" onClick={() => setOpen(true)} icon={CHAT_ICON}
-          title={isRefMode
-            ? 'Chat about this reference or summarize it, grounded only in the reference’s available text'
-            : 'Summarize this article or ask questions, answered only from the article’s own text'}>
-          {label || (isRefMode ? 'Chat about this reference' : 'Chat & Summarize')}
-        </Button>
-      ) : (
-        <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+  const triggerPill = (
+    <Button size="pill" variant="outline" onClick={openPanel} icon={CHAT_ICON}
+      className={grid ? 'rc-grid-trigger' : ''}
+      title={isRefMode
+        ? 'Chat about this reference or summarize it, grounded only in the reference’s available text'
+        : 'Summarize this article or ask questions, answered only from the article’s own text'}>
+      {label || (isRefMode ? 'Chat about this reference' : 'Chat & Summarize')}
+    </Button>
+  )
+
+  const panel = (
+    <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           {/* macOS-native segmented control — active state is a filled segment
               (a moving background), never an added border, so Summarize↔Chat
               never reflows (BUTTON_DESIGN §3.4b). */}
@@ -397,7 +410,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
               <SegmentedTab label="Summarize" active={tab === 'summarize'} onClick={() => setTab('summarize')} />
               <SegmentedTab label="Chat" active={tab === 'chat'} onClick={() => setTab('chat')} />
             </div>
-            <IconButton onClick={() => setOpen(false)} title="Close" aria-label="Close assistant" className="ml-auto"
+            <IconButton onClick={closePanel} title="Close" aria-label="Close assistant" className="ml-auto"
               style={{ color: 'var(--color-text-muted)' }}>
               {CLOSE_ICON}
             </IconButton>
@@ -505,7 +518,19 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
             </div>
           )}
         </div>
-      )}
-    </div>
   )
+
+  // Grid mode: "Chat & Summarize" pill sits in its 2×2 cell; the assistant
+  // panel portals into the shared full-width region below the grid when open.
+  if (grid) {
+    return (
+      <div className="rc-grid-cell">
+        {triggerPill}
+        {isOpen && grid.host ? createPortal(panel, grid.host) : null}
+      </div>
+    )
+  }
+
+  // Legacy / reference-card layout (unchanged): pill OR the expanded panel.
+  return <div>{!isOpen ? triggerPill : panel}</div>
 }

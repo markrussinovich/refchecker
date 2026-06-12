@@ -1,17 +1,27 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { getCheckGaps, addReferenceToCheck, getCitationRenumberPreview, getCorrectedReferenceList } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import Button from '../common/Button'
 import IconButton from '../common/IconButton'
 import LabelSizer from '../common/LabelSizer'
+import { useActionGrid } from './ActionPanelGrid'
+
+const GRID_ID = 'gapfinder'
 
 // Pre-run trigger labels — longest reserves the width so the analyzing swap
 // doesn't jump (BUTTON_DESIGN §3.1).
 const GAP_LABELS = ['Did you miss these?', 'Analyzing co-citations…']
+// In the 2×2 grid the pill stays visible after the run and reports the count,
+// so it needs the post-run labels in its width sizer too.
+const GRID_GAP_LABELS = [...GAP_LABELS, '99 to add — re-check', 'No gaps — re-check']
 
 const SEARCH_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
+)
+const REFRESH_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
 )
 const CHEVRON_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
@@ -66,6 +76,8 @@ export default function GapFinder({ checkId, references }) {
   // R49 — persist every collapse toggle (declared before the early return so
   // the hook count stays stable when `hasDoi` flips — rules-of-hooks).
   useEffect(() => { writeCollapsed(checkId, collapsed) }, [checkId, collapsed])
+  // Grid coordinator (null when rendered standalone / in tests → legacy layout).
+  const grid = useActionGrid()
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
 
@@ -213,16 +225,27 @@ export default function GapFinder({ checkId, references }) {
     })
   }
 
-  return (
-    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
-      {!d && (
-        <div>
-          <Button size="pill" variant="outline" onClick={run} loading={state.loading} icon={SEARCH_ICON}
-            title="Find works frequently co-cited by your references but missing from your bibliography">
-            <LabelSizer candidates={GAP_LABELS}>{state.loading ? 'Analyzing co-citations…' : 'Did you miss these?'}</LabelSizer>
-          </Button>
-        </div>
-      )}
+  // In the 2×2 action grid the pill stays in its cell and reports the live
+  // count; clicking runs (or re-runs) the analysis and opens the list below.
+  const onTrigger = () => { run(); if (grid) grid.open(GRID_ID) }
+  const gridVariant = !d ? 'outline' : suggestions.length > 0 ? 'status-warning' : 'status-success'
+  const gridLabel = state.loading
+    ? 'Analyzing co-citations…'
+    : !d
+      ? 'Did you miss these?'
+      : suggestions.length > 0
+        ? `${suggestions.length} to add — re-check`
+        : 'No gaps — re-check'
+  const runPill = (
+    <Button size="pill" variant={grid ? gridVariant : 'outline'} onClick={onTrigger} loading={state.loading}
+      icon={d ? REFRESH_ICON : SEARCH_ICON} className={grid ? 'rc-grid-trigger' : ''}
+      title="Find works frequently co-cited by your references but missing from your bibliography">
+      <LabelSizer candidates={grid ? GRID_GAP_LABELS : GAP_LABELS}>{grid ? gridLabel : (state.loading ? 'Analyzing co-citations…' : 'Did you miss these?')}</LabelSizer>
+    </Button>
+  )
+
+  const resultCard = (
+    <>
       {state.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
       {d && suggestions.length > 0 && (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
@@ -410,6 +433,26 @@ export default function GapFinder({ checkId, references }) {
           {d.note || `No frequently co-cited works are missing from your ${d.checked} DOI-bearing reference${d.checked === 1 ? '' : 's'}.`}
         </div>
       )}
+    </>
+  )
+
+  // Grid mode: the pill lives in its 2×2 cell; results portal full-width below.
+  if (grid) {
+    return (
+      <div className="rc-grid-cell">
+        {runPill}
+        {grid.isOpen(GRID_ID) && (state.error || d) && grid.host
+          ? createPortal(<div className="rc-action-details flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>{resultCard}</div>, grid.host)
+          : null}
+      </div>
+    )
+  }
+
+  // Legacy stacked layout (unchanged): pre-run pill, then the results card.
+  return (
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
+      {!d && <div>{runPill}</div>}
+      {resultCard}
     </div>
   )
 }

@@ -2060,14 +2060,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               <button
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
                 style={{
                   backgroundColor: activeSection === item.id ? 'var(--color-bg-tertiary)' : 'transparent',
                   color: activeSection === item.id ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                 }}
               >
-                {item.icon}
-                {item.label}
+                {/* Icon never shrinks; the label takes the rest and stays
+                    LEFT-aligned even when it wraps to two lines (e.g. "Accounts
+                    & Teams") instead of reading centered. */}
+                <span className="flex-none flex items-center">{item.icon}</span>
+                <span className="flex-1 text-left leading-snug">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -2087,9 +2090,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         {/* Right Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
-          <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-              {activeSection}
+          <div className="px-6 py-4 border-b text-left" style={{ borderColor: 'var(--color-border)' }}>
+            {/* Use the nav LABEL (e.g. "Accounts & Teams") not the section id
+                ("Accounts"), so the header matches the sidebar entry. */}
+            <h2 className="text-lg font-semibold text-left" style={{ color: 'var(--color-text-primary)' }}>
+              {navItems.find((n) => n.id === activeSection)?.label || activeSection}
             </h2>
           </div>
 

@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { getCheckRetractions } from '../../utils/api'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import Button from '../common/Button'
 import LabelSizer from '../common/LabelSizer'
+import { useActionGrid } from './ActionPanelGrid'
+
+const GRID_ID = 'retractions'
 
 // Every label this control can show — the longest decides the reserved width so
 // the rest↔checking↔result swap never resizes the button (BUTTON_DESIGN §3.1).
@@ -30,6 +34,9 @@ const CROSS_ICON = (
  */
 export default function RetractionCheck({ checkId, references }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
+  // Grid coordinator (null when rendered standalone / in tests → legacy layout).
+  // Called before the early return so the hook order is stable (rules-of-hooks).
+  const grid = useActionGrid()
   const hasDoi = Array.isArray(references) && references.some((r) => r?.doi || r?.verified_doi)
   if (!checkId || checkId <= 0 || !hasDoi) return null
 
@@ -67,15 +74,21 @@ export default function RetractionCheck({ checkId, references }) {
         ? 'No retractions — re-check'
         : `${retracted.length} retracted — re-check`
 
-  return (
-    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
-      <div>
-        <Button size="pill" variant={variant} onClick={run} loading={state.loading}
-          icon={checked ? REFRESH_ICON : CROSS_ICON}
-          title="Check cited DOIs against OpenAlex for retractions — runs again each click">
-          <LabelSizer candidates={RETRACTION_LABELS}>{btnLabel}</LabelSizer>
-        </Button>
-      </div>
+  // In the 2×2 action grid, clicking the pill runs the check AND opens this
+  // panel's details in the shared full-width region below the grid.
+  const onTrigger = () => { run(); if (grid) grid.open(GRID_ID) }
+
+  const trigger = (
+    <Button size="pill" variant={variant} onClick={onTrigger} loading={state.loading}
+      icon={checked ? REFRESH_ICON : CROSS_ICON}
+      className={grid ? 'rc-grid-trigger' : ''}
+      title="Check cited DOIs against OpenAlex for retractions — runs again each click">
+      <LabelSizer candidates={RETRACTION_LABELS}>{btnLabel}</LabelSizer>
+    </Button>
+  )
+
+  const details = (
+    <>
       {state.error && <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>}
       {d && retracted.length > 0 && (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--status-error-fill)', border: '1px solid var(--color-error, #ef4444)' }}>
@@ -105,6 +118,28 @@ export default function RetractionCheck({ checkId, references }) {
           {unknown > 0 ? ` · ${unknown} not indexed by OpenAlex` : ''}.
         </div>
       )}
+    </>
+  )
+
+  const hasDetails = !!(state.error || d)
+
+  // Grid mode: trigger lives in its 2×2 cell; details portal full-width below.
+  if (grid) {
+    return (
+      <div className="rc-grid-cell">
+        {trigger}
+        {grid.isOpen(GRID_ID) && hasDetails && grid.host
+          ? createPortal(<div className="rc-action-details flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>{details}</div>, grid.host)
+          : null}
+      </div>
+    )
+  }
+
+  // Legacy stacked layout (unchanged): pill then caption/card directly under it.
+  return (
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>
+      <div>{trigger}</div>
+      {details}
     </div>
   )
 }

@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { getCitationIntegrity } from '../../utils/api'
 import Button from '../common/Button'
 import SplitButton from '../common/SplitButton'
 import LabelSizer from '../common/LabelSizer'
+import { useActionGrid } from './ActionPanelGrid'
+
+const GRID_ID = 'citation'
 
 // Every label the main segment can show — longest reserves the width so no swap
 // between rest↔checking↔result reflows (BUTTON_DESIGN §3.1).
@@ -54,6 +58,9 @@ const ABSTAIN_MSG = {
 export default function CitationIntegrity({ checkId }) {
   const [state, setState] = useState({ loading: false, data: null, error: null })
   const [open, setOpen] = useState(true)
+  // Grid coordinator (null when rendered standalone / in tests → legacy layout).
+  // Called before the early return so the hook order is stable (rules-of-hooks).
+  const grid = useActionGrid()
   if (!checkId || checkId <= 0) return null
 
   const run = async () => {
@@ -92,34 +99,41 @@ export default function CitationIntegrity({ checkId }) {
           ? 'Numbering consistent — re-check'
           : `${issues.length} numbering issue${issues.length === 1 ? '' : 's'} — re-check`
 
+  // In the 2×2 action grid the panel's open state is owned by the grid
+  // coordinator (accordion); standalone it keeps its own `open` toggle.
+  const isOpen = grid ? grid.isOpen(GRID_ID) : open
+  const onMain = () => { run(); if (grid) grid.open(GRID_ID) }
+  const onCaret = grid ? () => grid.toggle(GRID_ID) : () => setOpen((o) => !o)
+
   // Pre-check: a lone outline pill identical to the other action pills. Post-
   // check: the caret fades/slides in (SplitButton owns the radius transition so
   // the main segment's LEFT edge never moves) (BUTTON_DESIGN §3.2 option A).
   const mainButton = (
-    <Button size="pill" variant={variant} onClick={run} loading={state.loading}
+    <Button size="pill" variant={variant} onClick={onMain} loading={state.loading}
       icon={checked ? REFRESH_ICON : LIST_ICON}
+      className={grid ? 'rc-grid-trigger' : ''}
       title="Check inline-citation numbering for gaps, out-of-order, duplicates, undefined or uncited references — runs again each click">
       <LabelSizer candidates={CITATION_LABELS}>{btnLabel}</LabelSizer>
     </Button>
   )
 
-  return (
-    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)', flexBasis: '100%', width: '100%' }}>
-      <div>
-        <SplitButton
-          main={mainButton}
-          caret={checked}
-          caretOpen={open}
-          onCaretToggle={() => setOpen((o) => !o)}
-          caretTitle={open ? 'Hide details' : 'Show details'}
-        />
-      </div>
+  const triggerRow = (
+    <SplitButton
+      main={mainButton}
+      caret={checked}
+      caretOpen={isOpen}
+      onCaretToggle={onCaret}
+      caretTitle={isOpen ? 'Hide details' : 'Show details'}
+      fullWidth={!!grid}
+    />
+  )
 
+  const detailsCard = (state.error || (d && isOpen)) ? (
+    <>
       {state.error && (
         <div className="text-xs" style={{ color: 'var(--color-error)' }}>{state.error}</div>
       )}
-
-      {d && open && (
+      {d && isOpen && (
         <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', maxHeight: 360, overflowY: 'auto' }}>
           <div className="flex items-center gap-2 flex-wrap">
             <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Citation numbering</span>
@@ -167,6 +181,27 @@ export default function CitationIntegrity({ checkId }) {
           )}
         </div>
       )}
+    </>
+  ) : null
+
+  // Grid mode: SplitButton sits in its 2×2 cell; the details panel portals into
+  // the shared full-width region below the grid when this panel is open.
+  if (grid) {
+    return (
+      <div className="rc-grid-cell">
+        {triggerRow}
+        {grid.isOpen(GRID_ID) && detailsCard && grid.host
+          ? createPortal(<div className="rc-action-details flex flex-col" style={{ gap: 'var(--control-caption-gap)' }}>{detailsCard}</div>, grid.host)
+          : null}
+      </div>
+    )
+  }
+
+  // Legacy stacked layout (unchanged): split-button then its own full-width row.
+  return (
+    <div className="flex flex-col" style={{ gap: 'var(--control-caption-gap)', flexBasis: '100%', width: '100%' }}>
+      <div>{triggerRow}</div>
+      {detailsCard}
     </div>
   )
 }

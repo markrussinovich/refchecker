@@ -18,6 +18,7 @@ import RetractionCheck from './RetractionCheck'
 import GapFinder from './GapFinder'
 import CitationIntegrity from './CitationIntegrity'
 import ArticleAssistant from './ArticleAssistant'
+import ActionPanelGrid from './ActionPanelGrid'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -337,13 +338,12 @@ export default function MainPanel() {
           />
         )}
 
-        {/* On-demand retraction check (OpenAlex is_retracted, real signal).
-            Column-of-rows so every block left-aligns to one edge and shares one
-            vertical rhythm owned by the container gap (BUTTON_DESIGN §2.1) —
-            removing/adding a block never leaves a double/zero margin. Capped at
-            760px so the pills don't stretch edge-to-edge. */}
+        {/* On-demand article tools in a 2×2 button grid — each pill keeps its
+            cell and never shifts; clicking one opens its details full-width in
+            the shared region directly below the grid (ActionPanelGrid owns the
+            accordion). Capped at 760px so the pills don't stretch edge-to-edge. */}
         {showContent && isComplete && (
-          <div className="flex flex-col items-start" style={{ gap: 'var(--control-row-gap)', maxWidth: 760 }}>
+          <ActionPanelGrid>
             {/*
              * Per-article remount keys (#bug: cross-article result bleed).
              * In a batch, these on-demand panels keep their fetched results
@@ -372,7 +372,7 @@ export default function MainPanel() {
               key={`assist-${selectedCheckId}`}
               checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
             />
-          </div>
+          </ActionPanelGrid>
         )}
 
         {/* Document-level AI-generated-text detection (opt-in) */}

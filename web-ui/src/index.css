@@ -395,6 +395,32 @@ a[href^="mailto:"]:hover {
 }
 .rc-caret-in { animation: rcCaretIn 120ms ease; }
 
+/* === 2×2 action-button grid (ActionPanelGrid) ===
+   The four article-tool triggers (Retractions / Gap-finder / Citation-numbering
+   / Chat & Summarize) sit in a fixed 2-column grid and never move; the open
+   panel portals its details into the full-width host rendered below the grid. */
+.rc-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--control-row-gap);
+  align-items: start;          /* a tall trigger never stretches its row-mate */
+  max-width: 760px;
+}
+/* Whatever trigger a panel drops into its cell (a pill Button or a SplitButton)
+   fills the column so the 2×2 reads as four even buttons. */
+.rc-action-grid > .rc-grid-cell { min-width: 0; }
+.rc-action-grid > .rc-grid-cell > * { width: 100%; }
+.rc-grid-trigger { width: 100%; justify-content: flex-start; }
+/* The shared full-width details region below the grid. Collapses to nothing
+   when no panel is open (the open panel portals exactly one child in). */
+.rc-action-grid-content { max-width: 760px; }
+.rc-action-grid-content:empty { display: none; }
+.rc-action-grid-content > .rc-action-details { margin-top: var(--control-row-gap); }
+/* On a narrow window fall back to a single column (still never shifts). */
+@media (max-width: 560px) {
+  .rc-action-grid { grid-template-columns: 1fr; }
+}
+
 /* Non-reflowing grid-row expand for collapsible result bodies (gap-finder,
    AI-likelihood): animate grid-template-rows 0fr→1fr so the fixed header stays
    put while the list reveals. overflow:hidden lives only on the animated wrapper

@@ -30,17 +30,22 @@ export default function SplitButton({
   menu = null,
   menuOpen = false,
   caretTitle = 'Show details',
+  fullWidth = false,
 }) {
   return (
     // overflow:visible so the focus ring (§1.2) and the menu are never clipped.
-    <span style={{ position: 'relative', display: 'inline-flex', overflow: 'visible' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+    // fullWidth (used inside the 2×2 action grid) makes the group fill its cell:
+    // the main segment flex-grows while the caret keeps its fixed square width.
+    <span style={{ position: 'relative', display: 'inline-flex', overflow: 'visible', width: fullWidth ? '100%' : undefined }}>
+      <span style={{ display: 'inline-flex', alignItems: 'stretch', width: fullWidth ? '100%' : undefined }}>
         {/* The main segment. When the caret exists, flatten its right corners and
             drop its right border so exactly one 1px divider shows; the caret keeps
             its left border. The transition makes that corner flatten smoothly. */}
         <span
           style={{
             display: 'inline-flex',
+            flexGrow: fullWidth ? 1 : undefined,
+            minWidth: fullWidth ? 0 : undefined,
             borderRadius: caret
               ? 'var(--control-radius) 0 0 var(--control-radius)'
               : 'var(--control-radius)',
