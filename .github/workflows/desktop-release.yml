@@ -249,6 +249,19 @@ jobs:
           NO_STRIP: "true"
         shell: bash
         run: |
+          # Fork PRs (e.g. into the upstream repo) don't receive repository
+          # secrets, so the Apple signing cert is empty. Tauri's macOS bundler
+          # still tries to `security import` the empty APPLE_CERTIFICATE and
+          # fails ("failed to import keychain certificate"), failing the PR
+          # check even though the app compiled fine on every platform. When no
+          # cert is present, build UNSIGNED (validation only) by unsetting the
+          # Apple vars so Tauri skips codesigning (signingIdentity is null in
+          # tauri.conf.json). Real `desktop-v*` tag releases keep their secrets
+          # and sign + notarize as before.
+          if [[ -z "${APPLE_CERTIFICATE:-}" || -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            echo "No Apple signing certificate in this run (fork PR / no secrets) — building unsigned."
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
           # If no valid updater key is available, disable updater-artifact
           # generation for this build (Tauri refuses to build otherwise).
           EXTRA_CONFIG=""
