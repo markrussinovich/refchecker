@@ -263,7 +263,10 @@ jobs:
           # bundling/download step.
           n=0
           until [ "$n" -ge 3 ]; do
-            npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG && break
+            # --locked: build against the committed Cargo.lock exactly, never
+            # silently re-resolve a newer (possibly broken) transitive crate.
+            # This is the guard that prevents another `time 0.3.48` style drift.
+            npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG -- --locked && break
             n=$((n+1))
             echo "::warning::tauri build attempt $n failed (likely a transient tool-download 504); retrying in 45s…"
             sleep 45
