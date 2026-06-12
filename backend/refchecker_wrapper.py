@@ -2671,6 +2671,11 @@ class ProgressRefChecker:
                 return no_ref_result
 
             # Step 3: Check references in parallel (like CLI)
+            # total_refs MUST reflect the real, final reference count — this is
+            # the authoritative count the whole progress stream divides by. It
+            # is recomputed from len(references) here (after all extraction /
+            # de-dup / merge passes have run) so processed can never overshoot
+            # an early estimate and push the bar past 100% ("28/23 · 122%").
             total_refs = len(references)
             await self.emit_progress("references_extracted", {
                 "total_refs": total_refs,
@@ -2751,6 +2756,13 @@ class ProgressRefChecker:
             )
 
             # Step 4: Return final results
+            # Reconcile the reported total to the REAL final reference count.
+            # `results` is the verified reference list actually streamed to the
+            # UI; if it ever carries more entries than the early `total_refs`
+            # estimate (de-dup/merge/re-extraction), raise the total so
+            # processed_refs == total_refs and progress lands exactly at 100%
+            # rather than overshooting.
+            final_total_refs = max(total_refs, len(results))
             final_result = {
                 "paper_title": paper_title,
                 "paper_source": paper_source,
@@ -2758,8 +2770,8 @@ class ProgressRefChecker:
                 "bibliography_source_kind": bibliography_source_kind,
                 "references": results,
                 "summary": {
-                    "total_refs": total_refs,
-                    "processed_refs": total_refs,
+                    "total_refs": final_total_refs,
+                    "processed_refs": final_total_refs,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,

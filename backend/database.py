@@ -256,12 +256,26 @@ def _get_effective_reference_status(ref: Dict[str, Any], is_complete: bool) -> s
     return "verified"
 
 
-def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
+def _compute_reference_buckets_from_results(
+    results: List[Dict[str, Any]],
+    is_complete: bool,
+    stored_total_refs: Optional[int] = None,
+) -> Dict[str, int]:
     """Compute summary counters from stored check results.
 
     This mirrors ``web-ui/src/utils/referenceStatus.js`` so history cards and
     the selected-check Summary render the same numbers even if persisted
     aggregate columns are stale from an older run.
+
+    ``processed_refs`` is the count of distinct, non-pending reference results
+    actually present in ``results``. The persisted ``total_refs`` column is an
+    EARLY estimate (taken right after the first extraction); de-dup / merge /
+    re-extraction can land MORE references than that estimate, which made
+    ``processed_refs`` exceed ``total_refs`` and the UI render >100% ("28/23 ·
+    122%"). We therefore also return a reconciled ``total_refs`` that is never
+    below ``processed_refs`` — the real final count — so progress can never
+    overshoot. When ``stored_total_refs`` is None we fall back to
+    ``processed_refs`` as the total.
     """
     errors_count = 0
     warnings_count = 0
@@ -323,8 +337,19 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
         if effective_status in {"verified", "suggestion"}:
             refs_verified += 1
 
+    processed_refs = len(latest_results_by_index)
+    # Reconcile the total against the REAL processed count so progress never
+    # exceeds 100%. The stored total is an early extraction estimate; the
+    # actual reference set can be larger after de-dup/merge/re-extraction.
+    try:
+        _stored_total = int(stored_total_refs) if stored_total_refs is not None else 0
+    except (TypeError, ValueError):
+        _stored_total = 0
+    reconciled_total_refs = max(_stored_total, processed_refs)
+
     return {
-        "processed_refs": len(latest_results_by_index),
+        "processed_refs": processed_refs,
+        "total_refs": reconciled_total_refs,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
         "suggestions_count": suggestions_count,
@@ -722,12 +747,12 @@ class Database:
         their stored ``results_json``.
         """
         async with db.execute(
-            "SELECT id, status, results_json FROM check_history WHERE results_json IS NOT NULL AND results_json != ''"
+            "SELECT id, status, total_refs, results_json FROM check_history WHERE results_json IS NOT NULL AND results_json != ''"
         ) as cursor:
             rows = await cursor.fetchall()
 
         for row in rows:
-            check_id, status, raw_results = row
+            check_id, status, stored_total, raw_results = row
             if not raw_results:
                 continue
             try:
@@ -739,11 +764,13 @@ class Database:
             buckets = _compute_reference_buckets_from_results(
                 parsed,
                 is_complete=status in {"completed", "cancelled", "error"},
+                stored_total_refs=stored_total,
             )
             await db.execute(
                 """
                 UPDATE check_history
-                   SET errors_count = ?,
+                   SET total_refs = ?,
+                       errors_count = ?,
                        warnings_count = ?,
                        suggestions_count = ?,
                        unverified_count = ?,
@@ -755,6 +782,7 @@ class Database:
                  WHERE id = ?
                 """,
                 (
+                    buckets["total_refs"],
                     buckets["errors_count"],
                     buckets["warnings_count"],
                     buckets["suggestions_count"],
@@ -1063,7 +1091,10 @@ class Database:
                             buckets = _compute_reference_buckets_from_results(
                                 parsed_results,
                                 is_complete=item.get('status') in {'completed', 'cancelled', 'error'},
+                                stored_total_refs=item.get('total_refs'),
                             )
+                            # buckets carries a reconciled total_refs (>= processed_refs)
+                            # so the sidebar card never renders "59/43".
                             item.update(buckets)
                     history.append(item)
                 return history
@@ -1106,9 +1137,13 @@ class Database:
                     if result['results_json']:
                         result['results'] = json.loads(result['results_json'])
                         if isinstance(result['results'], list) and result['results']:
+                            # Pass the stored total so the recompute reconciles it
+                            # up to the real processed count (never < processed_refs),
+                            # keeping the selected-check Summary <= 100%.
                             result.update(_compute_reference_buckets_from_results(
                                 result['results'],
                                 is_complete=result.get('status') in {'completed', 'cancelled', 'error'},
+                                stored_total_refs=result.get('total_refs'),
                             ))
                     if result.get('issue_type_counts_json'):
                         result['issue_type_counts'] = json.loads(result['issue_type_counts_json'])
@@ -1625,9 +1660,13 @@ class Database:
             if not isinstance(results, list):
                 results = []
 
-            buckets = _compute_reference_buckets_from_results(results, is_complete=True)
+            buckets = _compute_reference_buckets_from_results(
+                results, is_complete=True, stored_total_refs=row["total_refs"],
+            )
             terminal_status = "completed" if buckets["processed_refs"] > 0 else "error"
-            total_refs = int(row["total_refs"] or 0) or buckets["processed_refs"]
+            # Reconciled total never sits below the real processed count, so a
+            # finalized orphan can't persist "processed > total" (>100% progress).
+            total_refs = buckets["total_refs"]
 
             from datetime import timezone as _tz
             completed_at = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")

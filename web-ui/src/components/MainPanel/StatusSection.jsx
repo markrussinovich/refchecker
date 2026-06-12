@@ -789,9 +789,19 @@ export default function StatusSection() {
     displayStatus = selectedCheck.status || 'idle'
     displayTitle = selectedCheck.custom_label || selectedCheck.paper_title
     displaySource = selectedCheck.paper_source
-    displayTotalRefs = selectedCheck.total_refs || 0
-    displayProcessedRefs = selectedCheck.processed_refs || 0
-    displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
+    // total_refs can be an early estimate that's smaller than the real
+    // (post de-dup/merge) processed count. Reconcile the total up to processed
+    // and clamp the displayed processed + progress so the bar never exceeds
+    // 100% ("28/23 · 122%"). REAL DATA ONLY — no fabricated references.
+    {
+      const rawTotal = selectedCheck.total_refs || 0
+      const rawProcessed = selectedCheck.processed_refs || 0
+      displayTotalRefs = Math.max(rawTotal, rawProcessed)
+      displayProcessedRefs = Math.min(rawProcessed, displayTotalRefs)
+    }
+    displayProgress = displayTotalRefs > 0
+      ? Math.min((displayProcessedRefs / displayTotalRefs) * 100, 100)
+      : 0
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
     displayHallucinationProvider = selectedCheck.hallucination_provider
@@ -819,6 +829,12 @@ export default function StatusSection() {
       displayMessage = 'Check failed'
     }
   }
+
+  // Final defensive clamp: the progress bar must never render past 100%,
+  // regardless of which path (live WebSocket stats or persisted history)
+  // produced displayProgress. Guards against a stale early total_refs estimate
+  // that lagged behind processed_refs.
+  displayProgress = Math.min(Math.max(displayProgress || 0, 0), 100)
 
   // Determine the source type - prefer selectedCheck, fall back to checkStore for current session
   const displaySourceType = selectedCheck?.source_type || (isCurrentSessionCheck ? checkStoreSourceType : null)
