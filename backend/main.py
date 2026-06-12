@@ -4200,6 +4200,22 @@ async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require
             else:
                 text = _read_textfile(paper_source)
 
+        # 1b) Pasted text / .bib / .bbl / .tex (source_type == 'text'). The body
+        #     is saved to a temp file (read it) — or, for an inline paste, IS the
+        #     stored string. Without this the DocumentViewer fell through to the
+        #     cached-PDF lookup below (no PDF exists for a structured/text
+        #     source) and showed "the original document text isn't available".
+        if not (text or "").strip() and source_type == 'text' and paper_source:
+            if os.path.exists(paper_source):
+                if paper_source.lower().endswith('.pdf'):
+                    text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+                    fmt = "pdf"
+                else:
+                    text = _read_textfile(paper_source)
+            elif len(paper_source) > 200:
+                # The pasted content was stored inline rather than as a file path.
+                text = paper_source
+
         # 2) URL / DOI input — reuse the PDF cached during the check.
         if not (text or "").strip() and paper_source:
             try:
