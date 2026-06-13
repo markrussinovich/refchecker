@@ -297,8 +297,15 @@ Legend: ✅ available · — not applicable to that surface · 🌐 needs a host
 
 ### Web UI
 
-<!-- screenshot: webui-main — main UI showing a completed check with stats badges and reference cards -->
-![RefChecker Web UI](assets/webui.png)
+A completed check — summary health, the 2×2 article-tools grid (retractions · gap-finder · citation-numbering · chat & summarize), and AI-generated-text detection with a per-page breakdown:
+
+<!-- screenshot: webui-main — completed check: stats badges, 2×2 action grid, AI-detection -->
+![RefChecker — completed check overview](assets/webui.png)
+
+Per-reference verification and enrichment — matched database, verified/DOI links, citation counts, and the Additional-Info bar (abstract · claim · topics · full link · add-to-library):
+
+<!-- screenshot: webui-references — a reference card with verification + enrichment -->
+![RefChecker — reference verification detail](assets/webui-references.png)
 
 ### CLI — Startup banner
 
