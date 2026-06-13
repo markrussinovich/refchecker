@@ -15,6 +15,7 @@ from refchecker.core.hallucination_policy import (
     should_defer_likely_to_llm,
     should_check_hallucination,
     _compute_author_overlap,
+    _reverify_with_llm_metadata,
     _strip_team_names,
 )
 from refchecker.core.report_builder import ReportBuilder
@@ -1804,6 +1805,33 @@ def test_unlikely_low_overlap_accepts_found_authors_when_found_title_matches_cit
 
     assert verdict == 'UNLIKELY'
     assert 'corrected' not in explanation
+
+
+def test_reverify_llm_metadata_parses_last_first_author_lists():
+    issues = _reverify_with_llm_metadata(
+        {
+            'title': 'Marlowe: Stanford’s gpu-based computational instrument',
+            'authors': [
+                'Craig Kapfer',
+                'Kurt Stine',
+                'Balasubramanian Narasimhan',
+                'Christopher Mentzel',
+                'Emmanuel Candes',
+            ],
+            'year': 2025,
+        },
+        [],
+        {
+            'found_title': 'Marlowe: Stanford’s gpu-based computational instrument',
+            'found_authors': (
+                'Kapfer, Craig, Stine, Kurt, Narasimhan, Balasubramanian, '
+                'Mentzel, Christopher, Candès, Emmanuel'
+            ),
+            'found_year': '2025',
+        },
+    )
+
+    assert issues == []
 
 
 def test_unlikely_author_guard_allows_compressed_lastname_initial_lists():
