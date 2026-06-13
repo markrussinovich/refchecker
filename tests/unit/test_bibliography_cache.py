@@ -21,11 +21,12 @@ class _Extractor:
 def test_bibliography_cache_is_scoped_by_llm_identity(tmp_path):
     input_spec = "https://openreview.net/forum?id=testPaper123"
     bibliography = [{"title": "A cached reference"}]
+    current_identity = llm_cache_identity_from_extractor(_Extractor())
 
-    cache_bibliography(str(tmp_path), input_spec, bibliography, "OpenAIProvider:gpt-4.1:")
+    cache_bibliography(str(tmp_path), input_spec, bibliography, current_identity)
 
-    assert cached_bibliography(str(tmp_path), input_spec, "OpenAIProvider:gpt-4.1:") == bibliography
-    assert cached_bibliography(str(tmp_path), input_spec, "OpenAIProvider:gpt-4o:") is None
+    assert cached_bibliography(str(tmp_path), input_spec, current_identity) == bibliography
+    assert cached_bibliography(str(tmp_path), input_spec, current_identity.replace("gpt-4.1", "gpt-4o")) is None
 
 
 def test_bibliography_cache_ignores_legacy_unscoped_file(tmp_path):
@@ -39,10 +40,19 @@ def test_bibliography_cache_ignores_legacy_unscoped_file(tmp_path):
 
 
 def test_bibliography_cache_filename_is_llm_specific():
-    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:") != bibliography_cache_filename("OpenAIProvider:gpt-4o:")
-    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:").startswith("bibliography_")
+    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v4") != bibliography_cache_filename("OpenAIProvider:gpt-4o:refparse-v4")
+    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v4").startswith("bibliography_")
 
 
 def test_llm_cache_identity_from_extractor_includes_provider_model_and_endpoint():
-    assert llm_cache_identity_from_extractor(_Extractor()) == "_Provider:gpt-4.1:https://api.example.test/v1"
-    assert llm_cache_identity_from_extractor(None) == "no_llm"
+    assert llm_cache_identity_from_extractor(_Extractor()) == "_Provider:gpt-4.1:https://api.example.test/v1:refparse-v4"
+    assert llm_cache_identity_from_extractor(None) == "no_llm:refparse-v4"
+
+
+def test_bibliography_cache_ignores_previous_extraction_version(tmp_path):
+    input_spec = "https://arxiv.org/pdf/2602.06718"
+    stale_bibliography = [{"title": "Stale 46-reference extraction"}]
+
+    cache_bibliography(str(tmp_path), input_spec, stale_bibliography, "_Provider:gpt-4.1:https://api.example.test/v1")
+
+    assert cached_bibliography(str(tmp_path), input_spec, llm_cache_identity_from_extractor(_Extractor())) is None

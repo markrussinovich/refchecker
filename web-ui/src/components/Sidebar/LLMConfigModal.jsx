@@ -4,14 +4,14 @@ import Button from '../common/Button'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useKeyStore } from '../../stores/useKeyStore'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { validateLLMConfig } from '../../utils/api'
+import { validateLLMConfig, listLLMModels } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 // Keep in sync with src/refchecker/config/settings.py DEFAULT_EXTRACTION_MODELS
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, hallucinationCapable: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true, hallucinationCapable: true },
-  { id: 'google', name: 'Google', defaultModel: 'gemini-2.5-flash', requiresKey: true, hallucinationCapable: true },
+  { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite-preview', requiresKey: true, hallucinationCapable: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
   { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true, hallucinationCapable: false },
 ]
@@ -19,32 +19,38 @@ const PROVIDERS = [
 /**
  * Modal for adding/editing LLM configurations
  */
-export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null }) {
-  const { addConfig, updateConfig, configs } = useConfigStore()
+export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null, selectionMode = 'extraction' }) {
+  const { addConfig, updateConfig, configs, selectHallucinationConfig, selectConfig } = useConfigStore()
   const multiuser = useAuthStore(state => state.multiuser)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState(null)
 
   const [formData, setFormData] = useState({
-    name: '',
     provider: 'anthropic',
     model: '',
     api_key: '',
     endpoint: '',
   })
 
+  // Live model lookup state
+  const [modelOptions, setModelOptions] = useState([]) // string[]
+  const [modelSource, setModelSource] = useState(null) // 'live' | 'fallback' | null
+  const [modelFetching, setModelFetching] = useState(false)
+  const [modelError, setModelError] = useState(null)
+
+  // Test-connection state
+  const [testResult, setTestResult] = useState(null) // { ok, message }
+  const [testing, setTesting] = useState(false)
+
   // Reset form when modal opens/closes or editConfig changes
   useEffect(() => {
     if (isOpen) {
       // When creating a new config with a prefillConfig (keyless config for same provider),
-      // use its name/model/provider so the user just needs to add the API key
+      // use its model/provider so the user just needs to add the API key
       const source = editConfig || prefillConfig
       const defaultProvider = source?.provider || 'anthropic'
-      const providerInfo = PROVIDERS.find(p => p.id === defaultProvider)
-      const defaultModel = providerInfo?.defaultModel || ''
       setFormData({
-        name: source?.name || defaultModel,
         provider: defaultProvider,
         model: source?.model || '',
         api_key: '',
@@ -69,6 +75,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     (existingProviderConfig ? useKeyStore.getState().getKey(`llm:${existingProviderConfig.id}`) : null)
   )
   const hasReusableProviderKey = !!existingProviderConfig || !!reusableProviderKey
+  const hasServerEnvironmentKey = existingProviderConfig?.key_source === 'environment' || existingProviderConfig?.env_key_available
 
   useEffect(() => {
     if (!multiuser) return
@@ -79,53 +86,92 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         provider: fallbackProvider?.id || 'anthropic',
         model: '',
         endpoint: '',
-        name: (!prev.name || prev.name === 'meta-llama/Llama-3.1-8B-Instruct')
-          ? (fallbackProvider?.defaultModel || prev.name)
-          : prev.name,
       }))
     }
   }, [availableProviders, formData.provider, multiuser])
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => {
-      const updated = { ...prev, [name]: value }
-      // Auto-update config name when model changes (only if name is empty or matches old model)
-      if (name === 'model' && !editConfig) {
-        const oldModel = prev.model || selectedProvider?.defaultModel || ''
-        if (!prev.name || prev.name === oldModel) {
-          updated.name = value || selectedProvider?.defaultModel || ''
-        }
-      }
-      return updated
-    })
+    setFormData(prev => ({ ...prev, [name]: value }))
     setError(null)
   }
 
   const handleProviderChange = (e) => {
     const provider = e.target.value
-    const providerInfo = availableProviders.find(p => p.id === provider)
-    setFormData(prev => {
-      const oldModel = prev.model || selectedProvider?.defaultModel || ''
-      const newDefaultModel = providerInfo?.defaultModel || ''
-      return {
-        ...prev,
-        provider,
-        model: '', // Reset model when provider changes
-        // Auto-update name if it was empty or matched the old model
-        name: (!prev.name || prev.name === oldModel) ? newDefaultModel : prev.name,
-        endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
-      }
-    })
+    setFormData(prev => ({
+      ...prev,
+      provider,
+      model: '', // Reset model when provider changes
+      endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
+    }))
     setError(null)
+    setModelOptions([])
+    setModelSource(null)
+    setModelError(null)
+    setTestResult(null)
+  }
+
+  // Live model lookup — falls back to the curated static list when the
+  // provider's /models endpoint isn't available or returns an error.
+  const handleFetchModels = async () => {
+    setModelError(null)
+    setModelFetching(true)
+    try {
+      const effectiveKey = formData.api_key.trim() || reusableProviderKey || undefined
+      const res = await listLLMModels(
+        formData.provider,
+        effectiveKey,
+        formData.endpoint.trim() || undefined,
+      )
+      setModelOptions(res.data.models || [])
+      setModelSource(res.data.source || 'fallback')
+      if (res.data.error) setModelError(res.data.error)
+    } catch (err) {
+      setModelError(err.response?.data?.detail || err.message || 'Lookup failed')
+      setModelOptions([])
+      setModelSource(null)
+    } finally {
+      setModelFetching(false)
+    }
+  }
+
+  // "Test connection" — runs the same validation the Save flow does, but
+  // without persisting. Lets users iterate on model+key before committing.
+  const handleTestConnection = async () => {
+    setTestResult(null)
+    if (selectedProvider?.requiresKey && !formData.api_key.trim() && !hasReusableProviderKey) {
+      setTestResult({ ok: false, message: 'Enter an API key first.' })
+      return
+    }
+    if (selectedProvider?.requiresEndpoint && !formData.endpoint.trim()) {
+      setTestResult({ ok: false, message: 'Endpoint URL is required.' })
+      return
+    }
+    setTesting(true)
+    try {
+      const payload = {
+        provider: formData.provider,
+        model: formData.model.trim() || selectedProvider?.defaultModel || null,
+        api_key: formData.api_key.trim() || reusableProviderKey || undefined,
+        endpoint: formData.endpoint.trim() || undefined,
+      }
+      const res = await validateLLMConfig(payload)
+      if (res.data?.valid) {
+        setTestResult({ ok: true, message: res.data.message || res.data.warning || 'Connection successful' })
+      } else {
+        setTestResult({ ok: false, message: res.data?.error || 'Validation failed' })
+      }
+    } catch (err) {
+      let msg = err.response?.data?.detail
+      if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join(', ')
+      else if (msg && typeof msg !== 'string') msg = msg.message || JSON.stringify(msg)
+      setTestResult({ ok: false, message: msg || err.message || 'Test failed' })
+    } finally {
+      setTesting(false)
+    }
   }
 
   const validate = () => {
-    if (!formData.name.trim()) {
-      setError('Name is required')
-      return false
-    }
-
     if (selectedProvider?.requiresKey && !editConfig && !formData.api_key.trim() && !hasReusableProviderKey) {
       setError('API key is required')
       return false
@@ -148,10 +194,13 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     setError(null)
 
     try {
+      const effectiveModel = formData.model.trim() || selectedProvider?.defaultModel || null
       const configData = {
-        name: formData.name.trim(),
+        // Name is no longer user-editable; use the model identifier so it
+        // shows up consistently in selectors and history rows.
+        name: effectiveModel || formData.provider,
         provider: formData.provider,
-        model: formData.model.trim() || selectedProvider?.defaultModel || null,
+        model: effectiveModel,
         endpoint: formData.endpoint.trim() || null,
       }
 
@@ -233,11 +282,14 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         savedConfig = await updateConfig(prefillConfig.id, configData)
         // Re-fetch configs to get updated has_key flags from backend
         await useConfigStore.getState().fetchConfigs()
-        // Auto-select the newly keyed config
-        await useConfigStore.getState().selectConfig(prefillConfig.id)
+        if (selectionMode === 'hallucination') {
+          selectHallucinationConfig(prefillConfig.id)
+        } else {
+          await selectConfig(prefillConfig.id)
+        }
         logger.info('LLMConfigModal', 'Keyless config updated with key')
       } else {
-        savedConfig = await addConfig(configData)
+        savedConfig = await addConfig(configData, { selectFor: selectionMode })
         logger.info('LLMConfigModal', 'Config created')
       }
 
@@ -269,31 +321,6 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Name */}
-        <div>
-          <label 
-            htmlFor="name"
-            className="block text-sm font-medium mb-1"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            Configuration Name
-          </label>
-          <input
-            type="text"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="e.g., My GPT-4"
-            className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
-            }}
-          />
-        </div>
-
         {/* Provider */}
         <div>
           <label 
@@ -329,41 +356,66 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
           </p>
         </div>
 
-        {/* Model */}
+        {/* Model — combobox: live dropdown of available models + free text */}
         <div>
-          <label 
+          <label
             htmlFor="model"
             className="block text-sm font-medium mb-1"
             style={{ color: 'var(--color-text-primary)' }}
           >
             Model
-            <span 
-              className="ml-1 font-normal"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
+            <span className="ml-1 font-normal" style={{ color: 'var(--color-text-muted)' }}>
               (optional)
             </span>
           </label>
-          <input
-            type="text"
-            id="model"
-            name="model"
-            value={formData.model}
-            onChange={handleChange}
-            placeholder={selectedProvider?.defaultModel || 'Default model'}
-            className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
-            }}
-          />
-          <p 
-            className="mt-1 text-xs"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            Default: {selectedProvider?.defaultModel}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              id="model"
+              name="model"
+              list="llm-model-options"
+              autoComplete="off"
+              value={formData.model}
+              onChange={handleChange}
+              placeholder={selectedProvider?.defaultModel || 'Default model'}
+              className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
+              style={{
+                backgroundColor: 'var(--color-bg-secondary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleFetchModels}
+              disabled={modelFetching}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+                opacity: modelFetching ? 0.6 : 1,
+              }}
+              title="Query the provider's /models endpoint with the current API key. Falls back to a curated list when the live lookup isn't supported."
+            >
+              {modelFetching ? 'Loading…' : 'Fetch'}
+            </button>
+          </div>
+          <datalist id="llm-model-options">
+            {modelOptions.map(m => <option key={m} value={m} />)}
+          </datalist>
+          <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            {modelSource === 'live'
+              ? `Live list from provider (${modelOptions.length} models). You can also type any model id.`
+              : modelSource === 'fallback'
+                ? `Showing curated fallback list (${modelOptions.length} models). Type any model id, or click Fetch with a valid API key.`
+                : `Default: ${selectedProvider?.defaultModel}. Type any model id, or click Fetch to query the provider with your API key.`}
           </p>
+          {modelError && (
+            <p className="mt-1 text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>
+              Lookup error: {modelError}
+            </p>
+          )}
         </div>
 
         {/* API Key */}
@@ -403,9 +455,13 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               style={{ color: 'var(--color-text-muted)' }}
             >
               {multiuser
-                ? 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
+                ? hasServerEnvironmentKey && !formData.api_key
+                  ? 'Using the server environment key by default. Enter a key here to override it for this browser.'
+                  : 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
                 : hasReusableProviderKey && !editConfig
-                  ? 'Defaults to the existing encrypted provider key in the local RefChecker database.'
+                  ? hasServerEnvironmentKey
+                    ? 'Defaults to the server environment key. Enter a key here to store a local encrypted override.'
+                    : 'Defaults to the existing encrypted provider key in the local RefChecker database.'
                   : 'Stored encrypted in the local RefChecker database and never shown again.'}
             </p>
           </div>
@@ -454,22 +510,49 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
           </div>
         )}
 
+        {/* Test result */}
+        {testResult && (
+          <div
+            className="p-3 rounded-lg border text-sm"
+            style={{
+              backgroundColor: testResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+              borderColor: testResult.ok ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)',
+              color: testResult.ok ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)',
+              wordBreak: 'break-word',
+            }}
+          >
+            {testResult.ok ? '✓ ' : '✗ '}{testResult.message}
+          </div>
+        )}
+
         {/* Actions */}
-        <div className="flex justify-end gap-3 pt-2">
-          <Button 
-            type="button" 
-            variant="secondary" 
-            onClick={onClose}
-            disabled={isSubmitting || isValidating}
+        <div className="flex justify-between gap-3 pt-2 items-center flex-wrap">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleTestConnection}
+            disabled={isSubmitting || isValidating || testing}
+            loading={testing}
+            title="Run a small live call to verify the API key + model before saving"
           >
-            Cancel
+            {testing ? 'Testing…' : 'Test connection'}
           </Button>
-          <Button 
-            type="submit" 
-            loading={isSubmitting || isValidating}
-          >
-            {isValidating ? 'Validating...' : (editConfig ? 'Save Changes' : 'Add Configuration')}
-          </Button>
+          <div className="flex gap-3 ml-auto">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={isSubmitting || isValidating}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              loading={isSubmitting || isValidating}
+            >
+              {isValidating ? 'Validating...' : (editConfig ? 'Save Changes' : 'Add Configuration')}
+            </Button>
+          </div>
         </div>
       </form>
     </Modal>

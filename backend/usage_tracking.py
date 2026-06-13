@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 from urllib.parse import urlparse
 
-from .database import get_data_dir
+from .database import get_data_dir, get_logs_dir
 from refchecker.utils.url_utils import extract_arxiv_id_from_url
 
 
@@ -62,7 +62,7 @@ def get_usage_log_path() -> Path:
     if configured:
         log_path = Path(configured).expanduser()
     else:
-        log_path = get_data_dir() / "logs" / "usage-events.jsonl"
+        log_path = get_logs_dir() / "usage-events.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     return log_path
 

@@ -1,0 +1,145 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RefChecker",
+  "version": "../package.json",
+  "identifier": "com.ariomoniri.refchecker",
+  "build": {
+    "frontendDist": "../frontend",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "RefChecker",
+        "label": "main",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "url": "index.html",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": true,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "copyright": "Copyright (c) 2026 Ario Moniri. Based on RefChecker by Mark Russinovich (MIT).",
+    "shortDescription": "Validate academic paper references",
+    "longDescription": "Desktop wrapper around RefChecker. Validates citations against Semantic Scholar, OpenAlex, CrossRef, DBLP, and ACL Anthology, and uses LLM-powered search to detect likely fabricated references.",
+    "externalBin": [
+      "binaries/refchecker-server"
+    ],
+    "resources": [],
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "PDF Document",
+        "description": "Open this PDF in RefChecker to validate its citations",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["bib", "bbl"],
+        "name": "BibTeX Bibliography",
+        "description": "Open this bibliography in RefChecker to verify each entry",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["tex", "latex"],
+        "name": "LaTeX Source",
+        "description": "Open this LaTeX file in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Open this Word document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["odt"],
+        "name": "OpenDocument Text",
+        "description": "Open this ODT document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["rtf"],
+        "name": "Rich Text",
+        "description": "Open this RTF document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown",
+        "description": "Open this Markdown file in RefChecker",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["html", "htm"],
+        "name": "HTML",
+        "description": "Open this HTML file in RefChecker",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Plain Text",
+        "description": "Open this text file in RefChecker",
+        "role": "Viewer"
+      }
+    ],
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0",
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/ArioMoniri/refchecker/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhCMkQzMTI4Qjc5QjBGRUUKUldUdUQ1dTNLREV0aStZWGZMcG9QZmxtYjN5U2NkVjRUem5Nd3d0T1VOOGpvMXVTZ3VtS2s0SFgK"
+    }
+  }
+}

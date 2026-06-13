@@ -1,17 +1,82 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import {
   formatAuthors,
+  normalizeAuthors,
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
   exportReferenceAsBibtex,
-  copyToClipboard
+  exportReferenceAsStyle,
+  CITATION_STYLE_DEFAULTS,
+  copyToClipboard,
+  displayReferenceValue,
 } from '../../utils/formatters'
 import {
   getEffectiveReferenceStatus,
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
+import { openExternal, isTauri } from '../../utils/tauriBridge'
+import { useStyleStore } from '../../stores/useStyleStore'
+import {
+  shouldSuppressVenueWarning,
+  acronymFor,
+  fullNameFor,
+  styleAcceptsAbbreviatedVenue,
+} from '../../utils/venueAbbreviations'
+import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
+
+// Click handler that routes link clicks through Tauri's shell plugin when
+// running inside the desktop app. Belt-and-braces alongside the global
+// capture-phase handler in main.jsx — if the global one is somehow
+// missed (e.g. by an earlier listener calling stopImmediatePropagation),
+// the explicit onClick here still does the right thing.
+const handleExternalClick = (url) => (e) => {
+  if (!isTauri()) return // let the browser handle it normally
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+  e.preventDefault()
+  openExternal(url)
+}
 
 const urlPattern = /https?:\/\/[^\s]+/g
+
+function normalizeCitationMarkerText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .trim()
+    .toLowerCase()
+}
+
+function findCitationMarkerRange(sentence, marker) {
+  if (!sentence || !marker) return null
+  const exactAt = sentence.indexOf(marker)
+  if (exactAt >= 0) return { start: exactAt, end: exactAt + marker.length }
+
+  const normalizedMarker = normalizeCitationMarkerText(marker)
+  if (!normalizedMarker) return null
+  const markerCore = normalizedMarker.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
+  const normalizedCore = markerCore || normalizedMarker
+
+  const candidates = []
+  for (let start = 0; start < sentence.length; start += 1) {
+    const ch = sentence[start]
+    if (ch !== '(' && ch !== '[' && !/[A-Za-z]/.test(ch)) continue
+    const windowEnd = Math.min(sentence.length, start + Math.max(marker.length + 24, 24))
+    for (let end = start + 3; end <= windowEnd; end += 1) {
+      const raw = sentence.slice(start, end)
+      const normalized = normalizeCitationMarkerText(raw)
+      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
+        candidates.push({ start, end, length: end - start })
+      }
+    }
+  }
+
+  if (!candidates.length) return null
+  candidates.sort((a, b) => a.length - b.length || a.start - b.start)
+  return { start: candidates[0].start, end: candidates[0].end }
+}
 
 // Parse error_details to extract cited/actual values and format on separate lines
 // Handles new format: "Title mismatch:\n       cited:  value\n       actual: value"
@@ -192,16 +257,27 @@ function CollapsibleText({ text }) {
 /**
  * Individual reference card matching CLI output format
  */
-const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs }) {
+const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs, isCheckComplete = false }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
-  const status = getEffectiveReferenceStatus(reference)
+  const status = getEffectiveReferenceStatus(reference, isCheckComplete)
+
+  // Subscribe to the shared citation-style store so the card re-renders
+  // when the user changes the style picker on the References tab.
+  const activeFormat = useStyleStore(s => s.format)
+  const activeStyleOptions = useStyleStore(s => s.styleOptions)
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef(null)
+
+  // v0.7.67: per-card collapse state for the citation-context list.
+  // Collapsed by default so cards stay compact even when a ref is cited
+  // multiple times; expands inline on click. Persists nothing — every
+  // tab switch or re-render starts collapsed again.
+  const [contextOpen, setContextOpen] = useState(false)
 
   // Close export menu on outside click
   useEffect(() => {
@@ -419,11 +495,13 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
   const matchedDatabase = hasLlmVerifiedUrl
     ? 'LLM search'
-    : reference.matched_database || (
-      reference.status === 'verified' && reference.cited_url && !reference.authoritative_urls?.length
-        ? 'Web page'
-        : null
-    )
+    : reference.from_fuzzy_cache
+      ? `Cache (fuzzy${reference.fuzzy_match_score ? ` · score ${reference.fuzzy_match_score}` : ''})`
+      : reference.matched_database || (
+        reference.status === 'verified' && reference.cited_url && !reference.authoritative_urls?.length
+          ? 'Web page'
+          : null
+      )
 
   const displayUrls = hasLlmVerifiedUrl
     ? (reference.authoritative_urls || []).filter(urlObj => urlObj.type === 'llm_verified').concat(
@@ -444,10 +522,38 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
       error_type: issue.warning_type,
       error_details: issue.warning_details || '',
     }))
-  const displayWarnings = foundMetadataMatchesCitation ? [] : (recheckWarnings.length > 0 ? recheckWarnings : (reference.warnings || []))
+  const baseDisplayWarnings = foundMetadataMatchesCitation
+    ? []
+    : (recheckWarnings.length > 0 ? recheckWarnings : (reference.warnings || []))
+  // Style-aware venue suppression. When the active citation style
+  // permits NLM-style abbreviated journal titles AND the cited venue
+  // is a known abbreviation of the database venue, the venue warning
+  // is a false positive. Suppression runs at render time, so flipping
+  // the style dropdown re-evaluates instantly.
+  const displayWarnings = baseDisplayWarnings.filter(w => {
+    const t = (w.warning_type || w.error_type || '').toLowerCase()
+    if (t !== 'venue') return true
+    return !shouldSuppressVenueWarning({
+      cited_value: reference.venue,
+      actual_value: w.ref_venue_correct || w.actual_value,
+      warning_details: w.warning_details || w.error_details,
+    }, activeFormat)
+  })
   const displayErrors = (reference.errors || [])
     .filter(issue => issue.error_type && issue.error_type !== 'unverified')
     .filter(() => !foundMetadataMatchesCitation)
+    .filter(issue => {
+      // Same style-aware suppression for errors typed as 'venue'.
+      const t = (issue.error_type || '').toLowerCase()
+      if (t !== 'venue') return true
+      return !shouldSuppressVenueWarning({
+        cited_value: reference.venue,
+        actual_value: issue.ref_venue_correct || issue.actual_value,
+        warning_details: issue.error_details,
+      }, activeFormat)
+    })
+  const displayVenue = displayReferenceValue(reference.venue)
+  const displayYear = displayReferenceValue(reference.year)
 
   return (
     <div
@@ -525,46 +631,98 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           </div>
 
-          {/* Authors */}
-          {reference.authors?.length > 0 && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {formatAuthors(reference.authors)}
-            </div>
-          )}
-
-          {/* Venue */}
-          {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {reference.venue}
-            </div>
-          )}
-
-          {/* Year */}
-          {reference.year && reference.year !== 0 && reference.year !== '0' && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {reference.year}
-            </div>
-          )}
-
-          {/* Cited URL */}
-          {reference.cited_url && (
-            <div>
-              <a
-                href={reference.cited_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline mobile-break-url"
-                style={{ color: 'var(--color-link)' }}
+          {/* When a non-default citation style is picked, render the
+              reference once in that style and hide the duplicated
+              structured rows below. With Plain text (ACM) selected
+              we fall through to the structured authors / venue / year
+              / cited-url layout which is the original behaviour. */}
+          {(() => {
+            const stylePicked = activeFormat && activeFormat !== 'plaintext'
+            if (!stylePicked) return null
+            const styleDefaults = CITATION_STYLE_DEFAULTS[activeFormat] || {}
+            const effectiveOpts = { ...styleDefaults, ...(activeStyleOptions || {}) }
+            let rendered = ''
+            try { rendered = exportReferenceAsStyle(reference, activeFormat, index, effectiveOpts) } catch { return null }
+            if (!rendered) return null
+            return (
+              <div
+                className="mt-1 mb-1 px-2 py-1 rounded text-xs"
+                style={{
+                  background: 'var(--color-bg-tertiary)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  fontFamily: activeFormat === 'bibtex' || activeFormat === 'bibitem' ? 'ui-monospace, monospace' : undefined,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
               >
-                {reference.cited_url}
-              </a>
-            </div>
+                {rendered}
+              </div>
+            )
+          })()}
+
+          {/* Structured rows — only shown when the style picker is on Plain
+              text (ACM). With APA / IEEE / BibTeX / etc. picked, the
+              styled preview block above already contains all this. */}
+          {(activeFormat === 'plaintext' || !activeFormat) && (
+            <>
+              {/* Authors — per-name hover surfaces ORCID + OpenAlex
+                  profile links when the enrichment payload has them.
+                  Falls back to a plain comma-joined string when no
+                  enrichment is available (extractor-only refs). */}
+              {normalizeAuthors(reference.authors).length > 0 && (
+                <AuthorsLine
+                  authors={reference.authors}
+                  enrichedAuthors={reference.enrichment?.authors}
+                />
+              )}
+
+              {/* Venue — hover surfaces the journal/conference page on
+                  OpenAlex when we have a source_id from enrichment.
+                  Inline parenthetical shows the OTHER form (full name
+                  if user cited acronym, or NLM acronym if user cited
+                  full name AND the active style accepts abbrevs).
+                  Re-evaluates when style changes. */}
+              {displayVenue && displayVenue !== 0 && displayVenue !== '0' && (
+                <VenueLine
+                  venue={displayVenue}
+                  fullVenue={reference.enrichment?.venue}
+                  venueOpenalexId={reference.enrichment?.venue_id}
+                  activeStyle={activeFormat}
+                />
+              )}
+
+              {/* Year — with accessed date if it differs from the
+                  published year (web-style references like "Accessed
+                  2024-03-12; published 2018"). */}
+              {displayYear && displayYear !== 0 && displayYear !== '0' && (
+                <div
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {displayYear}
+                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(displayYear) && (
+                    <span style={{ color: 'var(--color-text-muted)' }}>
+                      {' '}· accessed {reference.accessed_date}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Cited URL */}
+              {reference.cited_url && (
+                <div>
+                  <a
+                    href={reference.cited_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline mobile-break-url"
+                    style={{ color: 'var(--color-link)' }}
+                  >
+                    {reference.cited_url}
+                  </a>
+                </div>
+              )}
+            </>
           )}
 
           {/* Divider before verification results */}
@@ -594,6 +752,159 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {/* Citation context — the actual passage(s) in the paper body
+              where this reference is cited. v0.7.67: collapsed by
+              default behind a `▶ Context (N×)` toggle, then renders one
+              SEPARATE box per occurrence (up to 3) with the citation
+              marker highlighted so the user can spot misattributions at
+              a glance. Falls back to the legacy single-string
+              `citation_context` field when the backend hasn't populated
+              the new array yet. */}
+          {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
+            <div className="flex mb-1" style={{ minWidth: 0 }}>
+              <span
+                className="flex-shrink-0"
+                style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+              >
+                {/* Toggle row — header label + arrow indicator. Whole
+                    row is the click target so users can hit either the
+                    arrow OR the label. Mimics the native <details>
+                    affordance without relying on browser styling. */}
+                <button
+                  type="button"
+                  onClick={() => setContextOpen((v) => !v)}
+                  aria-expanded={contextOpen}
+                  title={contextOpen ? 'Hide citation contexts' : 'Show citation contexts'}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    cursor: 'pointer',
+                    color: 'var(--color-text-secondary)',
+                    font: 'inherit',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                >
+                  <span style={{ display: 'inline-block', width: '0.9em' }}>
+                    {contextOpen ? '▼' : '▶'}
+                  </span>
+                  {' '}
+                  {reference.citation_count > 1
+                    ? `Context (${reference.citation_count}×)`
+                    : 'Context'}
+                </button>
+              </span>
+              <div
+                style={{
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {contextOpen && (
+                  reference.citation_contexts?.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
+                        // Split sentence at marker for inline bold
+                        // without dangerouslySetInnerHTML.
+                        const marker = ctx.marker || ''
+                        const sent = ctx.sentence || ''
+                        const markerRange = findCitationMarkerRange(sent, marker)
+                        const markerAt = markerRange ? markerRange.start : -1
+                        const markerEnd = markerRange ? markerRange.end : -1
+                        const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
+                        const head = markerRange ? sent.slice(0, markerAt) : sent
+                        const tail = markerRange ? sent.slice(markerEnd) : ''
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              color: 'var(--color-text-primary)',
+                              background: 'var(--color-bg-secondary)',
+                              border: '1px solid var(--color-border, #d4d4d8)',
+                              borderLeft: '3px solid var(--color-accent, #3b82f6)',
+                              borderRadius: 6,
+                              padding: '8px 10px',
+                              boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
+                            }}
+                            title="Sentence around the citation marker in the source paper"
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                marginBottom: 5,
+                                color: 'var(--color-text-muted)',
+                                fontSize: '0.72rem',
+                                fontStyle: 'normal',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}
+                            >
+                              <span>Excerpt {i + 1}</span>
+                              {marker && (
+                                <span
+                                  style={{
+                                    color: 'var(--color-accent, #3b82f6)',
+                                    background: 'var(--color-bg-tertiary)',
+                                    border: '1px solid var(--color-border, #d4d4d8)',
+                                    borderRadius: 999,
+                                    padding: '0 6px',
+                                    textTransform: 'none',
+                                    letterSpacing: 0,
+                                  }}
+                                >
+                                  {marker}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
+                              {ctx.before && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {ctx.before}{' '}
+                                </span>
+                              )}
+                              <span>
+                                {head}
+                              </span>
+                              {markerRange && (
+                                <span
+                                  style={{
+                                    fontStyle: 'normal',
+                                    fontWeight: 700,
+                                    color: 'var(--color-accent, #3b82f6)',
+                                  }}
+                                >
+                                  {markerText}
+                                </span>
+                              )}
+                              <span>{tail}</span>
+                              {ctx.after && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {' '}{ctx.after}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <span
+                      style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
+                      title="Sentence around the citation marker in the source paper"
+                    >
+                      {reference.citation_context}
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Authoritative URLs - deduplicate arxiv URLs (prefer abs over pdf) */}
           {(() => {
             const urls = displayUrls
@@ -614,7 +925,11 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             })
 
             return filteredUrls.map((urlObj, i) => (
-              <div key={i} className="flex">
+              <div
+                key={i}
+                className="flex gap-2"
+                style={{ minWidth: 0 }}
+              >
                 <span
                   className="flex-shrink-0"
                   style={{ color: 'var(--color-text-secondary)', width: '120px' }}
@@ -625,14 +940,27 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   href={urlObj.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:underline mobile-break-url"
-                  style={{ color: 'var(--color-link)' }}
+                  onClick={handleExternalClick(urlObj.url)}
+                  className="hover:underline"
+                  style={{
+                    color: 'var(--color-link)',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-all',
+                    minWidth: 0,
+                    flex: '1 1 auto',
+                  }}
                 >
                   {urlObj.url}
                 </a>
               </div>
             ))
           })()}
+
+          {/* Display-ready enrichment from OpenAlex / Crossref / S2 —
+              cited-by count, refs count, OA, external IDs, FoS chips,
+              per-author ORCID popover. Renders nothing when no
+              enrichment data is available. */}
+          <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
@@ -835,6 +1163,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   if (prevProps.index !== nextProps.index) return false
   if (prevProps.displayIndex !== nextProps.displayIndex) return false
   if (prevProps.totalRefs !== nextProps.totalRefs) return false
+  if (prevProps.isCheckComplete !== nextProps.isCheckComplete) return false
   const prev = prevProps.reference
   const next = nextProps.reference
   if (prev === next) return true
@@ -854,5 +1183,346 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.authoritative_urls === next.authoritative_urls
   )
 })
+
+/**
+ * Authors line with per-name hover. Matches each surface-string token
+ * back to an enrichment record (by surname) so authors that have an
+ * ORCID or OpenAlex profile in the OpenAlex/Crossref enrichment
+ * payload get a clickable name; others render as plain text.
+ *
+ * Hover surfaces the author's profile link + first known affiliation.
+ * Falls back gracefully when no enrichment was returned (e.g. the
+ * ref verified via DBLP only and has no author IDs).
+ */
+function AuthorsLine({ authors, enrichedAuthors }) {
+  const list = normalizeAuthors(authors)
+  if (list.length === 0) return null
+
+  // Normalise a name fragment: lowercase, strip diacritics, strip
+  // punctuation. Matches "Bossuyt" / "Bössuyt" / "bossuyt," to one
+  // canonical "bossuyt" so cited spellings + database spellings
+  // match regardless of accents or trailing punctuation.
+  const norm = (s) => {
+    if (!s) return ''
+    return String(s)
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')      // strip combining diacritics
+      .toLowerCase()
+      .replace(/[^a-z0-9\-' ]+/g, ' ')      // keep letters, digits, hyphens, apostrophes, spaces
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  // Build a lookup table from surname → enrichment entry. Indexes by:
+  //   - normalised full name ("per buchwald")
+  //   - normalised surname ("buchwald")
+  //   - first initial + surname ("p buchwald", "buchwald p")
+  // so the cited "Buchwald P" (Vancouver) and "P. Buchwald" (APA) and
+  // "Per Buchwald" (database canonical) all collapse to one entry.
+  const enrichmentByKey = (() => {
+    const m = new Map()
+    const add = (k, v) => { if (k && !m.has(k)) m.set(k, v) }
+    for (const a of (enrichedAuthors || [])) {
+      const name = a && a.name ? String(a.name).trim() : ''
+      if (!name) continue
+      const lower = norm(name)
+      const tokens = lower.split(/\s+/).filter(Boolean)
+      if (tokens.length === 0) continue
+      const surname = tokens[tokens.length - 1]
+      const given = tokens.slice(0, -1)
+      const initials = given.map(t => t.charAt(0)).filter(Boolean)
+      add(lower, a)
+      add(surname, a)
+      // "buchwald p" / "p buchwald"
+      for (const ini of initials) {
+        add(`${surname} ${ini}`, a)
+        add(`${ini} ${surname}`, a)
+      }
+      // Surname-first (Vancouver order in S2 data)
+      if (tokens.length >= 2) {
+        add(`${tokens[0]} ${tokens[tokens.length - 1]}`, a)
+      }
+    }
+    return m
+  })()
+
+  const lookupEnrichment = (display) => {
+    const lower = norm(display)
+    if (!lower) return null
+    if (enrichmentByKey.has(lower)) return enrichmentByKey.get(lower)
+    const tokens = lower.split(/\s+/).filter(Boolean)
+    // Try the longest token first (surnames are typically the longest
+    // single token in "Buchwald P" or "P. Buchwald"). Then any single
+    // token. Final pass: pairwise surname+initial combos.
+    const sorted = [...tokens].sort((a, b) => b.length - a.length)
+    for (const tok of sorted) {
+      if (tok.length >= 2 && enrichmentByKey.has(tok)) return enrichmentByKey.get(tok)
+    }
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = i + 1; j < tokens.length; j++) {
+        const a = `${tokens[i]} ${tokens[j]}`
+        if (enrichmentByKey.has(a)) return enrichmentByKey.get(a)
+      }
+    }
+    return null
+  }
+
+  // Cap at 10 visible names + " et al." so very long author lists don't
+  // dominate the card. Matches the legacy formatAuthors() behaviour.
+  const visible = list.slice(0, 10)
+  const overflow = list.length > 10
+  return (
+    <div style={{ color: 'var(--color-text-secondary)' }}>
+      {visible.map((name, i) => {
+        const e = lookupEnrichment(name)
+        const profileHref = e?.orcid
+          ? `https://orcid.org/${e.orcid}`
+          : e?.openalex_id
+            ? `https://openalex.org/${e.openalex_id}`
+            : e?.s2_author_id
+              ? `https://www.semanticscholar.org/author/${e.s2_author_id}`
+              : null
+        const tooltip = e
+          ? [
+              e.name && e.name !== name ? `Full name: ${e.name}` : null,
+              e.orcid ? `ORCID: ${e.orcid}` : null,
+              e.openalex_id ? `OpenAlex: ${e.openalex_id}` : null,
+              !e.orcid && !e.openalex_id && e.s2_author_id ? `Semantic Scholar author: ${e.s2_author_id}` : null,
+              Array.isArray(e.institutions) && e.institutions.length > 0
+                ? `Affiliation: ${e.institutions.slice(0, 2).join(', ')}`
+                : null,
+              profileHref ? '(click to open profile)' : null,
+            ].filter(Boolean).join('\n')
+          : null
+        const href = profileHref
+        const handle = (ev) => {
+          if (!href) return
+          if (!isTauri()) return
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+          ev.preventDefault()
+          openExternal(href)
+        }
+        return (
+          <span key={`${name}-${i}`}>
+            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} />
+            {i < visible.length - 1 ? ', ' : (overflow ? ', et al.' : '')}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Single author chip with hover popover. Renders the name inline with
+ * a dotted underline (matching the rest of the card), and on hover
+ * pops up a small card with the author's full name, ORCID, OpenAlex
+ * / Semantic Scholar author IDs, and first affiliation. Click opens
+ * the profile link in the system browser.
+ */
+function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef(null)
+  const enterTimer = useRef(null)
+  const leaveTimer = useRef(null)
+  // 250ms hover delay so brushing past names doesn't flash the popover.
+  const onEnter = () => {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
+    if (!e) return
+    enterTimer.current = setTimeout(() => setOpen(true), 250)
+  }
+  const onLeave = () => {
+    if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    leaveTimer.current = setTimeout(() => setOpen(false), 120)
+  }
+  useEffect(() => () => {
+    if (enterTimer.current) clearTimeout(enterTimer.current)
+    if (leaveTimer.current) clearTimeout(leaveTimer.current)
+  }, [])
+
+  const orcidUrl = e?.orcid ? `https://orcid.org/${e.orcid}` : null
+  const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
+  const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
+
+  return (
+    <span
+      ref={wrapperRef}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ position: 'relative', display: 'inline-block' }}
+    >
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onClickHref}
+          title={!e ? tooltipFallback : undefined}
+          style={{
+            color: 'var(--color-text-secondary)',
+            textDecorationColor: 'var(--color-link, #3b82f6)',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '3px',
+            textDecorationLine: 'underline',
+          }}
+        >
+          {name}
+        </a>
+      ) : (
+        <span title={tooltipFallback || undefined}>{name}</span>
+      )}
+      {open && e && (
+        <div
+          role="tooltip"
+          className="rounded-md shadow-lg p-2 text-xs"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: 6,
+            zIndex: 60,
+            minWidth: 260,
+            maxWidth: 360,
+            background: 'var(--color-bg-primary)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text-primary)',
+            whiteSpace: 'normal',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{e.name || name}</div>
+          {Array.isArray(e.institutions) && e.institutions.length > 0 && (
+            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
+              {e.institutions.slice(0, 2).join(' · ')}
+            </div>
+          )}
+          <div className="space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {orcidUrl && (
+              <ProfileRow label="ORCID" value={e.orcid} href={orcidUrl} />
+            )}
+            {openalexUrl && (
+              <ProfileRow label="OpenAlex" value={e.openalex_id} href={openalexUrl} />
+            )}
+            {s2Url && !orcidUrl && !openalexUrl && (
+              <ProfileRow label="Semantic Scholar" value={e.s2_author_id} href={s2Url} />
+            )}
+          </div>
+          {(orcidUrl || openalexUrl || s2Url) && (
+            <div className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              Click name to open profile in browser
+            </div>
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
+function ProfileRow({ label, value, href }) {
+  return (
+    <div className="flex items-baseline gap-2 leading-snug">
+      <span style={{ color: 'var(--color-text-muted)', minWidth: 64 }}>{label}:</span>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(ev) => {
+          if (!isTauri()) return
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+          ev.preventDefault()
+          openExternal(href)
+        }}
+        style={{
+          color: 'var(--color-link, #3b82f6)',
+          wordBreak: 'break-all',
+        }}
+      >
+        {value}
+      </a>
+    </div>
+  )
+}
+
+/**
+ * Venue line with hover. Title attribute shows the full venue name
+ * (when the cited string was an abbreviation like "ANZ J Surg" vs
+ * OpenAlex's "ANZ journal of surgery") plus the OpenAlex source ID.
+ * Click opens the OpenAlex venue page in the system browser.
+ */
+function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
+  // Resolve the (full, acronym) pair so we can display both forms.
+  // Priority for the FULL name: the OpenAlex-resolved string > the
+  // reverse-lookup from the cited string (when only an acronym was
+  // cited). Priority for the ACRONYM: NLM table forward lookup on
+  // whichever full name we have.
+  const resolvedFull = (() => {
+    if (fullVenue && fullVenue !== venue) return fullVenue
+    const reverse = fullNameFor(venue)
+    return reverse && reverse.toLowerCase() !== String(venue).toLowerCase() ? reverse : null
+  })()
+  const resolvedAcronym = acronymFor(resolvedFull || venue) || acronymFor(venue)
+
+  // Cited venue is the source-of-truth display. The supplemental form
+  // (acronym OR full) shows in parens after, gated by whether the
+  // ACTIVE STYLE accepts abbreviations: in Vancouver/AMA/IEEE/NLM the
+  // acronym is the official form so we surface it alongside the full
+  // name; in APA/MLA/Chicago we show the full name alongside an
+  // acronym if the cited string was the abbrev.
+  const styleAcceptsAbbrev = styleAcceptsAbbreviatedVenue(activeStyle)
+  let supplemental = null
+  // Pick the form the user DIDN'T cite. If the cited string already
+  // matches resolvedFull, show the acronym; otherwise show the full.
+  const venueNorm = String(venue || '').toLowerCase().trim()
+  const fullNorm = String(resolvedFull || '').toLowerCase().trim()
+  if (resolvedFull && venueNorm !== fullNorm) {
+    supplemental = resolvedFull
+  } else if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) {
+    // Only show the acronym alongside the full name when the active
+    // style would permit it (so APA refs don't get noisy with NLM
+    // acronyms the user wouldn't use anyway).
+    if (styleAcceptsAbbrev) supplemental = resolvedAcronym
+  }
+
+  const titleBits = []
+  if (resolvedFull && venueNorm !== fullNorm) titleBits.push(`Full name: ${resolvedFull}`)
+  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM acronym: ${resolvedAcronym}`)
+  if (venueOpenalexId) titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
+  if (venueOpenalexId) titleBits.push('(click to open venue page)')
+  const title = titleBits.join('\n') || undefined
+  const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
+  const handle = (ev) => {
+    if (!href || !isTauri()) return
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+    ev.preventDefault()
+    openExternal(href)
+  }
+  return (
+    <div style={{ color: 'var(--color-text-secondary)' }} title={title}>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={handle}
+          style={{
+            color: 'var(--color-text-secondary)',
+            textDecorationColor: 'var(--color-link, #3b82f6)',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '3px',
+            textDecorationLine: 'underline',
+          }}
+        >
+          {venue}
+        </a>
+      ) : (
+        <span>{venue}</span>
+      )}
+      {supplemental && (
+        <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
+          ({supplemental})
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default ReferenceCard

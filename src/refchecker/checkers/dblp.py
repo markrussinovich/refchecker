@@ -176,7 +176,8 @@ class DBLPReferenceChecker:
         cited_year = reference.get('year')
         if cited_year and hit_year:
             try:
-                if int(cited_year) != int(hit_year):
+                # Suppress trivial 1-year gaps (online-ahead-of-print, epub vs print)
+                if abs(int(cited_year) - int(hit_year)) > 1:
                     errors.append({
                         'warning_type': 'year',
                         'warning_details': f'Year mismatch: cited {cited_year}, DBLP has {hit_year}',

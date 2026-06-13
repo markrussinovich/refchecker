@@ -18,11 +18,22 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import apply_hallucination_verdict, build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
+from refchecker.core.hallucination_policy import (
+    apply_hallucination_verdict,
+    build_hallucination_error_entry,
+    pre_screen_hallucination,
+    run_hallucination_check,
+    should_defer_likely_to_llm,
+)
 from refchecker.utils.arxiv_utils import get_bibtex_content
-from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
+from refchecker.utils.text_utils import (
+    detect_latex_bibliography_format,
+    display_reference_value,
+    extract_latex_references,
+)
 
 logger = logging.getLogger(__name__)
+_PRINT_LOCK = threading.RLock()
 
 if TYPE_CHECKING:
     from refchecker.core.refchecker import ArxivReferenceChecker
@@ -31,13 +42,14 @@ if TYPE_CHECKING:
 def _safe_print(*args, **kwargs) -> None:
     """Print that falls back to ascii+replace when stdout can't handle Unicode."""
     import sys
-    try:
-        print(*args, **kwargs, flush=True)
-    except UnicodeEncodeError:
-        text = ' '.join(str(a) for a in args)
-        sys.stdout.buffer.write(text.encode('utf-8', errors='replace'))
-        sys.stdout.buffer.write(b'\n')
-        sys.stdout.buffer.flush()
+    with _PRINT_LOCK:
+        try:
+            print(*args, **kwargs, flush=True)
+        except UnicodeEncodeError:
+            text = ' '.join(str(a) for a in args)
+            sys.stdout.buffer.write(text.encode('utf-8', errors='replace'))
+            sys.stdout.buffer.write(b'\n')
+            sys.stdout.buffer.flush()
 
 
 def _safe_print_labeled(emoji: str, text: str) -> None:
@@ -426,11 +438,17 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total
     ref_idx: 1-based index among error references for this paper.
     total_refs: total references in the paper (for context).
     """
+    with _PRINT_LOCK:
+        _print_bulk_reference_block_unlocked(error_entry, ref_idx, total_refs)
+
+
+def _print_bulk_reference_block_unlocked(error_entry: Dict[str, Any], ref_idx: int, total_refs: int) -> None:
+    """Print a bulk reference block while the caller holds _PRINT_LOCK."""
     ref_title = error_entry.get('ref_title', 'Untitled')
     ref_authors = error_entry.get('ref_authors_cited', '')
-    ref_year = error_entry.get('ref_year_cited', '')
+    ref_year = display_reference_value(error_entry.get('ref_year_cited', ''))
     ref_url = error_entry.get('ref_url_cited', '')
-    ref_venue = error_entry.get('ref_venue_cited', '')
+    ref_venue = display_reference_value(error_entry.get('ref_venue_cited', ''))
     ref_verified_url = error_entry.get('ref_verified_url', '')
 
     # Reference header with simple [n] index
@@ -475,18 +493,16 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total
                 if detail:
                     _safe_print(f'         Subreason: {detail}')
 
-        for error in original_errors:
-            if (error.get('error_type') == 'unverified'
-                    or error.get('warning_type') == 'unverified'
-                    or error.get('info_type') == 'unverified'):
-                continue
+        from refchecker.utils.error_utils import sort_issues_for_cli_display
+
+        for error in sort_issues_for_cli_display(original_errors):
             error_details = (error.get('error_details')
                              or error.get('warning_details')
                              or error.get('info_details', 'Unknown error'))
-            if 'error_type' in error:
-                _safe_print_labeled('❌', error_details)
-            elif 'warning_type' in error:
+            if 'warning_type' in error:
                 _safe_print_labeled('⚠️ ', error_details)
+            elif 'error_type' in error:
+                _safe_print_labeled('❌', error_details)
             else:
                 _safe_print_labeled('ℹ️ ', error_details)
     else:
@@ -530,40 +546,41 @@ class BulkProgressReporter:
             # Paper ID is 1-based start order (result.index is 0-based)
             paper_id = result.index + 1
 
-            # ── Paper header ──
-            display_title = result.input_spec or result.paper_id or result.title
-            _safe_print(f'\n📄 {dt.datetime.now().strftime("%H:%M:%S")} [{paper_id}/{self.total_papers}] {display_title}')
-            if result.source_url and result.source_url != display_title:
-                _safe_print(f'   {result.source_url}')
+            with _PRINT_LOCK:
+                # ── Paper header ──
+                display_title = result.input_spec or result.paper_id or result.title
+                _safe_print(f'\n📄 {dt.datetime.now().strftime("%H:%M:%S")} [{paper_id}/{self.total_papers}] {display_title}')
+                if result.source_url and result.source_url != display_title:
+                    _safe_print(f'   {result.source_url}')
 
-            # ── Paper stats ──
-            flagged_entries = [
-                e for e in result.errors
-                if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
-            ]
-            flagged_count = len(flagged_entries)
-            paper_unverified = max(result.total_unverified_refs, flagged_count)
-            elapsed = f'{result.elapsed_seconds:.0f}s'
-            flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
-            _safe_print(
-                f'   refs={result.references_processed} '
-                f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
-                f'info={result.total_info_found} unverified={paper_unverified}'
-                f'{flag_note} '
-                f'({elapsed})'
-            )
+                # ── Paper stats ──
+                flagged_entries = [
+                    e for e in result.errors
+                    if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
+                ]
+                flagged_count = len(flagged_entries)
+                paper_unverified = max(result.total_unverified_refs, flagged_count)
+                elapsed = f'{result.elapsed_seconds:.0f}s'
+                flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
+                _safe_print(
+                    f'   refs={result.references_processed} '
+                    f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
+                    f'info={result.total_info_found} unverified={paper_unverified}'
+                    f'{flag_note} '
+                    f'({elapsed})'
+                )
 
-            # ── Show all references with errors/warnings ──
-            for ref_idx, error_entry in enumerate(result.errors, 1):
-                _safe_print('')
-                _print_bulk_reference_block(error_entry, ref_idx, result.references_processed)
+                # ── Show all references with errors/warnings ──
+                for ref_idx, error_entry in enumerate(result.errors, 1):
+                    _safe_print('')
+                    _print_bulk_reference_block(error_entry, ref_idx, result.references_processed)
 
-            # ── Running totals ──
-            _safe_print(
-                f'   Totals: refs={self.total_references} '
-                f'errors={self.total_errors} warnings={self.total_warnings} '
-                f'info={self.total_info} unverified={self.total_unverified}'
-            )
+                # ── Running totals ──
+                _safe_print(
+                    f'   Totals: refs={self.total_references} '
+                    f'errors={self.total_errors} warnings={self.total_warnings} '
+                    f'info={self.total_info} unverified={self.total_unverified}'
+                )
 
 
 @dataclass
@@ -1230,7 +1247,12 @@ def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], pap
     Uses the same comparison logic as the existing checkers but operates
     on pre-fetched data instead of making API calls.
     """
-    from refchecker.utils.text_utils import calculate_title_similarity, compare_authors, strip_latex_commands
+    from refchecker.utils.text_utils import (
+        calculate_title_similarity,
+        compare_authors,
+        strip_latex_commands,
+        titles_align_with_subtitle_tolerance,
+    )
     from refchecker.utils.error_utils import validate_year
 
     errors: List[Dict[str, Any]] = []
@@ -1240,6 +1262,12 @@ def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], pap
     actual_title = (paper_data.get('title') or '').strip().lower()
     if cited_title and actual_title:
         similarity = calculate_title_similarity(cited_title, actual_title)
+        # v0.7.68: tolerate cited-has-subtitle / actual-no-subtitle (and vice
+        # versa) — DOI already matched, so this isn't a real mismatch.
+        if similarity < 0.8 and titles_align_with_subtitle_tolerance(
+            reference.get('title', ''), paper_data.get('title', '')
+        ):
+            similarity = 1.0
         if similarity < 0.8:
             errors.append({
                 'error_type': 'title',
@@ -1432,18 +1460,8 @@ def _submit_hallucination_assessments_async(
 
         outcome, assessment = pre_screen_hallucination(filtered)
         if outcome == 'resolved':
-            # Mirror the deferral logic in run_hallucination_check():
-            # 0% author-overlap LIKELY verdicts, and verified LIKELY verdicts,
-            # should be deferred to the LLM, which can web-search and confirm
-            # whether the checker matched a different paper.
-            author_overlap = assessment.get('author_overlap') if assessment else None
-            should_defer_likely = (
-                assessment
-                and assessment.get('verdict') == 'LIKELY'
-                and (author_overlap == 0 or bool(verified_url))
-            )
             if (
-                should_defer_likely
+                should_defer_likely_to_llm(assessment, verified_url)
                 and llm_verifier
                 and (getattr(llm_verifier, 'available', False) or getattr(llm_verifier, 'cache_dir', None))
             ):
@@ -1490,6 +1508,8 @@ def _finalize_hallucination_on_result(
                     assessment,
                     reference=reference,
                     standard_refchecker=lambda found_ref, checker=checker: checker.verify_reference_standard(None, found_ref),
+                    llm_client=getattr(checker.report_builder, 'llm_verifier', None) if hasattr(checker, 'report_builder') else None,
+                    web_searcher=getattr(checker.report_builder, 'web_searcher', None) if hasattr(checker, 'report_builder') else None,
                 )
                 error_entry['hallucination_assessment'] = applied.get('hallucination_assessment', assessment)
                 if applied.get('matched_database'):
@@ -1497,6 +1517,13 @@ def _finalize_hallucination_on_result(
                 authoritative_urls = applied.get('authoritative_urls') or []
                 if authoritative_urls:
                     error_entry['ref_verified_url'] = authoritative_urls[0].get('url', error_entry.get('ref_verified_url', ''))
+                if (
+                    has_unverified
+                    and applied.get('status') == 'verified'
+                    and not applied.get('errors')
+                    and not applied.get('warnings')
+                ):
+                    error_entry['_resolved_unverified_by_hallucination'] = True
         except Exception as exc:
             logger.warning('Hallucination check failed for %s: %s',
                            error_entry.get('ref_title', '?')[:60], exc)
@@ -1512,11 +1539,13 @@ def _finalize_hallucination_on_result(
             or e.get('warning_type') == 'unverified'
             or e.get('info_type') == 'unverified'
             for e in raw_errors
-        )
+        ) or entry.get('_resolved_unverified_by_hallucination')
         if has_unverified and result.total_unverified_refs > 0:
             result.total_unverified_refs -= 1
 
-    # Remove URL-verified UNLIKELY entries
+    # Remove entries whose only issue was an unverified result resolved by the
+    # shared hallucination policy. Bulk output only lists problematic refs, so
+    # keeping these entries would print both a verified URL and "Could not verify".
     to_remove = []
     for i, entry in enumerate(result.errors):
         assessment = entry.get('hallucination_assessment') or {}
@@ -1531,7 +1560,7 @@ def _finalize_hallucination_on_result(
             'url references paper' in (e.get('error_details') or '').lower()
             for e in raw_errors
         )
-        if has_unverified and has_url_references:
+        if entry.get('_resolved_unverified_by_hallucination') or (has_unverified and has_url_references):
             to_remove.append(i)
     for i in reversed(to_remove):
         result.errors.pop(i)

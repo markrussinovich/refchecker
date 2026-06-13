@@ -63,6 +63,10 @@ class TestArxivVersionCheck(unittest.TestCase):
     def test_version_update_converts_errors_to_warnings(self, mock_get_latest, mock_fetch_version):
         """Test that errors are converted to warnings with version suffix when citing older version."""
         mock_get_latest.return_value = 5
+        # v5 is a genuinely different title/author set vs v2, so the smarter
+        # _version_metadata_changed_for_issue guard (which only downgrades an
+        # error to a warning when the field actually changed between versions)
+        # fires for both the title and author errors.
         mock_fetch_version.side_effect = lambda arxiv_id, version_num: {
             2: {
                 'title': 'Attention Is All You Need',
@@ -70,7 +74,7 @@ class TestArxivVersionCheck(unittest.TestCase):
                 'year': 2017,
             },
             5: {
-                'title': 'Attention Is All You Need: Revised Transformer Architecture',
+                'title': 'Sparse Mixture-of-Experts Transformers for Long-Context Reasoning',
                 'authors': [{'name': 'Ashish Vaswani'}, {'name': 'Noam Shazeer'}],
                 'year': 2017,
             },

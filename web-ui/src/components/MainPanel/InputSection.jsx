@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Button from '../common/Button'
 import FileDropZone from './FileDropZone'
 import BulkInputZone from './BulkInputZone'
@@ -6,6 +6,7 @@ import { useCheckStore } from '../../stores/useCheckStore'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAiDetectionStore } from '../../stores/useAiDetectionStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useFileUpload } from '../../hooks/useFileUpload'
 import * as api from '../../utils/api'
@@ -14,6 +15,31 @@ import { logger } from '../../utils/logger'
 function getConfigApiKey(keyStore, config) {
   if (!config) return null
   return keyStore.getKey(`llm:${config.id}`) || keyStore.getKey(config.provider)
+}
+
+/**
+ * Collect the opt-in AI-detection request fields, or null when disabled.
+ * Threaded into single + batch requests exactly like the LLM/hallucination
+ * params already are.
+ */
+function aiDetectionValues() {
+  const s = useAiDetectionStore.getState()
+  if (!s.enabled) return null
+  const out = { ai_detection_enabled: true, ai_detection_backend: s.backend }
+  if (s.backend === 'api') {
+    out.ai_detection_service = s.service
+    out.ai_detection_consent = !!s.consent
+    const key = useKeyStore.getState().getKey(s.service)
+    if (key) out.ai_detection_api_key = key
+  }
+  return out
+}
+
+function appendAiDetection(formData) {
+  const v = aiDetectionValues()
+  if (!v) return
+  Object.entries(v).forEach(([k, val]) =>
+    formData.append(k, typeof val === 'boolean' ? String(val) : val))
 }
 
 /**
@@ -42,6 +68,7 @@ function sanitizeUrlInput(input) {
 export default function InputSection() {
   const [inputMode, setInputMode] = useState('url') // url, file, text, bulk
   const [inputValue, setInputValue] = useState('')
+  const [pendingAutoSubmit, setPendingAutoSubmit] = useState(false)
   const [textValue, setTextValue] = useState('')
   const [bulkUrls, setBulkUrls] = useState('')
   const [bulkFiles, setBulkFiles] = useState([])
@@ -64,6 +91,54 @@ export default function InputSection() {
   const { fetchHistory, clearSelection, selectCheck } = useHistoryStore()
   
   const fileUpload = useFileUpload()
+
+  // Drag-drop on the whole window + "Open With → RefChecker" from the OS
+  // both push the file in via this DOM event so we don't duplicate the
+  // submit pipeline.
+  useEffect(() => {
+    const onOpenFile = (e) => {
+      const f = e.detail?.file
+      if (!f) return
+      setInputMode('file')
+      const ok = fileUpload.handleFile(f)
+      // Flag for auto-submit once the file lands in state. We don't call
+      // handleSubmit synchronously because the new file isn't yet
+      // visible in the closure.
+      if (ok) setPendingAutoSubmit(true)
+    }
+    window.addEventListener('refchecker:open-file', onOpenFile)
+
+    const onCheckUrl = (e) => {
+      const url = e.detail?.url
+      if (!url) return
+      setInputMode('url')
+      setInputValue(url)
+      setPendingAutoSubmit(true)
+    }
+    window.addEventListener('refchecker:check-url', onCheckUrl)
+
+    return () => {
+      window.removeEventListener('refchecker:open-file', onOpenFile)
+      window.removeEventListener('refchecker:check-url', onCheckUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
 
   const handleSubmit = async () => {
     // Validate input
@@ -132,6 +207,9 @@ export default function InputSection() {
       if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
+      const paperclipKey = keyStore.getKey('paperclip')
+      if (paperclipKey) formData.append('paperclip_api_key', paperclipKey)
+      appendAiDetection(formData)
 
       logger.info('Check', 'Initiating check request', { 
         mode: inputMode, 
@@ -183,6 +261,8 @@ export default function InputSection() {
         unverified_count: 0,
         llm_provider: config?.provider || null,
         llm_model: config?.model || null,
+        hallucination_provider: hallucinationConfig?.provider || null,
+        hallucination_model: hallucinationConfig?.model || null,
         status: 'in_progress',
         session_id: session_id,
       })
@@ -223,6 +303,7 @@ export default function InputSection() {
       const llmKey = getConfigApiKey(keyStore, config)
       const hallucinationKey = getConfigApiKey(keyStore, hallucinationConfig)
       const ssKey = keyStore.getKey('semantic_scholar')
+      const paperclipKey = keyStore.getKey('paperclip')
       
       let response
       
@@ -242,6 +323,8 @@ export default function InputSection() {
           api_key: llmKey,
           hallucination_api_key: hallucinationKey,
           semantic_scholar_api_key: ssKey,
+          paperclip_api_key: paperclipKey,
+          ...(aiDetectionValues() || {}),
         })
       } else {
         // File batch
@@ -264,7 +347,9 @@ export default function InputSection() {
         if (llmKey) formData.append('api_key', llmKey)
         if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
         if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
-        
+        if (paperclipKey) formData.append('paperclip_api_key', paperclipKey)
+        appendAiDetection(formData)
+
         response = await api.startBatchFileCheck(formData)
       }
 
@@ -293,6 +378,8 @@ export default function InputSection() {
           unverified_count: 0,
           llm_provider: config?.provider || null,
           llm_model: config?.model || null,
+          hallucination_provider: hallucinationConfig?.provider || null,
+          hallucination_model: hallucinationConfig?.model || null,
           status: 'in_progress',
           session_id: check.session_id,
           batch_id: batch_id,
@@ -333,15 +420,51 @@ export default function InputSection() {
   const isChecking = status === 'checking' && !isNewRefcheckMode
   const isComplete = (status === 'completed' || status === 'cancelled' || status === 'error') && !isNewRefcheckMode
 
+  // Outer-banner drag-drop. When the user drops a file ANYWHERE on the
+  // input card (above the tabs, on the title, around the inner zone),
+  // the GlobalDropZone's document listener should catch it — but the
+  // user reported drops outside the dashed zone silently did nothing.
+  // Adding explicit handlers on the outer card guarantees the drop
+  // fires regardless of how event bubbling interacts with the inner
+  // FileDropZone.
+  const handleBannerDragOver = (e) => {
+    // Permissive file-drag detection — matches GlobalDropZone's
+    // looksLikeFileDrag. macOS Tauri webview reports drags via
+    // 'public.file-url' / 'NSFilenamesPboardType' rather than 'Files',
+    // and pre-drop dataTransfer.types is sometimes empty. preventDefault
+    // is required on dragover or the browser refuses the drop entirely.
+    const types = Array.from(e.dataTransfer?.types || [])
+    const looksLikeFile = types.length === 0 || types.some(t => {
+      const lo = String(t).toLowerCase()
+      return lo === 'files' || lo.includes('file-url') || lo.includes('filenames') || lo.includes('uri-list')
+    })
+    if (!looksLikeFile) return
+    e.preventDefault()
+    try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
+  }
+  const handleBannerDrop = (e) => {
+    const files = Array.from(e.dataTransfer?.files || [])
+    if (files.length === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    // Route through the same custom event GlobalDropZone uses so the
+    // existing onOpenFile listener handles state + auto-submit.
+    window.dispatchEvent(new CustomEvent('refchecker:open-file', {
+      detail: { file: files[0], sourceLabel: files[0].name },
+    }))
+  }
+
   return (
-    <div 
+    <div
       className="rounded-lg border p-4 lg:p-6"
       style={{
         backgroundColor: 'var(--color-bg-secondary)',
         borderColor: 'var(--color-border)',
       }}
+      onDragOver={handleBannerDragOver}
+      onDrop={handleBannerDrop}
     >
-      <h2 
+      <h2
         className="text-lg font-semibold mb-4"
         style={{ color: 'var(--color-text-primary)' }}
       >

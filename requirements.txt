@@ -39,10 +39,24 @@ nltk>=3.9.4
 scikit-learn>=1.8.0
 joblib>=1.5.3
 
+# Paperclip biomedical full-text / arXiv search — used as an OPTIONAL
+# secondary verification tier. Bundled so users only need to set
+# PAPERCLIP_API_KEY in Settings; no extra pip step. The checker
+# (src/refchecker/checkers/paperclip.py) is inert when the key is
+# missing, so shipping this dep is safe by default.
+gxl-paperclip>=0.1.0
+
 # vLLM support (for local model inference) - optional, install separately
 # These have complex dependency chains (torch, numba, etc.)
 # pip install torch vllm huggingface_hub
 huggingface_hub>=1.12.0
+
+# AI-generated-text detection — LOCAL backend (optional, install separately;
+# deliberately NOT bundled into the desktop sidecar to keep it small). The
+# llm-judge and api backends need none of these. Prefer the lighter onnxruntime
+# stack; torch is the heavier fallback.
+# pip install onnxruntime transformers        # lighter, PyInstaller-friendly
+# pip install torch transformers              # fallback runtime
 
 # Development dependencies
 pytest>=9.0.3

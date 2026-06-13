@@ -37,6 +37,14 @@ def test_html_math_title_markup_matches_unicode_script_l():
     assert calculate_title_similarity(cited, stored) == 1.0
 
 
+def test_title_similarity_handles_missing_word_spacing_artifact():
+    cited = "Inception loops discoverwhatexcitesneuronsmostusingdeeppredictivemodels"
+    found = "Inception loops discover what excites neurons most using deep predictive models"
+
+    assert calculate_title_similarity(cited, found) == 1.0
+    assert compare_titles_with_latex_cleaning(cited, found) == 1.0
+
+
 class TestNameMatching:
     """Test name matching functionality."""
     
@@ -234,7 +242,7 @@ class TestNameMatching:
         
         match, error = compare_authors(cited, correct)
         assert not match
-        assert "First author mismatch:" in error
+        assert "no matching authors:" in error
         # Both names should be displayed in "First Last" format
         assert "Srivathsan Koundinyan" in error
         assert "John P. Smith" in error
@@ -290,6 +298,22 @@ class TestAuthorNameProcessing:
         assert len(parsed) == 5, f"Expected 5 authors but got {len(parsed)}: {parsed}"
         expected = ["Jiang, J", "Xia, G. G", "Carlton, D. B", "Anderson, C. N", "Miyakawa, R. H"]
         assert parsed == expected, f"Expected {expected} but got {parsed}"
+
+        # Regression for ACL Anthology/PDF extraction where "Yih, W.-t" was split into two authors.
+        factscore_authors = "S. Min, K. Krishna, X. Lyu, M. Lewis, Yih, W.-t, P. Koh, M. Iyyer, L. Zettlemoyer, H. Hajishirzi"
+        factscore_parsed = parse_authors_with_initials(factscore_authors)
+        factscore_expected = [
+            "S. Min", "K. Krishna", "X. Lyu", "M. Lewis", "Yih, W.-t",
+            "P. Koh", "M. Iyyer", "L. Zettlemoyer", "H. Hajishirzi",
+        ]
+        assert factscore_parsed == factscore_expected
+
+        factscore_correct = [
+            "Sewon Min", "Kalpesh Krishna", "Xinxi Lyu", "M. Lewis", "Wen-tau Yih",
+            "Pang Wei Koh", "Mohit Iyyer", "Luke Zettlemoyer", "Hannaneh Hajishirzi",
+        ]
+        result, error = compare_authors(factscore_parsed, factscore_correct)
+        assert result is True, f"Expected FActScore authors to match but got: {error}"
         
         # Test various initial formats
         test_cases = [
@@ -299,6 +323,27 @@ class TestAuthorNameProcessing:
         ]
         
         for input_authors, expected in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
+
+    def test_parse_compressed_lastname_initial_author_list(self):
+        """PDF extraction can drop commas after initials before the next surname."""
+        cases = [
+            (
+                "Kurutach, T. Clavera, I. Duan, Y. Tamar, A. Abbeel, P",
+                ["Kurutach, T.", "Clavera, I.", "Duan, Y.", "Tamar, A.", "Abbeel, P"],
+            ),
+            (
+                "Kim, G.-H. Lee, J. Jang, Y. Yang, H. Kim, K.-E",
+                ["Kim, G.-H.", "Lee, J.", "Jang, Y.", "Yang, H.", "Kim, K.-E"],
+            ),
+            (
+                "Osband, I. Van Roy, B",
+                ["Osband, I.", "Van Roy, B"],
+            ),
+        ]
+
+        for input_authors, expected in cases:
             result = parse_authors_with_initials(input_authors)
             assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
     
@@ -950,6 +995,23 @@ class TestAuthorComparisonBugFixes:
             "Gemini Team",
             "Rohan Anil",
             "Sebastian Borgeaud",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "collective authorship shorthand" in error_message.lower()
+
+    def test_single_consortium_author_matches_large_collaboration(self):
+        """A sole consortium author should be accepted for large collaborations."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["MICrONS Consortium"]
+        correct_authors = [
+            "MICrONS Consortium",
+            "J. Alexander Bae",
+            "Mahaly Baptiste",
+            "Maya R. Baptiste",
         ]
 
         match_result, error_message = compare_authors(cited_authors, correct_authors)

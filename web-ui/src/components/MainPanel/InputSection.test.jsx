@@ -126,6 +126,7 @@ describe('InputSection bulk mode', () => {
       if (provider === 'anthropic') return 'llm-key'
       if (provider === 'google') return 'hallucination-key'
       if (provider === 'semantic_scholar') return 'ss-key'
+      if (provider === 'paperclip') return 'paperclip-key'
       return null
     })
     mocks.startBatchCheck.mockResolvedValue({
@@ -166,6 +167,7 @@ describe('InputSection bulk mode', () => {
         api_key: 'llm-key',
         hallucination_api_key: 'hallucination-key',
         semantic_scholar_api_key: 'ss-key',
+        paperclip_api_key: 'paperclip-key',
       })
     })
 
@@ -174,6 +176,10 @@ describe('InputSection bulk mode', () => {
     expect(mocks.addToHistory).toHaveBeenCalledWith(expect.objectContaining({
       id: 42,
       paper_source: '2401.12345',
+      llm_provider: 'anthropic',
+      llm_model: 'claude-4',
+      hallucination_provider: 'google',
+      hallucination_model: 'gemini-2.5-flash',
       batch_id: 'batch-1',
       batch_label: '2401.12345',
     }))

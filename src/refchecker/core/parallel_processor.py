@@ -37,6 +37,7 @@ class ReferenceResult:
     reference: Dict[str, Any]
     verified_data: Optional[Dict[str, Any]] = None
     hallucination_assessment: Optional[Dict[str, Any]] = None
+    hallucination_verdict_applied: bool = False
 
 
 class ParallelReferenceProcessor:
@@ -268,9 +269,12 @@ class ParallelReferenceProcessor:
                                         assessment,
                                         reference=current_result.reference,
                                         standard_refchecker=lambda found_ref: self.base_checker.verify_reference_standard(None, found_ref),
+                                        llm_client=getattr(self.base_checker.report_builder, 'llm_verifier', None),
+                                        web_searcher=getattr(self.base_checker.report_builder, 'web_searcher', None),
                                     )
                                     current_result.hallucination_assessment = tmp.get('hallucination_assessment', assessment)
                                     current_result.errors = tmp['errors']
+                                    current_result.hallucination_verdict_applied = True
                         
                         # Print the result using base checker's output methods
                         # (hallucination_assessment is now available for display decisions)
@@ -329,18 +333,19 @@ class ParallelReferenceProcessor:
         self.base_checker._print_reference_header(reference, result.index, self.total_references)
 
         assessment = result.hallucination_assessment
-        ha_link = assessment.get('link') if assessment else None
-        ha_link_is_http = isinstance(ha_link, str) and ha_link.startswith('http')
         llm_assessment_unlikely = bool(
             assessment and assessment.get('verdict') == 'UNLIKELY'
         )
-        should_suppress_url_from_verifier = (
+        llm_confirmed_without_checker_data = (
             not result.verified_data
             and llm_assessment_unlikely
-            and ha_link_is_http
         )
-        url_from_verifier = None if should_suppress_url_from_verifier else result.url
-        self.base_checker._print_verified_urls(reference, result.verified_data, url_from_verifier, result.errors)
+        ha_link = assessment.get('link') if assessment else None
+        ha_link_is_http = isinstance(ha_link, str) and ha_link.startswith('http')
+        if llm_confirmed_without_checker_data:
+            print("")
+        else:
+            self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
 
         # If the ref had no DB match but the LLM confirmed it (UNLIKELY),
         # apply_hallucination_verdict already stripped the unverified error
@@ -357,7 +362,7 @@ class ParallelReferenceProcessor:
                     print(f"       Verified URL: {ha_link}")
                     printed_llm_verification = True
                 if ha_explanation:
-                    print(f"       LLM confirmed: {ha_explanation}")
+                    print(f"       {ha_explanation}")
 
         # Display errors and warnings
         if result.errors:
@@ -382,7 +387,7 @@ class ParallelReferenceProcessor:
                     print(f"       ✅ Verified via URL: {cited_url}")
                     ha_explanation = assessment.get('explanation', '')
                     if ha_explanation:
-                        print(f"         LLM confirmed: {ha_explanation}")
+                        print(f"         {ha_explanation}")
                 elif url_references_paper and assessment and assessment.get('verdict') == 'LIKELY':
                     # URL references paper but LLM says likely hallucinated
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)

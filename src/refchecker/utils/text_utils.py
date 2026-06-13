@@ -7,7 +7,7 @@ import re
 import logging
 import unicodedata
 import html
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ def expand_abbreviations(text: str) -> str:
         'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
         'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
         'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+        # Neuroscience journals
+        'j. comput. neurosci.': 'journal of computational neuroscience',
         # Nature journals
         'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
         # Handle specific multi-word patterns and well-known acronyms
@@ -201,6 +203,61 @@ def parse_authors_with_initials(authors_text):
     
     # Fix "Nameet al" concatenation from PDF extraction (newline before "et al" collapsed)
     authors_text = re.sub(r'(\w)(et\s*al\.?)\s*$', r'\1 \2', authors_text)
+
+    def is_initial_token(part: str) -> bool:
+        return bool(re.match(r'^[A-Z]\.?(?:\s+[A-Z]\.?)*(?:-[A-Za-z]\.?)?$', part.strip()))
+
+    def split_compressed_lastname_initial_list(text: str):
+        """Parse lists where a comma after each initial was dropped.
+
+        PDF extraction sometimes turns ``Lastname, F., Other, G.`` into
+        ``Lastname, F. Other, G``.  A plain comma split then sees
+        ``F. Other`` as one author rather than the initial for ``Lastname``
+        followed by the next surname.  Reconstruct the intended
+        ``Lastname, F.`` entries when every comma-separated part follows that
+        pattern.
+        """
+        if ',' not in text or ' and ' in text.lower() or ';' in text:
+            return None
+
+        comma_parts = [part.strip() for part in text.split(',') if part.strip()]
+        if len(comma_parts) < 3:
+            return None
+
+        initial_unit = r'[A-Z]\.?(?:-[A-Z]\.?)?'
+        leading_initials_re = re.compile(
+            rf'^(?P<initials>{initial_unit}(?:\s+{initial_unit})*)\s+(?P<next_surname>.+)$'
+        )
+        terminal_initials_re = re.compile(rf'^{initial_unit}(?:\s+{initial_unit})*$')
+
+        authors = []
+        current_surname = comma_parts[0]
+        saw_compressed_boundary = False
+
+        for index, part in enumerate(comma_parts[1:], start=1):
+            match = leading_initials_re.match(part)
+            if match and index < len(comma_parts) - 1:
+                initials = match.group('initials').strip()
+                next_surname = match.group('next_surname').strip()
+                if not next_surname:
+                    return None
+                authors.append(f"{current_surname}, {initials}")
+                current_surname = next_surname
+                saw_compressed_boundary = True
+                continue
+
+            if terminal_initials_re.match(part):
+                authors.append(f"{current_surname}, {part}")
+                current_surname = ''
+                continue
+
+            return None
+
+        if current_surname:
+            return None
+        if saw_compressed_boundary and len(authors) >= 2:
+            return authors
+        return None
     
     # Special case: Handle single author followed by "et al" (e.g., "Mubashara Akhtar et al.")
     # This should be split into ["Mubashara Akhtar", "et al"]
@@ -210,6 +267,10 @@ def parse_authors_with_initials(authors_text):
         if base_author and not ' and ' in base_author and not ',' in base_author:
             # This is a simple "FirstName LastName et al" case
             return [base_author, 'et al']
+
+    compressed_authors = split_compressed_lastname_initial_list(authors_text)
+    if compressed_authors:
+        return compressed_authors
     
     # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
     if ';' in authors_text:
@@ -250,12 +311,8 @@ def parse_authors_with_initials(authors_text):
                         surname, initials = comma_parts
                         # Surname should be capitalized word(s)
                         surname_pattern = r'^[A-Z][a-zA-Z\s\-\.\']+$'
-                        # Initials should be 1-3 capital letters with optional periods and spaces
-                        # Allow patterns like "K.", "D. V.", "A. B. C."
-                        initial_pattern = r'^[A-Z]\.?(\s+[A-Z]\.?)*\s*$'
-                        
                         if (re.match(surname_pattern, surname) and 
-                            re.match(initial_pattern, initials) and
+                            is_initial_token(initials) and
                             len(surname) >= 2 and len(initials.replace('.', '').replace(' ', '')) >= 1):
                             valid_authors.append(f"{surname}, {initials}")
                         else:
@@ -264,7 +321,6 @@ def parse_authors_with_initials(authors_text):
                 else:
                     # No comma, doesn't match expected format
                     break
-            
             # If we successfully parsed at least 2 authors, use this format
             if len(valid_authors) >= 2:
                 return valid_authors
@@ -405,7 +461,7 @@ def parse_authors_with_initials(authors_text):
                 # Check if this follows surname, given pattern
                 surname_matches = re.match(surname_pattern, surname_candidate)
                 is_full_given = re.match(full_given_pattern, given_candidate)
-                is_initial = re.match(initial_pattern, given_candidate)
+                is_initial = re.match(initial_pattern, given_candidate) or is_initial_token(given_candidate)
                 
                 # Accept if surname matches and given is either full name or initial
                 given_matches = is_full_given or is_initial
@@ -484,7 +540,7 @@ def parse_authors_with_initials(authors_text):
         elif current_author:
             # We're building an author name
             # Check if this part looks like an initial (1-3 characters, possibly with periods)
-            if re.match(r'^[A-Z]\.?\s*$', part) or re.match(r'^[A-Z]\.\s*[A-Z]\.?\s*$', part):
+            if is_initial_token(part):
                 # This is an initial, add to current author
                 current_author += f", {part}"
             else:
@@ -927,7 +983,7 @@ def normalize_diacritics(text: str) -> str:
     special_chars = {
         'ł': 'l', 'Ł': 'L',
         'ℓ': 'l', 'ℒ': 'L',
-        'đ': 'd', 'Đ': 'D', 
+        'đ': 'd', 'Đ': 'D',
         'ħ': 'h', 'Ħ': 'H',
         'ø': 'o', 'Ø': 'O',
         'þ': 'th', 'Þ': 'TH',
@@ -938,6 +994,12 @@ def normalize_diacritics(text: str) -> str:
         'ü': 'ue', 'Ü': 'UE',
         'ö': 'oe', 'Ö': 'OE',
         'ä': 'ae', 'Ä': 'AE',
+        # Turkish (v0.7.58) — dotless ı and dotted İ don't decompose
+        # via NFD, leaving names like "Dıraçoğlu" mismatched against
+        # the Latinized "Diracoglu" the cited side typically uses.
+        'ı': 'i', 'İ': 'I',
+        'ğ': 'g', 'Ğ': 'G',
+        'ş': 's', 'Ş': 'S',
     }
     
     for special, replacement in special_chars.items():
@@ -1066,6 +1128,143 @@ def normalize_diacritics_simple(text: str) -> str:
     
     return ascii_text
 
+# v0.7.66 (Issue B): surname-prefix particles that travel WITH the
+# surname when generating variants — Vancouver/APA bibliographies write
+# them either way ("dos Santos A" vs "A dos Santos"), and the variant
+# generator must keep the prefix glued to the surname token.
+_SURNAME_PREFIX_PARTICLES = {
+    'dos', 'das', 'da', 'do', 'de', 'del', 'della', 'di', 'du',
+    'van', 'von', 'der', 'den', 'des', 'ten', 'ter',
+    'la', 'le', 'las', 'los',
+    'el', 'al', 'bin', 'ben', 'ibn',
+    'af', 'av', 'zu', 'zur', 'zum', 'mac', 'mc',
+}
+
+
+def _normalize_variant_for_compare(s: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace, normalize
+    diacritics — used to compare two surface name variants for equality
+    without being thrown off by formatting differences (commas, periods,
+    extra spaces, accents)."""
+    if not s:
+        return ''
+    s = normalize_diacritics_simple(s)
+    s = s.lower()
+    # Drop periods, commas, hyphens used as separators (but keep
+    # internal letters joined). Convert any punctuation/whitespace run
+    # to a single space.
+    s = re.sub(r"[\.,;:'`’\-‐‑–—]+", ' ', s)
+    s = re.sub(r"\s+", ' ', s).strip()
+    return s
+
+
+def name_variants(canonical_full_name: str) -> set:
+    """Generate the common citation surface forms for a canonical full
+    author name. Given e.g. "Lindsay A. Tetreault" returns a set of
+    Vancouver / APA / natural / comma-prefixed forms, including the
+    "Lindsay Tetreault L" oddity where the first name is retained and a
+    redundant first-initial trails the surname.
+
+    Surname-prefix particles ("dos", "van", "de", "von", ...) travel
+    with the surname so "André Renato dos Santos" keeps "dos Santos"
+    intact as the surname phrase.
+
+    The output is intentionally over-generative — `is_name_match` uses
+    normalized equality on the cartesian product of two variant sets,
+    so spurious extras cost nothing as long as they don't collide with
+    a DIFFERENT person's canonical name.
+    """
+    variants: set = set()
+    if not canonical_full_name:
+        return variants
+    raw = normalize_apostrophes(canonical_full_name.strip())
+    # If the canonical itself is "Last, First Middle" form, flip to
+    # "First Middle Last" before tokenisation so the surname-detection
+    # logic below sees the natural ordering.
+    if ',' in raw:
+        left, _, right = raw.partition(',')
+        left = left.strip()
+        right = right.strip()
+        if left and right:
+            raw = f"{right} {left}"
+    tokens = raw.split()
+    if not tokens:
+        return variants
+    # Detect the parser-oddity case: input ends in a BARE single letter
+    # (no period) AND has ≥3 tokens AND the second-to-last token looks
+    # like a real surname word (len > 1, not a particle). This is
+    # "Lindsay Tetreault L" — the trailing "L" is a redundant first-
+    # initial that the parser tacked on. We handle it by treating the
+    # tokens BEFORE the trailing letter as the real name, and emit a
+    # special trailing-initial variant.
+    _trailing_oddity = False
+    if (
+        len(tokens) >= 3
+        and len(tokens[-1].rstrip('.')) == 1
+        and tokens[-1].rstrip('.').isalpha()
+        and not tokens[-1].endswith('.')
+        and len(tokens[-2].rstrip('.')) > 1
+        and tokens[-2].lower().rstrip('.') not in _SURNAME_PREFIX_PARTICLES
+    ):
+        _trailing_oddity = True
+        tokens = tokens[:-1]
+    # Identify surname tokens: walk from the right and absorb particles
+    # before the rightmost surname word.
+    surname_tokens = [tokens[-1]]
+    i = len(tokens) - 2
+    while i >= 0 and tokens[i].lower().rstrip('.') in _SURNAME_PREFIX_PARTICLES:
+        surname_tokens.insert(0, tokens[i])
+        i -= 1
+    given_tokens = tokens[:i + 1]
+    if not given_tokens:
+        # Just a surname — variants are limited.
+        surname_phrase = ' '.join(surname_tokens)
+        variants.add(surname_phrase)
+        return variants
+    surname_phrase = ' '.join(surname_tokens)
+    # Initials from given tokens: first letter of each, uppercase.
+    initials = [t[:1].upper() for t in given_tokens if t and t[:1].isalpha()]
+    if not initials:
+        return variants
+    first_initial = initials[0]
+    initials_concat = ''.join(initials)  # "LA"
+    initials_dotted = '. '.join(initials) + '.'  # "L. A."
+    initials_dot_no_space = '.'.join(initials) + '.'  # "L.A."
+    initials_spaced = ' '.join(initials)  # "L A"
+    givens_full = ' '.join(given_tokens)  # "Lindsay A."
+
+    # Vancouver: "<Surname> <initials-concat>" — preserve the FULL
+    # initials set (no first-only fallback) so a different person with
+    # different middle initials can't sneak in via the variant check.
+    variants.add(f"{surname_phrase} {initials_concat}")
+    variants.add(f"{surname_phrase} {initials_spaced}")
+    variants.add(f"{surname_phrase} {initials_dotted}")
+    variants.add(f"{surname_phrase} {initials_dot_no_space}")
+    # APA comma forms
+    variants.add(f"{surname_phrase}, {initials_dotted}")
+    variants.add(f"{surname_phrase}, {initials_concat}")
+    variants.add(f"{surname_phrase}, {initials_dot_no_space}")
+    # APA full given names
+    variants.add(f"{surname_phrase}, {givens_full}")
+    variants.add(f"{surname_phrase} {givens_full}")
+    # Natural "<Givens> <Surname>"
+    variants.add(f"{givens_full} {surname_phrase}")
+    variants.add(f"{initials_concat} {surname_phrase}")
+    variants.add(f"{initials_dotted} {surname_phrase}")
+    variants.add(f"{initials_dot_no_space} {surname_phrase}")
+    variants.add(f"{initials_spaced} {surname_phrase}")
+    # Trailing-initial oddity: "Lindsay A. Tetreault" → "Lindsay Tetreault L"
+    # — first-given + surname + first-given's first letter (NOT any
+    # middle initial). The oddity is specifically a parser quirk where
+    # the cited form retained the full first name AND tacked on the
+    # first-initial again as if it were a Vancouver suffix. Emitting for
+    # ANY initial (e.g. "Pavlo Dral A" for "Pavlo A. Dral") would let
+    # two people with the same first name + surname but different middle
+    # initials wrongly match each other.
+    variants.add(f"{given_tokens[0]} {surname_phrase} {first_initial}")
+    return variants
+
+
 def is_name_match(name1: str, name2: str) -> bool:
     """
     Check if two author names match, allowing for variations.
@@ -1081,6 +1280,16 @@ def is_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
 
+    # v0.7.66 (Issue B): keep the truly-original inputs around. The
+    # function reassigns name1/name2 after Vancouver rotation, but the
+    # variant generator below needs to see the pre-rotation strings to
+    # catch the "Lindsay Tetreault L" oddity (rotation turns it into
+    # "L. Lindsay Tetreault", which the surname-detector then reads as
+    # surname="Tetreault" / given=["L","Lindsay"] — losing the trailing
+    # initial signal).
+    _orig_name1_for_variants = name1
+    _orig_name2_for_variants = name2
+
     def has_internal_accent_apostrophe(token: str) -> bool:
         token = normalize_apostrophes(token)
         return any(
@@ -1090,8 +1299,452 @@ def is_name_match(name1: str, name2: str) -> bool:
 
     raw_name1 = normalize_apostrophes(name1.strip())
     raw_name2 = normalize_apostrophes(name2.strip())
+
+    # v0.7.67 (Issue 3a): normalise Unicode hyphen variants with optional
+    # surrounding whitespace down to a single ASCII hyphen BEFORE we
+    # tokenise. PDFs and some database exports render hyphenated surnames
+    # as e.g. "Tejada ‐ Romero" (U+2010 HYPHEN with spaces) where the
+    # cited form is the ASCII "Tejada-Romero" — without this the surname
+    # token splits in two and downstream matching fails.
+    _hyphen_pat = re.compile(r'\s*[‐‑‒–—−]\s*')
+    raw_name1 = _hyphen_pat.sub('-', raw_name1)
+    raw_name2 = _hyphen_pat.sub('-', raw_name2)
+
     raw_parts1 = raw_name1.split()
     raw_parts2 = raw_name2.split()
+
+    # v0.7.57: Vancouver-style rotation. "Surname Initials" (Vancouver:
+    # "van der Ven DJC") shouldn't be flagged as a mismatch against
+    # "FirstName ... Surname" (APA: "Denise J C van der Ven") when
+    # they're the same person.
+    # v0.7.60: also accept hyphenated initials ("J-M", "K-C") since
+    # German/Polish/etc names like "Kim-Charline" → "K-C" and
+    # "Graf von der Schulenburg J-M" all use them.
+    def _split_vancouver_initials(last, allow_single=False):
+        """If `last` looks like a Vancouver initials cluster, return
+        the periodised initials list; else None. Handles:
+          "DJC"  (unbroken 2-4 uppercase letters)
+          "J-M", "K-C", "J.M.", "J.M"  (hyphen / dot separated)
+          "P"    (single initial — only when allow_single=True, see
+                 v0.7.63 Coronel Granado P case below)
+        """
+        if not last:
+            return None
+        s = last.rstrip('.').lstrip()
+        if not s:
+            return None
+        # v0.7.63 ("Coronel Granado P"): when the caller has additional
+        # surname tokens before the trailing initial, accept a single
+        # letter as a valid Vancouver initial cluster. Without this,
+        # multi-word Spanish/Portuguese surnames with a SINGLE given-
+        # name initial (Vancouver style) fall straight through and the
+        # downstream comparator never sees them as initials+surname.
+        if allow_single and len(s) == 1 and s.isalpha() and s.isupper():
+            return [s + "."]
+        # Case 1: unbroken uppercase cluster (2-4 letters, no separators)
+        if 2 <= len(s) <= 4 and s.isalpha() and s.isupper():
+            return [c + "." for c in s]
+        # Case 2: separated cluster — bits are 1-2 uppercase letters,
+        # combined letter count 2..4.
+        bits = [b for b in re.split(r'[-.–—]', s) if b]
+        if not bits:
+            return None
+        if not all(1 <= len(b) <= 2 and b.isalpha() and b.isupper() for b in bits):
+            return None
+        flat = ''.join(bits)
+        if not (2 <= len(flat) <= 4):
+            return None
+        return [c + "." for c in flat]
+
+    def _maybe_rotate_vancouver(parts):
+        if len(parts) < 2:
+            return parts
+        # v0.7.65: never rotate when ANY token carries a comma. A comma
+        # signals "Last, First" (APA) ordering, not Vancouver. v0.7.63's
+        # single-letter trailing-initial branch (allow_single below) was
+        # otherwise pulling the trailing middle initial of
+        # "Johnson, Maria K." → ["K.", "Johnson,", "Maria"] and breaking
+        # the downstream comma-rotation path entirely.
+        if any(',' in p for p in parts):
+            return parts
+        # v0.7.63: allow a single-letter trailing initial when EITHER
+        # (a) there are ≥2 preceding tokens that look like a multi-word
+        # surname (covers "Coronel Granado P", "Gimeno del Sol M", "van
+        # der Berg J", "dos Santos A", "Renovato França M"), OR
+        # (b) the trailing token ends with an unambiguous period ("H."),
+        # in which case even a 2-token "Häuselmann H." is unambiguously
+        # Vancouver-style and we can safely rotate. (a)-only would
+        # leave 2-token cases like "Häuselmann H." unrotated and miss
+        # the Hauselmann HJ vs Häuselmann H. cross-comparison.
+        leading_looks_like_surname = len(parts) >= 3 and all(
+            (p[:1].isalpha() and not p.islower()) or p.lower() in {
+                'von', 'van', 'de', 'del', 'della', 'di', 'da', 'dos',
+                'du', 'le', 'la', 'las', 'los', 'der', 'den', 'des',
+                'ten', 'ter', 'af', 'av', 'zu', 'zur', 'zum',
+            }
+            for p in parts[:-1]
+        )
+        last_has_period = parts[-1].endswith('.') and len(parts[-1].rstrip('.')) == 1
+        # Also allow single-letter trailing initial in the 2-token case
+        # when the FIRST token is unambiguously a surname (≥4 letters,
+        # title-cased — not all-caps which would itself look like an
+        # initial cluster). Covers "Hauselmann H" / "Häuselmann H"
+        # without misreading "Zhang Y" — wait, "Zhang Y" is the desired
+        # APA shape "Surname Initial" too, so rotating it is actually
+        # CORRECT (it matches "Y. Zhang"). The existing 2-letter cluster
+        # branch already rotates "Zhang YJ" successfully; this extends
+        # the same treatment to single-letter trailing initials.
+        first_looks_like_surname = (
+            len(parts) == 2
+            and len(parts[0].rstrip('.')) >= 4
+            and parts[0][:1].isalpha() and parts[0][:1].isupper()
+            and not parts[0].isupper()  # avoid all-caps "MGMT R"
+        )
+        allow_single = (
+            leading_looks_like_surname
+            or last_has_period
+            or first_looks_like_surname
+        )
+        # v0.7.67 (Issue 3b): when leading tokens look like a surname AND
+        # the trailing 2+ tokens are EACH a bare single uppercase letter
+        # (the Vancouver "M J G" run), collapse those tokens into one
+        # initial cluster before rotating. Covers Spanish/Portuguese
+        # APA-Vancouver hybrids like "De Tejada-Romero M J G" where the
+        # cited form puts every given initial as its own token.
+        if leading_looks_like_surname and len(parts) >= 3:
+            trailing_singles = []
+            i = len(parts) - 1
+            while i >= 0:
+                t = parts[i].rstrip('.')
+                if len(t) == 1 and t.isalpha() and t.isupper():
+                    trailing_singles.insert(0, t)
+                    i -= 1
+                else:
+                    break
+            if len(trailing_singles) >= 2 and i >= 0:
+                # Re-check leading is still ≥2 tokens to keep surname-ness.
+                leading = parts[: i + 1]
+                if len(leading) >= 1:
+                    initials = [t + '.' for t in trailing_singles]
+                    return initials + leading
+        split = _split_vancouver_initials(parts[-1], allow_single=allow_single)
+        if split is None:
+            return parts
+        # Move to front so downstream surname-particle grouping pulls
+        # "van der Ven" / "Menezes Costa" back together as one and
+        # matches against the APA form's given-name initials.
+        return split + parts[:-1]
+    raw_parts1 = _maybe_rotate_vancouver(raw_parts1)
+    raw_parts2 = _maybe_rotate_vancouver(raw_parts2)
+    raw_name1 = " ".join(raw_parts1)
+    raw_name2 = " ".join(raw_parts2)
+    name1 = raw_name1
+    name2 = raw_name2
+
+    # v0.7.66 (Issue B): variant-based fall-through. Treat EACH side as
+    # potentially canonical, generate the common citation surface forms,
+    # and accept if any cited variant normalizes-equal to any actual
+    # variant. This catches "Lindsay Tetreault L" ↔ "Lindsay A.
+    # Tetreault" (parser oddity where first name is kept and a redundant
+    # first-initial trails the surname) without requiring a new branch
+    # in the dozen surname/initial special cases below. Positive-only:
+    # never rejects, only accepts, so existing strict negatives (e.g.
+    # "JK Brown" vs "J. L. Brown") still fall through to the standard
+    # mismatch checks.
+    try:
+        # Variant-based positive accept — only triggered when ONE side
+        # has the trailing-initial parser oddity shape (≥3 tokens, last
+        # token a bare single uppercase letter without a period, second-
+        # to-last a real word). Without this gate, two unrelated people
+        # with the same first-given letter + surname (e.g. "Pavlo O
+        # Dral" vs "Pavlo A. Dral") would wrongly intersect via the
+        # `<first_given> <surname> <first_initial>` variant.
+        def _looks_like_trailing_initial_oddity(s: str) -> bool:
+            if not s:
+                return False
+            toks = normalize_apostrophes(s.strip()).split()
+            if len(toks) < 3:
+                return False
+            last = toks[-1]
+            if last.endswith('.'):
+                return False
+            last_clean = last.rstrip('.')
+            if len(last_clean) != 1 or not last_clean.isalpha() or not last_clean.isupper():
+                return False
+            prev = toks[-2].rstrip('.')
+            if len(prev) <= 1:
+                return False
+            return True
+
+        _oddity1 = _looks_like_trailing_initial_oddity(_orig_name1_for_variants)
+        _oddity2 = _looks_like_trailing_initial_oddity(_orig_name2_for_variants)
+        if _oddity1 or _oddity2:
+            _vars1 = set()
+            _vars2 = set()
+            for src in (name1, _orig_name1_for_variants):
+                if src:
+                    _vars1.update(_normalize_variant_for_compare(v) for v in name_variants(src))
+                    _vars1.add(_normalize_variant_for_compare(src))
+            for src in (name2, _orig_name2_for_variants):
+                if src:
+                    _vars2.update(_normalize_variant_for_compare(v) for v in name_variants(src))
+                    _vars2.add(_normalize_variant_for_compare(src))
+            _vars1.discard('')
+            _vars2.discard('')
+            if _vars1 & _vars2:
+                return True
+    except Exception:
+        # Variant generation should never block the standard path —
+        # if anything goes wrong, fall through to the existing logic.
+        pass
+
+    # v0.7.60: dedicated post-rotation "Initials + Multi-word Surname"
+    # compare. The downstream particle grouping handles van/von/de but
+    # NOT genuine compound surnames like "Menezes Costa",
+    # "Graf von der Schulenburg", or hyphenated last names. Pattern:
+    #   Both sides start with 1+ initial tokens (X. or X), end with
+    #   1+ non-initial tokens (the surname, possibly multi-word).
+    # Match when surnames agree (case-insensitive, joined, hyphens and
+    # Al-/El- prefixes normalised) AND cited initials are a prefix or
+    # subset of the actual initials — extra middle initials on either
+    # side are allowed (Vancouver may drop middles, APA may include).
+    def _initials_and_surname(parts):
+        if len(parts) < 2:
+            return None, None
+        initials = []
+        i = 0
+        while i < len(parts):
+            tok = parts[i].rstrip('.')
+            # An initial is 1-2 uppercase letters (already split by
+            # rotation), possibly with a period.
+            if 1 <= len(tok) <= 2 and tok.isalpha() and tok.isupper():
+                # v0.7.65: when the token is a 2-letter compact cluster
+                # like "GV" or "HJ" (Vancouver-compact), expand BOTH
+                # letters as separate initials. The pre-v0.7.65 code
+                # only kept tok[0], which made "GV Abramkin" look like
+                # ini=["G"], silently matching "G. A. Abramkin" via the
+                # single-initial-prefix branch and dropping the V vs A
+                # mismatch. Expanding gives ini=["G","V"] which then
+                # fails the position-by-position prefix check correctly.
+                for ch in tok:
+                    initials.append(ch.upper())
+                i += 1
+            else:
+                break
+        if not initials or i >= len(parts):
+            return None, None
+        surname = ' '.join(parts[i:]).strip()
+        return initials, surname
+
+    def _normalize_surname(s):
+        s = s.lower()
+        # Strip Arabic "Al-" / "El-" prefix and join hyphenated parts
+        # ("Al-Omari" ≈ "Alomari", "Carvalho-e-Silva" ≈ "Carvalhoesilva")
+        s = re.sub(r'^(al|el)[-‐]', '', s)
+        s = re.sub(r'[-‐]', '', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    ini1, sur1 = _initials_and_surname(raw_parts1)
+    ini2, sur2 = _initials_and_surname(raw_parts2)
+    if ini1 and ini2 and sur1 and sur2:
+        # Diacritic-stripped surname compare via the existing helper.
+        sur1_norm = _normalize_surname(normalize_diacritics(sur1))
+        sur2_norm = _normalize_surname(normalize_diacritics(sur2))
+        # v0.7.63 ("Häuselmann"): normalize_diacritics() transliterates
+        # ä→ae (German convention), so "Hauselmann" (cited, no umlaut)
+        # vs "Häuselmann" (actual) becomes "hauselmann" vs "haeuselmann"
+        # — a false mismatch. Also try the no-transliteration form
+        # (ä→a) so the diacritic-stripped surfaces compare equal. Same
+        # for Turkish ğ/ş/ı/İ (Türk Geriatri Dergisi style — handled by
+        # the v0.7.58 char map) when ONE side has the diacritic and the
+        # other has the bare Latin letter.
+        sur1_norm_simple = _normalize_surname(normalize_diacritics_simple(sur1))
+        sur2_norm_simple = _normalize_surname(normalize_diacritics_simple(sur2))
+        # Accept surname match OR one being a suffix of the other
+        # (handles "Abu Osman" vs "Osman" where the DB truncated the
+        # particle).
+        def _surnames_agree(a, b):
+            return (
+                a == b
+                or (len(a) >= 4 and len(b) >= 4 and
+                    (a.endswith(' ' + b) or
+                     b.endswith(' ' + a) or
+                     a.endswith(b) or
+                     b.endswith(a)))
+            )
+        surnames_agree = (
+            _surnames_agree(sur1_norm, sur2_norm)
+            or _surnames_agree(sur1_norm_simple, sur2_norm_simple)
+            # Cross-pair: one side transliterated, the other not.
+            or _surnames_agree(sur1_norm, sur2_norm_simple)
+            or _surnames_agree(sur1_norm_simple, sur2_norm)
+        )
+        if surnames_agree:
+            # Initials check: shorter must be a prefix of longer (the
+            # truncated/dropped-middle case) OR one's first initial
+            # equals the other's first initial when one side has only
+            # one (the "Maiers MJ" vs "Michele Maiers" case where
+            # Michele only contributes M as a first initial).
+            short, long = (ini1, ini2) if len(ini1) <= len(ini2) else (ini2, ini1)
+            if (
+                long[:len(short)] == short  # exact prefix
+                or (len(short) == 1 and long and short[0] == long[0])  # first only
+            ):
+                return True
+            # v0.7.63 ("Coronel Granado P"): when the surnames agree
+            # ONLY via the suffix path (the longer surname phrase is
+            # the shorter one preceded by extra given-name tokens that
+            # got captured as 'surname' on one side), the cited initials
+            # may align with ANY of the trailing given-name letters
+            # rather than the first. E.g. cited "Coronel Granado P" →
+            # ini=["P"], sur="Coronel Granado"; actual "M. Pilar
+            # Coronel Granado" → ini=["M"], sur="Pilar Coronel Granado".
+            # The actual surname *contains* the cited surname, and the
+            # extra prefix "Pilar" gives the cited "P". Accept when EACH
+            # cited initial appears as the first letter of one of those
+            # extra prefix words.
+            if sur1_norm != sur2_norm:
+                shorter_sur_norm, longer_sur_norm = (
+                    (sur1_norm, sur2_norm) if len(sur1_norm) < len(sur2_norm)
+                    else (sur2_norm, sur1_norm)
+                )
+                shorter_ini, longer_ini = (
+                    (ini1, ini2) if len(sur1_norm) < len(sur2_norm)
+                    else (ini2, ini1)
+                )
+                if longer_sur_norm.endswith(shorter_sur_norm):
+                    # The extra words sit at the START of the longer
+                    # surname phrase. Their first letters are candidate
+                    # initials for the shorter side's cited initials.
+                    extra = longer_sur_norm[: -len(shorter_sur_norm)].strip()
+                    extra_initials = [w[:1].upper() for w in extra.split() if w]
+                    # Combined initial pool for the longer side: its own
+                    # parsed initials PLUS the extra-prefix initials.
+                    pool = list(longer_ini) + extra_initials
+                    if all(letter in pool for letter in shorter_ini):
+                        return True
+
+    # v0.7.63 ("Coronel Granado P"): asymmetric initials+multi-word-surname
+    # match. The branch above requires BOTH sides to parse as initials +
+    # surname. Spanish APA gives the surname AT THE END after given names
+    # ("Mª Pilar Coronel Granado") — the leading "Mª" / first-name token
+    # isn't uppercase, so _initials_and_surname() returns (None, None) on
+    # that side and the branch above never fires. Here we accept a one-
+    # sided match: if ONE side parses cleanly as Vancouver initials + a
+    # multi-word surname phrase (≥2 surname words), match when the OTHER
+    # side ends with that surname phrase (after diacritic normalisation)
+    # AND the first letter of the other side's first surname-preceding
+    # token matches the cited first initial. Covers Spanish (Coronel
+    # Granado, García López), Portuguese (Renovato França), Dutch (van
+    # der Berg), German von (von der Leyen), French (de la Cruz),
+    # Brazilian (dos Santos, da Silva), Arabic prefix (Al-Omari) when
+    # combined with a multi-word given name.
+    def _asym_initials_multiword_surname(ini, sur, other_parts):
+        if not ini or not sur:
+            return False
+        # Require a genuinely multi-word surname (≥2 tokens, total ≥6
+        # chars after dropping spaces) — single-token surnames are
+        # already covered by the existing _vancouver_apa / _compact
+        # paths and including them here risks pulling in unrelated
+        # same-surname authors.
+        sur_tokens = sur.split()
+        if len(sur_tokens) < 2:
+            return False
+        # Try both diacritic forms so "Häuselmann"/"Hauselmann" agree.
+        sur_norm_t = _normalize_surname(normalize_diacritics(sur))
+        sur_norm_s = _normalize_surname(normalize_diacritics_simple(sur))
+        if len(sur_norm_t.replace(' ', '')) < 6 and len(sur_norm_s.replace(' ', '')) < 6:
+            return False
+        # Build the OTHER side's full name (post-rotation) and check if
+        # it ends with the surname phrase. We check both diacritic forms
+        # of the other side too.
+        other_full_t = _normalize_surname(normalize_diacritics(' '.join(other_parts).lower()))
+        other_full_s = _normalize_surname(normalize_diacritics_simple(' '.join(other_parts).lower()))
+        ends_with_surname = any(
+            full and (full == sn or full.endswith(' ' + sn))
+            for full in (other_full_t, other_full_s)
+            for sn in (sur_norm_t, sur_norm_s)
+            if sn
+        )
+        if not ends_with_surname:
+            return False
+        # Identify the FIRST given-name token on the other side: the
+        # first non-particle token that isn't part of the trailing
+        # surname phrase. Use diacritic-simple form for first-letter
+        # comparison (so "Mª"/"Pilar" still gives first-letter "m"/"p").
+        particle_lc = {
+            'von', 'van', 'de', 'del', 'della', 'di', 'da', 'dos', 'du',
+            'le', 'la', 'las', 'los', 'der', 'den', 'des', 'ten', 'ter',
+            'af', 'av', 'zu', 'zur', 'zum',
+        }
+        # Strip the surname tokens off the end of `other_parts`. Match
+        # token-by-token from the end using normalised forms so
+        # "Mª Pilar Coronel Granado" minus "Coronel Granado" leaves
+        # ["Mª", "Pilar"].
+        sur_tok_norm = [_normalize_surname(normalize_diacritics_simple(t.lower()))
+                        for t in sur_tokens]
+        other_tok_norm = [_normalize_surname(normalize_diacritics_simple(t.lower()))
+                          for t in other_parts]
+        leading = list(other_parts)
+        # Strip from the end while the last token matches a surname token.
+        while leading and sur_tok_norm and other_tok_norm[-1] == sur_tok_norm[-1]:
+            leading.pop()
+            other_tok_norm.pop()
+            sur_tok_norm.pop()
+        if not leading:
+            # Other side is JUST the surname (no given name) — accept
+            # only if cited has a single initial (we can't claim a
+            # given name the DB doesn't supply, but it's plausible the
+            # DB truncated the name to surname-only).
+            return len(ini) == 1
+        # Collect first-letter initials from EVERY non-particle given-
+        # name token. Spanish APA can list both given names ("Mª Pilar"
+        # = María Pilar); the cited Vancouver initial may correspond to
+        # the second given ("P" → Pilar), not the first. We require
+        # each cited initial to appear in the pool, AND the pool's
+        # first letter to either (a) match the cited first initial, or
+        # (b) be a known ordinal-marked Spanish given like "Mª" / "Sr"
+        # so we don't accept arbitrary first-letter drift.
+        given_initials = []
+        for tok in leading:
+            tok_clean = _normalize_surname(normalize_diacritics_simple(tok.lower()))
+            if tok_clean and tok_clean not in particle_lc:
+                given_initials.append(tok_clean[:1].upper())
+        if not given_initials:
+            return False
+        # Every cited initial must appear somewhere in the pool.
+        if not all(letter in given_initials for letter in ini):
+            return False
+        # If cited has only one initial and it matches the FIRST given
+        # initial, accept. Otherwise require either an exact prefix
+        # match OR the first given to be a Spanish "Mª" / "Mª Pilar"
+        # style ordinal-suffix abbreviation (token contains feminine /
+        # masculine ordinal marker) — in those cases the cited initial
+        # commonly skips to the second given.
+        first_tok_clean = _normalize_surname(normalize_diacritics_simple(
+            leading[0].lower()
+        ))
+        ordinal_abbrev = bool(re.search(r'[ªº]', first_tok_clean))
+        if given_initials[: len(ini)] == ini:
+            return True
+        if ordinal_abbrev:
+            # "Mª Pilar Coronel Granado" — cited "P" matches "Pilar".
+            return True
+        # Single cited initial that matches ANY of the given initials
+        # (covers the v0.7.60 "Maiers MJ vs Michele Maiers" spirit
+        # while remaining narrow — surnames already agree, so a single-
+        # letter match across a given is high-confidence).
+        if len(ini) == 1 and ini[0] in given_initials:
+            return True
+        return False
+
+    if ini1 and sur1 and not (ini2 and sur2):
+        if _asym_initials_multiword_surname(ini1, sur1, raw_parts2):
+            return True
+    if ini2 and sur2 and not (ini1 and sur1):
+        if _asym_initials_multiword_surname(ini2, sur2, raw_parts1):
+            return True
 
     # Keep simple two-part surnames with accent-placeholder apostrophes strict.
     # This avoids treating cases like "Balunovi'c" as exact matches while still
@@ -2068,15 +2721,35 @@ def surname_similarity(surname1: str, surname2: str) -> bool:
     
     s1_clean = remove_all_accents(s1)
     s2_clean = remove_all_accents(s2)
-    
+
     if s1_clean == s2_clean:
         return True
-    
+
+    # v0.7.63 ("Häuselmann"): one side may already have the German
+    # ä→ae / ö→oe / ü→ue transliteration applied (caller passed it
+    # through normalize_diacritics() before reaching us), while the
+    # other side preserves the bare Latin letter. Reverse-collapse the
+    # transliterated digraphs and re-compare. Restrict to the German
+    # forms only; we don't want to collapse "ae" → "a" in arbitrary
+    # surnames that legitimately contain "ae" (e.g. "Aerts").
+    def _collapse_german_transliteration(s):
+        # Only collapse digraphs at positions adjacent to typical
+        # German consonant patterns to limit false collapses. The
+        # surname is already lowercase + accent-stripped here.
+        return (s
+                .replace('ae', 'a')
+                .replace('oe', 'o')
+                .replace('ue', 'u'))
+    s1_collapsed = _collapse_german_transliteration(s1_clean)
+    s2_collapsed = _collapse_german_transliteration(s2_clean)
+    if s1_collapsed == s2_collapsed and len(s1_collapsed) >= 4:
+        return True
+
     # Check if one is a substring of the other (for compound surnames)
     if len(s1_clean) > 3 and len(s2_clean) > 3:
         if s1_clean in s2_clean or s2_clean in s1_clean:
             return True
-    
+
     return False
 
 
@@ -2145,6 +2818,160 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
     return True
 
 
+def _compact_initials_name_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match compact initials plus surname against expanded name tokens.
+
+    Handles both common publication-shape combinations:
+      * Western "F. M. Lastname" (surname-last)        — original case
+      * Vancouver "Lastname F. M." (surname-first)     — added 2026-05
+        for cases like "R. Tubbs" (cited APA) vs
+        "Tubbs R. S" (DB Vancouver) where the SAME author appears in
+        opposite token orders.
+
+    Also relaxes the strict length equality: the cited compact form may
+    have FEWER initials than the DB expanded form (one initial vs first
+    middle initial). The cited side providing MORE initials than the DB
+    has tokens is still rejected — that would be claiming initials the
+    DB doesn't confirm.
+    """
+    # Strip trailing periods on each token so "r." becomes "r" — common
+    # in cleaned-name forms where the period survives. The original
+    # function compared on `.isalpha()` which fails for "r.".
+    def _strip_period(tok: str) -> str:
+        return tok.rstrip('.').strip()
+
+    p1 = [_strip_period(t) for t in parts1]
+    p2 = [_strip_period(t) for t in parts2]
+    if len(p1) == 2 and len(p2) >= 3:
+        compact_initials, compact_surname = p1
+        long_parts = p2
+    elif len(p2) == 2 and len(p1) >= 3:
+        compact_initials, compact_surname = p2
+        long_parts = p1
+    else:
+        return False
+
+    if not compact_initials.isalpha() or len(compact_initials) < 1:
+        return False
+
+    # Try both orientations on the expanded side: surname-last (Western)
+    # AND surname-first (Vancouver / Asian).
+    candidates = []
+    candidates.append((long_parts[:-1], long_parts[-1]))   # surname-last
+    candidates.append((long_parts[1:],  long_parts[0]))    # surname-first
+
+    for expanded_prefix, expanded_surname in candidates:
+        if not surname_similarity(compact_surname, expanded_surname):
+            continue
+        # Cited can't have MORE initials than the DB provides — that
+        # would be inventing initials. Equal-or-fewer is fine.
+        if len(compact_initials) > len(expanded_prefix):
+            continue
+        # Each cited initial must match the first letter of the
+        # corresponding expanded token, positionally.
+        if all(
+            initial == token[0]
+            for initial, token in zip(compact_initials, expanded_prefix)
+            if token
+        ):
+            return True
+    return False
+
+
+def _normalize_initials_token(token: str) -> str:
+    """Reduce an initials token to a flat lowercase letter string.
+
+    "P.M." / "P. M." / "P-M" / "P.-M." / "PM" → "pm"
+    Returns "" for non-initial tokens.
+    """
+    cleaned = re.sub(r'[.\-]', '', token).lower()
+    if cleaned and cleaned.isalpha() and len(cleaned) <= 4:
+        return cleaned
+    return ''
+
+
+def _vancouver_apa_name_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match a 2-token Vancouver-shaped name ("Surname AB" or "AB Surname")
+    against a 2-token APA / full-given-name shape ("First Surname" or
+    "Surname First").
+
+    Vancouver compresses initials into one token (no periods between).
+    APA / display form may give a single first name. The match succeeds
+    only when:
+      - one side has a 1–4 letter all-letters token (compact initials),
+      - the OTHER side has a non-initial token (the given name),
+      - their surnames are similar (`surname_similarity`),
+      - AND every compact initial corresponds to the leading letter of
+        a given-name component. With a single given-name token like
+        "Patrick", we accept ONLY when the compact initials are a
+        single letter — otherwise we'd be claiming a middle name the
+        DB doesn't supply.
+    """
+    if len(parts1) != 2 or len(parts2) != 2:
+        return False
+
+    def split_into(surname_first_initials):
+        if surname_first_initials:
+            return parts1[0], parts1[1], parts2[0], parts2[1]
+        return parts1[1], parts1[0], parts2[1], parts2[0]
+
+    # Two orderings on each side: "Surname Initials" / "Initials Surname".
+    # Try the four combinations.
+    for p1_surname_first in (True, False):
+        s1_surname, s1_initials, _, _ = split_into(p1_surname_first)
+        compact_a = _normalize_initials_token(s1_initials)
+        if not compact_a:
+            continue
+        for p2_surname_first in (True, False):
+            sb_surname = parts2[0] if p2_surname_first else parts2[1]
+            sb_given = parts2[1] if p2_surname_first else parts2[0]
+            sb_given_norm = _normalize_initials_token(sb_given)
+            if not surname_similarity(s1_surname, sb_surname):
+                continue
+            # If the other side is ALSO compact initials, compare them.
+            if sb_given_norm:
+                if compact_a == sb_given_norm:
+                    return True
+                # A single initial is a strict prefix of longer initials.
+                if (len(compact_a) == 1 and sb_given_norm.startswith(compact_a)) or \
+                   (len(sb_given_norm) == 1 and compact_a.startswith(sb_given_norm)):
+                    return True
+                continue
+            # Other side has a real given name (e.g. "Patrick"). Accept
+            # only when compact_a is a single letter matching the given
+            # name's first letter — multi-letter "PM" against a single
+            # "Patrick" would claim an unverifiable middle name.
+            if len(compact_a) == 1 and sb_given.lower().startswith(compact_a):
+                return True
+    return False
+
+
+def _collapsed_author_token_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match names where PDF extraction removed spaces inside one author."""
+    def compact_token_text(tokens: List[str]) -> str:
+        return re.sub(r'[^a-z0-9]+', '', ''.join(tokens))
+
+    if len(parts1) == 1 and len(parts2) >= 2:
+        compact, expanded_parts = compact_token_text(parts1), parts2
+    elif len(parts2) == 1 and len(parts1) >= 2:
+        compact, expanded_parts = compact_token_text(parts2), parts1
+    else:
+        return False
+
+    if len(compact) < 5:
+        return False
+    expanded = compact_token_text(expanded_parts)
+    if compact == expanded:
+        return True
+
+    if len(expanded_parts) >= 3:
+        middle_parts = expanded_parts[1:-1]
+        if all(len(re.sub(r'[^a-z0-9]+', '', part)) == 1 for part in middle_parts):
+            return compact == compact_token_text([expanded_parts[0], expanded_parts[-1]])
+
+    return False
+
+
 def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     Enhanced name matching that handles initial-to-full-name and surname variations.
@@ -2201,6 +3028,15 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     
     if not parts1 or not parts2:
         return False
+
+    if _collapsed_author_token_match(parts1, parts2):
+        return True
+
+    if _compact_initials_name_match(parts1, parts2):
+        return True
+
+    if _vancouver_apa_name_match(parts1, parts2):
+        return True
 
     # Allow same-first-name matches when a two-part surname differs only by
     # diacritics or apostrophe-style accent placeholders, e.g. "Ramé" vs
@@ -2346,10 +3182,20 @@ _COLLECTIVE_AUTHOR_SHORTHANDS = frozenset({
     'qwen',
 })
 
+_COLLECTIVE_AUTHOR_SUFFIXES = frozenset({
+    'team',
+    'consortium',
+    'collaboration',
+    'collective',
+})
+
 
 def _is_collective_author_shorthand(author: str) -> bool:
     author_lower = normalize_diacritics(str(author or '').strip().lower())
-    return author_lower.endswith(' team') or author_lower in _COLLECTIVE_AUTHOR_SHORTHANDS
+    return (
+        any(author_lower.endswith(f' {suffix}') for suffix in _COLLECTIVE_AUTHOR_SUFFIXES)
+        or author_lower in _COLLECTIVE_AUTHOR_SHORTHANDS
+    )
 
 
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
@@ -2514,6 +3360,13 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         and enhanced_name_match(cleaned_cited[0], correct_names[0])
     ):
         return True, "Authors match (collective authorship shorthand)"
+
+    def any_cited_author_matches():
+        return any(
+            enhanced_name_match(cited_author, correct_author)
+            for cited_author in cleaned_cited
+            for correct_author in correct_names
+        )
     
     # When "et al" is present, only compare the explicitly listed authors
     # The key insight: if the citation has "et al", we should only verify the listed authors
@@ -2548,6 +3401,11 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             return False
         single_word_count = sum(1 for author in authors_list if len(author.strip().split()) == 1)
         return single_word_count >= len(authors_list) * 0.7  # 70% or more are single words
+
+    if not any_cited_author_matches():
+        from refchecker.utils.error_utils import format_no_matching_authors
+        display_cited = [format_author_for_display(author) for author in cleaned_cited]
+        return False, format_no_matching_authors(display_cited, correct_names)
     
     # Normal case without "et al" - compare all authors
     if len(cleaned_cited) != len(correct_names):
@@ -2566,8 +3424,23 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
-        # For cases where cited > correct, also show count mismatch
+        # For cases where cited > correct: if every authoritative author
+        # is matched somewhere in the cited list, the DB record is just
+        # missing entries (Semantic Scholar / OpenAlex routinely truncate
+        # very long author lists). That's not a citation error, so we
+        # accept the match instead of flagging a count mismatch the user
+        # can't act on.
         elif len(cleaned_cited) > len(correct_names):
+            def _correct_covered_by_cited():
+                for correct_author in correct_names:
+                    if not any(enhanced_name_match(correct_author, c) for c in cleaned_cited):
+                        return False
+                return True
+            if _correct_covered_by_cited():
+                return True, (
+                    f"Authors match (cited lists {len(cleaned_cited)} authors; "
+                    f"DB record only has {len(correct_names)} — likely DB truncation)"
+                )
             from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
@@ -2839,6 +3712,22 @@ def format_authors_for_display(authors):
     
     formatted_authors = [format_author_for_display(author) for author in authors]
     return ', '.join(formatted_authors)
+
+
+def is_no_date_placeholder(value) -> bool:
+    """Return True for bibliography no-date placeholders such as ``n.d.``."""
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if not text:
+        return False
+    compact = re.sub(r'\s+', '', text)
+    return compact in {'n.d.', 'n.d', 'nd'} or text in {'no date', 'undated'}
+
+
+def display_reference_value(value):
+    """Return an empty value for placeholders that should not be shown."""
+    return '' if is_no_date_placeholder(value) else value
 
 
 def strip_latex_commands(text):
@@ -4082,14 +4971,14 @@ def _extract_corrected_reference_data(error_entry: dict, corrected_data: dict) -
     else:
         correct_authors = str(authors_raw) if authors_raw else ''
         
-    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    correct_year = display_reference_value(error_entry.get('ref_year_correct') or corrected_data.get('year', ''))
     
     # Prioritize the verified URL that was actually used for verification
     correct_url = (error_entry.get('ref_url_correct') or 
                    error_entry.get('ref_verified_url') or 
                    corrected_data.get('url', ''))
     
-    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    correct_venue = display_reference_value(corrected_data.get('journal', '') or corrected_data.get('venue', ''))
     correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
     
     return {
@@ -4170,7 +5059,7 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     elif corrected_journal and not isinstance(corrected_journal, str):
         corrected_journal = str(corrected_journal)
     
-    journal_to_use = original_journal or corrected_journal
+    journal_to_use = display_reference_value(original_journal or corrected_journal)
     
     if journal_to_use and bibtex_type in ['article', 'inproceedings', 'conference']:
         field_name = 'journal' if bibtex_type == 'article' else 'booktitle'
@@ -4182,6 +5071,7 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
         if original_reference.get(field):
             lines.append(f"  {field} = {{{original_reference[field]}}},")
     
+    correct_year = display_reference_value(correct_year)
     if correct_year:
         lines.append(f"  year = {{{correct_year}}},")
     
@@ -4239,6 +5129,7 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     if correct_title:
         citation_parts.append(f"\\textit{{{correct_title}}}")
     
+    correct_venue = display_reference_value(correct_venue)
     if correct_venue:
         citation_parts.append(f"In \\textit{{{correct_venue}}}")
     
@@ -4273,12 +5164,14 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     if correct_authors:
         citation_parts.append(correct_authors)
     
+    correct_year = display_reference_value(correct_year)
     if correct_year:
         citation_parts.append(f"({correct_year})")
     
     if correct_title:
         citation_parts.append(f'"{correct_title}"')
     
+    correct_venue = display_reference_value(correct_venue)
     if correct_venue:
         citation_parts.append(f"In {correct_venue}")
     
@@ -4296,23 +5189,92 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     return citation_text
 
 
+def titles_align_with_subtitle_tolerance(cited_title: str, actual_title: str) -> bool:
+    """v0.7.68: tolerate subtitle differences when comparing two titles.
+
+    Real-world cases that triggered this:
+      - cited:  "A torn discoid lateral meniscus impacts Lower-Limb alignment
+                 regardless of age: surgical treatment May not be appropriate
+                 for an asymptomatic discoid lateral meniscus"
+        actual: "A Torn Discoid Lateral Meniscus Impacts Lower-Limb Alignment
+                 Regardless of Age"
+      - cited:  "The adaptive change ... discoid lateral meniscus plasty:
+                 an observational study"
+        actual: "The adaptive change ... discoid lateral meniscus plasty"
+
+    Both have a matching DOI; the cited version has a subtitle the
+    canonical record doesn't carry (or vice versa). The verifier
+    previously flagged "Title mismatch" here, which is a false positive.
+
+    The rule:
+      1. Lowercase + strip punctuation EXCEPT colon (the subtitle separator).
+      2. If the head-before-colon matches on both sides, they align.
+      3. Otherwise, if one is a strict prefix-extension of the other and the
+         shared prefix is >= 70% of the longer title and at least 20 chars
+         long, they align.
+
+    Negative-control titles (e.g. "Discoid meniscus" vs
+    "Identifying Younger Postmenopausal Women...") share no meaningful
+    prefix and correctly return False.
+    """
+    if not cited_title or not actual_title:
+        return False
+
+    def _norm_subtitle_keep_colon(s: str) -> str:
+        s = strip_html_markup(strip_latex_commands(s or ''))
+        s = s.lower().strip()
+        # keep colons (subtitle separator); strip other punctuation
+        s = re.sub(r"[^a-z0-9:\s]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    nc = _norm_subtitle_keep_colon(cited_title)
+    na = _norm_subtitle_keep_colon(actual_title)
+    if not nc or not na:
+        return False
+    if nc == na:
+        return True
+
+    # 1) Head-before-colon match — handles "X: subtitle" vs "X".
+    nc_head = nc.split(':', 1)[0].strip()
+    na_head = na.split(':', 1)[0].strip()
+    if nc_head and na_head and nc_head == na_head and len(nc_head) >= 20:
+        return True
+
+    # 2) Strict prefix-extension — handles subtitle appended without colon,
+    #    or colon on one side and the other side just stops at the head.
+    shorter, longer = (nc, na) if len(nc) <= len(na) else (na, nc)
+    if longer.startswith(shorter):
+        if len(shorter) >= max(20, int(0.7 * len(longer))):
+            return True
+
+    # 3) Same after dropping all subtitles on both sides.
+    if nc_head and na_head and nc_head == na_head and len(nc_head) >= 12:
+        # Shorter threshold allowed when BOTH sides have a colon, because
+        # then the subtitles are genuinely additional metadata.
+        if ':' in nc and ':' in na:
+            return True
+
+    return False
+
+
 def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) -> float:
     """
     Compare two titles with proper LaTeX cleaning for accurate similarity scoring.
-    
+
     This function ensures both titles are cleaned of LaTeX commands before comparison
     to avoid false mismatches due to formatting differences like {LLM}s vs LLMs.
-    
+
     Args:
         cited_title: Title from cited reference (may contain LaTeX)
         database_title: Title from database (usually already clean)
-        
+
     Returns:
         Similarity score between 0 and 1
     """
     if not cited_title or not database_title:
         return 0.0
-    
+
     # Clean markup from cited title and database title to match formatting.
     clean_cited = strip_latex_commands(strip_html_markup(cited_title))
     clean_database = strip_latex_commands(strip_html_markup(database_title))
@@ -4325,9 +5287,36 @@ def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) ->
     compact_database = re.sub(r'[^A-Za-z0-9]+', '', artifact_database).lower()
     if compact_cited and compact_cited == compact_database:
         return 1.0
-    
+
+    # v0.7.68: subtitle tolerance — "X" vs "X: subtitle" or vice versa is
+    # the same paper when an external ID (DOI/ArXiv) already linked us
+    # here. Treat as perfect match so we don't emit a false "Title
+    # mismatch" downstream.
+    if titles_align_with_subtitle_tolerance(cited_title, database_title):
+        return 1.0
+
     # Calculate similarity using cleaned titles
     return calculate_title_similarity(artifact_cited, artifact_database)
+
+
+def is_missing_title_spacing_artifact(cited_title: str, found_title: str) -> bool:
+    """Return True when titles differ only because extracted text lost word spaces."""
+    if not cited_title or not found_title:
+        return False
+
+    cited_clean = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(cited_title)))
+    found_clean = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(found_title)))
+    cited_compact = re.sub(r'[^A-Za-z0-9]+', '', cited_clean).lower()
+    found_compact = re.sub(r'[^A-Za-z0-9]+', '', found_clean).lower()
+    if not cited_compact or cited_compact != found_compact:
+        return False
+
+    cited_words = re.findall(r'[A-Za-z0-9]+', cited_clean)
+    found_words = re.findall(r'[A-Za-z0-9]+', found_clean)
+    if len(found_words) < len(cited_words) + 2:
+        return False
+
+    return any(len(word) >= 16 for word in cited_words)
 
 
 def normalize_extracted_title_artifacts(title: str) -> str:
@@ -4416,6 +5405,11 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     
     # Exact match
     if t1 == t2:
+        return 1.0
+
+    compact_t1 = re.sub(r'[^a-z0-9]+', '', t1)
+    compact_t2 = re.sub(r'[^a-z0-9]+', '', t2)
+    if compact_t1 and compact_t1 == compact_t2:
         return 1.0
     
     # Handle common technical term variations before other processing
@@ -4652,23 +5646,40 @@ def _extract_key_phrases(title: str) -> List[str]:
     return phrases
 
 
-def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
+def are_venues_substantially_different(venue1: str, venue2: str, citation_style: Optional[str] = None) -> bool:
     """
     Check if two venue names are substantially different (not just minor variations).
     This function uses a generic approach to handle academic venue abbreviations and formats.
-    
+
     Args:
-        venue1: First venue name
-        venue2: Second venue name
-        
+        venue1: First venue name (typically the cited venue)
+        venue2: Second venue name (typically the database/authoritative venue)
+        citation_style: Optional style hint ("vancouver", "ama", "ieee",
+            "apa", "mla", "chicago", "bibtex", "plaintext", "acm"). When the
+            style is one that permits NLM-style abbreviated journal titles
+            and the cited venue is a known abbreviation of the authoritative
+            venue, returns False (no mismatch).
+
     Returns:
         True if venues are substantially different, False if they match/overlap
     """
     # Import here to avoid circular dependency
     from refchecker.utils.url_utils import extract_arxiv_id_from_url
-    
+    from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation
+
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
+
+    # Style-aware abbreviation short-circuit. If the citation style
+    # permits the cited venue's abbreviated form, accept "ANZ J Surg"
+    # against the database's "ANZ journal of surgery" without firing a
+    # mismatch. Bidirectional check — works whether the cited or the
+    # database string is the abbreviation.
+    if citation_style and (
+        is_acceptable_abbreviation(venue1, venue2, citation_style)
+        or is_acceptable_abbreviation(venue2, venue1, citation_style)
+    ):
+        return False
     
     # If one venue is a preprint server (arXiv) and the other is a real
     # conference or journal, this is a preprint-to-published upgrade, not a
@@ -4729,6 +5740,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
                 'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
                 'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+                # Neuroscience journals
+                'j. comput. neurosci.': 'journal of computational neuroscience',
                 # Nature journals
                 'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
                 # Handle specific multi-word patterns and well-known acronyms
@@ -4866,6 +5879,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'pnas': 'proceedings of the national academy of sciences',
             'natl.': 'national',
             'acad.': 'academy',
+            
+            # Neuroscience journals
+            'j. comput. neurosci.': 'journal of computational neuroscience',
             
             # Special cases that don't follow standard acronym patterns
             'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
@@ -5348,24 +6364,55 @@ def find_best_match(search_results, cleaned_title, year=None, authors=None):
         # Calculate similarity score using utility function
         score = calculate_title_similarity(cleaned_title, result_title)
         
-        # Bonus for year match
+        # Year alignment: small bonus when years match, growing penalty
+        # when the gap exceeds plausible reprint / accepted-vs-published
+        # drift. Without a penalty a strong title match silently grabs a
+        # paper from a different year (e.g. cited 1999 but DB row 2005),
+        # which surfaces to the user as a confusing "Year mismatch"
+        # warning rather than the verifier rejecting the candidate.
         result_year = result.get('publication_year') or result.get('year')
-        if year and result_year and year == result_year:
-            score += 0.1
-        
-        # Bonus for first author match when multiple papers have same/similar titles
-        if authors and len(authors) > 0:
+        year_gap = None
+        if year and result_year:
+            try:
+                year_gap = abs(int(year) - int(result_year))
+                if year_gap == 0:
+                    score += 0.1
+                elif year_gap == 1:
+                    score += 0.05
+                elif year_gap <= 3:
+                    pass  # neutral — reprints / preprint vs journal drift
+                elif year_gap <= 5:
+                    # Likely wrong paper — small penalty
+                    score -= 0.25
+                else:
+                    # Almost certainly a different paper with similar
+                    # title (e.g. cited 1999 but candidate is 2005).
+                    # Heavy penalty so the candidate falls below the
+                    # SIMILARITY_THRESHOLD and the verifier rejects it
+                    # instead of accepting and surfacing a confusing
+                    # "Year mismatch" warning.
+                    score -= 0.45
+            except (TypeError, ValueError):
+                year_gap = None
+
+        # Bonus for first author match when multiple papers have same/similar titles.
+        # If the year is wildly off (>3 years) we don't trust the author
+        # bonus either — shared surnames are common (Wang, Smith, Sakamoto)
+        # and adding +0.2 there would exactly cancel the year penalty,
+        # letting a different-paper-same-surname candidate sneak past
+        # the SIMILARITY_THRESHOLD when the title is only fuzzy-matched.
+        if authors and len(authors) > 0 and (year_gap is None or year_gap <= 3):
             result_authors = result.get('authors', [])
             if result_authors and len(result_authors) > 0:
                 cited_first_author = authors[0]
                 result_first_author = result_authors[0]
-                
+
                 # Extract author name from different formats
                 if isinstance(result_first_author, dict):
                     result_first_author_name = result_first_author.get('name', '')
                 else:
                     result_first_author_name = str(result_first_author)
-                
+
                 # Check if first authors match using existing name matching logic
                 if is_name_match(cited_first_author, result_first_author_name):
                     score += 0.2  # Significant bonus for first author match
@@ -5460,8 +6507,16 @@ def is_year_substantially_different(cited_year: int, correct_year: int, context:
     # If years are the same, no warning needed
     if cited_year == correct_year:
         return False, None
-    
-    # Any year difference should be flagged as a warning for manual review
+
+    # v0.7.65: restore "any year difference flagged" semantics. The
+    # 1-year suppression introduced in v0.7.6 (online-ahead-of-print /
+    # epub vs print, accepted vs published) silently dropped real
+    # wrong-year errors and broke TestYearValidation. The candidate-
+    # filtering side ("≥5 years AND zero author overlap → wrong paper")
+    # lives in enhanced_hybrid_checker._is_wrong_paper_match() and is
+    # intentionally kept SEPARATE from this warning-emission function.
+    # Any year difference here flags a warning for manual review; the
+    # downstream consumer is free to weight 1-year gaps lower.
     warning_msg = f"Year mismatch: cited as {cited_year} but actually {correct_year}"
     return True, warning_msg
 
@@ -5526,12 +6581,17 @@ def normalize_venue_for_display(venue: str) -> str:
             'symp.': 'symposium',
             'workshop': 'workshop',
             'worksh.': 'workshop',
+            # Neuroscience journals
+            'j. comput. neurosci.': 'journal of computational neuroscience',
         }
         
         text_lower = text.lower()
         for abbrev, expansion in common_abbrevs.items():
-            # Only replace if it's a word boundary to avoid partial replacements
-            pattern = r'\b' + re.escape(abbrev) + r'\b'
+            # For abbreviations ending in period, use word boundary at start only
+            if abbrev.endswith('.'):
+                pattern = r'\b' + re.escape(abbrev)
+            else:
+                pattern = r'\b' + re.escape(abbrev) + r'\b'
             text_lower = re.sub(pattern, expansion, text_lower)
         
         return text_lower
@@ -5551,8 +6611,8 @@ def normalize_venue_for_display(venue: str) -> str:
     
     # Strip leading editor name lists like "..., editors, Venue ..." or "..., eds., Venue ..."
     # This prevents author/editor lists from being treated as venue
-    # Match 'editors,' 'editor,' or 'eds.,' possibly after a comma; capture the remainder as venue
-    editors_match = re.search(r"(?:^|,)\s*(?:editors?|eds?\.?|editor)\s*,\s*(.+)$", venue_text, re.IGNORECASE)
+    # Match 'editors,', 'editor,', 'eds.,', or '(eds.),' and capture the remainder as venue
+    editors_match = re.search(r"(?:^|[\s,])\(?\s*(?:editors?|eds?\.?)\s*\)?\s*,\s*(.+)$", venue_text, re.IGNORECASE)
     if editors_match:
         venue_text = editors_match.group(1).strip()
     
@@ -5574,9 +6634,31 @@ def normalize_venue_for_display(venue: str) -> str:
         venue_text = re.sub(r"'\d{2}$", '', venue_text)  # Year suffixes like 'CVPR'16'
     venue_text = re.sub(r',?\s*(vol\.?\s*|volume\s*)\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Volume info
     venue_text = re.sub(r',?\s*\d+\s*\([^)]*\).*$', '', venue_text)  # Issue info with optional spaces
-    venue_text = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
+    venue_text = re.sub(r',?\s*pp?\.?\s*\\?\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
     venue_text = re.sub(r'\s*\(print\).*$', '', venue_text, flags=re.IGNORECASE)  # Print designation
     venue_text = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_text, flags=re.IGNORECASE)  # Year.Print
+    # Strip NLM-style location + format parentheticals like
+    # "(New York, N.Y. Print)", "(Online)", or pure-geographic
+    # qualifiers like "(London, England)" — these are catalog metadata,
+    # not part of the venue name, and they sandbag the word-count-ratio
+    # check downstream into reporting a false mismatch.
+    # 1. Anything containing a known format/medium keyword.
+    venue_text = re.sub(
+        r'\s*\([^)]*\b(?:print|online|internet|electronic|web|cd[- ]rom)\b[^)]*\)[\s.,;]*$',
+        '',
+        venue_text,
+        flags=re.IGNORECASE,
+    )
+    # 2. Pure geographic qualifier — capitalised tokens (City, State /
+    # City, Country) only. Restricted to titlecase words + 2-letter
+    # state codes to avoid eating a meaningful "(Special Issue)" or
+    # "(Proceedings)" parenthetical.
+    venue_text = re.sub(
+        r'\s*\(\s*[A-Z][A-Za-z.]{2,}(?:\s+[A-Z][A-Za-z.]+)*'
+        r'(?:,\s*[A-Z][A-Za-z.]+(?:\s+[A-Z][A-Za-z.]+)*)?\s*\)[\s.,;]*$',
+        '',
+        venue_text,
+    )
     
     # Remove procedural prefixes (case-insensitive)
     prefixes_to_remove = [
@@ -5584,7 +6666,7 @@ def normalize_venue_for_display(venue: str) -> str:
         r'^\d{4}\s+',                     # "2024 "
     # Remove 'Proceedings of [the] [ORG]* [ordinal]*' only when followed by at least one word
     # This avoids cutting a venue down to just 'Proceedings of the'
-    r'^proceedings\s+of\s+(?!the\s*$)(?:the\s+)?(?:(?:acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(?:\d+(?:st|nd|rd|th)\s+)?',
+    r'^proceedings\s+of\s+(?!the\s*$)(?:the\s+)?(?:\d{4}\s+)?(?:(?:acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(?:\d+(?:st|nd|rd|th)\s+)?',
         r'^proc\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE" (require "of")
         r'^procs\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE" (require "of")
         r'^in\s+',

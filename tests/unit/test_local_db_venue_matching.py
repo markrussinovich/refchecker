@@ -126,7 +126,7 @@ def test_venue_mismatch_produces_warning(_make_checker):
         "doi": "10.5555/3295222.3295349",
     }
 
-    verified_data, errors, url = checker.verify_reference(reference)
+    verified_data, errors, _url = checker.verify_reference(reference)
     assert verified_data is not None
     venue_issues = [e for e in errors if e.get("warning_type") == "venue" or e.get("error_type") == "venue"]
     assert len(venue_issues) >= 1, f"Expected venue warning/error, got: {errors}"
@@ -175,6 +175,52 @@ def test_markup_normalized_title_fallback_finds_math_title(_make_checker):
 
     assert match is not None
     assert match["paperId"] == "openalex:2043804332"
+
+
+def test_title_search_does_not_use_leading_wildcard_scans(_make_checker):
+    checker = _make_checker([{
+        "paperId": "openalex:2043804332",
+        "title": "Sampling algorithms for <i>l</i><sub>2</sub> regression and applications",
+        "normalized_paper_title": "samplingalgorithmsforilisub2subregressionandapplications",
+        "year": 2006,
+        "authors": ["Petros Drineas", "Michael W. Mahoney", "S. Muthukrishnan"],
+        "venue": "Proceedings of the seventeenth annual ACM-SIAM symposium on Discrete algorithm - SODA '06",
+    }])
+    queries = []
+    checker.conn.set_trace_callback(queries.append)
+
+    match = checker.find_best_match(
+        "Sampling algorithms for ℓ2 regression and applications",
+        ["Petros Drineas", "Michael W Mahoney", "Shan Muthukrishnan"],
+        2006,
+    )
+
+    checker.conn.set_trace_callback(None)
+    assert match is not None
+    assert not any(" LIKE " in query.upper() for query in queries)
+
+
+def test_missing_title_spacing_uses_verified_title_for_display(_make_checker):
+    checker = _make_checker([{
+        "paperId": "s2:inception-loops",
+        "title": "Inception loops discover what excites neurons most using deep predictive models",
+        "year": 2019,
+        "authors": ["Edgar Y Walker", "Fabian H Sinz", "Erick Cobos"],
+        "venue": "Nature Neuroscience",
+        "externalIds_DOI": "10.1038/s41593-019-0517-x",
+    }])
+    reference = {
+        "title": "Inception loops discoverwhatexcitesneuronsmostusingdeeppredictivemodels",
+        "authors": ["Edgar Y Walker", "Fabian H Sinz", "Erick Cobos"],
+        "year": 2019,
+        "venue": "Nat.Neurosci.",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data is not None
+    assert not any(error.get("error_type") == "title" for error in errors)
+    assert reference["display_title"] == "Inception loops discover what excites neurons most using deep predictive models"
 
 
 # ── Missing venue ───────────────────────────────────────────────────

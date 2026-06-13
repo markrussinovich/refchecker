@@ -1,3 +1,5 @@
+import '@testing-library/jest-dom/vitest'
+
 // Mock window.matchMedia for theme tests
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

@@ -9,8 +9,20 @@ const ALLOWED_TYPES = [
   'text/x-tex',
   'application/x-tex',
   'application/x-latex',
+  'application/x-bibtex',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+  'application/vnd.oasis.opendocument.text', // odt
+  'application/rtf',
+  'text/markdown',
+  'text/html',
 ]
-const ALLOWED_EXTENSIONS = ['.pdf', '.txt', '.tex', '.latex', '.bib']
+// Accepted by the upload endpoint directly (.pdf/.txt/.tex/.bib/.bbl) or
+// converted to text server-side before being routed through the pipeline
+// (.docx/.odt/.rtf/.md/.html — see backend _maybe_convert_to_text).
+const ALLOWED_EXTENSIONS = [
+  '.pdf', '.txt', '.tex', '.latex', '.bib', '.bbl',
+  '.docx', '.odt', '.rtf', '.md', '.markdown', '.html', '.htm',
+]
 
 /**
  * Hook for file upload with drag-and-drop support
@@ -38,7 +50,7 @@ export function useFileUpload() {
     const hasValidType = ALLOWED_TYPES.includes(file.type) || file.type === ''
     
     if (!hasValidExtension && !hasValidType) {
-      const msg = `Invalid file type. Allowed: PDF, TXT, TEX, LaTeX, BibTeX`
+      const msg = `Invalid file type. Allowed: PDF, DOCX, ODT, RTF, TXT, TEX, LaTeX, BibTeX (.bib/.bbl), Markdown, HTML`
       logger.warn('useFileUpload', msg)
       return msg
     }
@@ -119,6 +131,14 @@ export function useFileUpload() {
     handleDragOver,
     handleDrop,
     handleInputChange,
+    // Direct File ingest. Used by the Tauri `refchecker:open-file`
+    // listener in InputSection — that path hands us a Blob/File built
+    // from a dropped path, NOT a DOM drag event, so `handleDrop`
+    // (which expects e.dataTransfer) doesn't fit. The hook always had
+    // this internally but never exported it, leaving every Tauri-side
+    // drop to crash with "fileUpload.handleFile is not a function" the
+    // moment GlobalDropZone broadcast the file.
+    handleFile,
     clearFile,
     maxFileSize: MAX_FILE_SIZE,
     allowedExtensions: ALLOWED_EXTENSIONS,

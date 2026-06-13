@@ -19,6 +19,21 @@ class DummyLLMProvider(LLMProviderMixin, LLMProvider):
     def is_available(self):
         return True
 
+    def _call_llm(self, prompt):
+        return ""
+
+
+class StaticResponseProvider(DummyLLMProvider):
+    def __init__(self, response):
+        super().__init__()
+        self.model = "test-model"
+        self.response = response
+        self.call_count = 0
+
+    def _call_llm(self, prompt):
+        self.call_count += 1
+        return self.response
+
 
 def test_parse_llm_response_splits_fixture_paragraph_block_into_references():
     provider = DummyLLMProvider()
@@ -63,6 +78,25 @@ def test_parse_llm_response_splits_adjacent_four_part_references():
     ]
 
 
+def test_parse_llm_response_splits_fused_same_line_references_after_year():
+    provider = DummyLLMProvider()
+    content = (
+        'Tibbits et al.#An adaptive MCMC scheme to tune deterministic scan uniform slice sampling#n.d.#2014 '
+        'Neal#Slice sampling and adaptive Markov chain Monte Carlo#n.d.#2003 '
+        'Stiennon et al.#Learning to summarize with human feedback#n.d.#2020 '
+        'Chung et al.#Scaling instruction-finetuned language models#n.d.#2022'
+    )
+
+    references = provider._parse_llm_response(content)
+
+    assert references == [
+        'Tibbits et al.#An adaptive MCMC scheme to tune deterministic scan uniform slice sampling#n.d.#2014#',
+        'Neal#Slice sampling and adaptive Markov chain Monte Carlo#n.d.#2003#',
+        'Stiennon et al.#Learning to summarize with human feedback#n.d.#2020#',
+        'Chung et al.#Scaling instruction-finetuned language models#n.d.#2022',
+    ]
+
+
 def test_parse_llm_response_wrapped_line_does_not_hit_local_re_shadowing():
     provider = DummyLLMProvider()
     content = (
@@ -77,3 +111,38 @@ def test_parse_llm_response_wrapped_line_does_not_hit_local_re_shadowing():
         'Anthropic#Claude 4 sonnet system card Technical Report#2025#https://www-cdn.anthropic.com/system-card.pdf',
         'OpenAI#GPT-5 System Card#2025#https://cdn.openai.com/gpt-5-system-card.pdf',
     ]
+
+
+def test_empty_extraction_response_is_not_cached(tmp_path):
+    provider = StaticResponseProvider("I found no valid references in this text.")
+    provider.cache_dir = str(tmp_path)
+
+    references = provider.extract_references_with_chunking("References\n[1] This is not a useful reference.")
+
+    assert references == []
+    assert not (tmp_path / "llm_responses").exists()
+
+
+def test_structured_extraction_response_is_cached(tmp_path):
+    provider = StaticResponseProvider("Alice Smith#A useful reference#Journal#2024#https://example.com")
+    provider.cache_dir = str(tmp_path)
+
+    references = provider.extract_references_with_chunking("References\n[1] Alice Smith. A useful reference. Journal. 2024.")
+
+    assert references == ["Alice Smith#A useful reference#Journal#2024#https://example.com"]
+    assert len(list((tmp_path / "llm_responses").glob("*.json"))) == 1
+
+
+def test_empty_author_url_references_do_not_dedupe_by_venue():
+    from refchecker.core.refchecker import ArxivReferenceChecker
+
+    checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    references = [
+        "#Address sanitizer#n.d.#n.d.#https://github.com/google/sanitizers/wiki/AddressSanitizer",
+        "#Afl#n.d.#n.d.#http://lcamtuf.coredump.cx/afl/",
+        "#Demos#n.d.#n.d.#https://sites.google.com/site/smarttvdemos/",
+    ]
+
+    processed = checker._process_llm_extracted_references(references)
+
+    assert [ref["title"] for ref in processed] == ["Address sanitizer", "Afl", "Demos"]

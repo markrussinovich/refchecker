@@ -314,6 +314,57 @@ def test_settings_updates_require_admin(auth_db):
     assert result["value"] == "7"
 
 
+def test_user_preferences_are_user_scoped(auth_db):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-preferences"))
+    other = _run(_create_user(api_main, db, "other-preferences"))
+
+    defaults = _run(api_main.get_user_preferences(owner))
+    assert defaults["citation_format"] == "plaintext"
+    assert defaults["has_citation_format"] is False
+
+    updated = _run(api_main.update_user_preferences(
+        api_main.UserPreferencesUpdate(
+            citation_format="ieee",
+            citation_style_options={"include_url": False},
+        ),
+        owner,
+    ))
+    assert updated["citation_format"] == "ieee"
+    assert updated["citation_style_options"] == {"include_url": False}
+    assert updated["has_citation_format"] is True
+
+    owner_preferences = _run(api_main.get_user_preferences(owner))
+    other_preferences = _run(api_main.get_user_preferences(other))
+    assert owner_preferences["citation_format"] == "ieee"
+    assert owner_preferences["citation_style_options"] == {"include_url": False}
+    assert other_preferences["citation_format"] == "plaintext"
+    assert other_preferences["has_citation_format"] is False
+
+
+def test_single_user_preferences_persist_for_local_user(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization_single_user_preferences")
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "local-preferences.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+    local_user = api_main.UserInfo(id=0, name="Local User", provider="local", is_admin=True)
+
+    initial = _run(api_main.get_user_preferences(local_user))
+    assert initial["citation_format"] == "plaintext"
+    assert initial["has_citation_format"] is False
+
+    updated = _run(api_main.update_user_preferences(
+        api_main.UserPreferencesUpdate(citation_format="apa"),
+        local_user,
+    ))
+    assert updated["citation_format"] == "apa"
+    assert updated["has_citation_format"] is True
+    assert _run(temp_db.get_user_preference(0, "citation_format")) == "apa"
+
+
 def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db):
     """Semantic Scholar keys are managed in browser storage in multi-user mode."""
     api_main, db = auth_db
@@ -485,8 +536,9 @@ def test_multiuser_create_llm_config_does_not_store_api_key(auth_db):
     ))
     config_id = result["id"]
 
-    # The response should indicate no key is stored
-    assert result["has_key"] is False
+    # The posted key must not be stored; any key availability can only come
+    # from server environment configuration.
+    assert result.get("key_source") in (None, "environment")
 
     # Verify the database has no key
     stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
@@ -512,3 +564,62 @@ def test_multiuser_update_llm_config_does_not_store_api_key(auth_db):
 
     stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
     assert stored["api_key"] is None or stored["api_key"] == ""
+
+
+def test_multiuser_llm_configs_include_server_env_metadata(auth_db, monkeypatch):
+    api_main, _db = auth_db
+    owner = _run(_create_user(api_main, _db, "owner-env-config"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-env-secret")
+
+    configs = _run(api_main.get_llm_configs(owner))
+    env_config = next(config for config in configs if config["id"] == "env:anthropic")
+
+    assert env_config["provider"] == "anthropic"
+    assert env_config["has_key"] is True
+    assert env_config["key_source"] == "environment"
+    assert env_config["is_environment"] is True
+    assert "api_key" not in env_config
+    assert "server-env-secret" not in repr(configs)
+
+
+def test_env_llm_config_resolution_prefers_request_key(auth_db, monkeypatch):
+    api_main, _db = auth_db
+    owner = _run(_create_user(api_main, _db, "owner-env-resolution"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-env-secret")
+
+    provider, model, api_key, endpoint = _run(api_main._resolve_llm_config_for_request(
+        user_id=owner.id,
+        use_llm=True,
+        llm_config_id="env:anthropic",
+        llm_provider=None,
+        llm_model=None,
+        api_key=None,
+    ))
+    assert provider == "anthropic"
+    assert model
+    assert api_key == "server-env-secret"
+    assert endpoint is None
+
+    _provider, _model, override_key, _endpoint = _run(api_main._resolve_llm_config_for_request(
+        user_id=owner.id,
+        use_llm=True,
+        llm_config_id="env:anthropic",
+        llm_provider=None,
+        llm_model=None,
+        api_key="browser-override",
+    ))
+    assert override_key == "browser-override"
+
+
+def test_multiuser_rejects_server_side_paperclip_key_storage(auth_db):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-paperclip-browser"))
+
+    status = _run(api_main.get_paperclip_key_status(owner))
+    assert status["has_key"] is False
+    assert status["storage"] == "browser-only"
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.set_paperclip_key(api_main.PaperclipKeyUpdate(api_key="pc-key"), owner))
+    assert exc.value.status_code == 410
+    assert _run(db.has_setting("paperclip_api_key")) is False

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from refchecker.core.parallel_processor import ParallelReferenceProcessor, ReferenceResult
 
@@ -41,11 +42,12 @@ def test_parallel_printer_does_not_rerun_hallucination_assessment(capsys):
 
 
 def test_parallel_printer_labels_llm_verified_source(capsys):
+    print_verified_urls = MagicMock(side_effect=lambda ref, vd, url, errors: print(''))
     base_checker = SimpleNamespace(
         _print_reference_header=lambda ref, index, total: print(
             f"[{index+1}/{total}] {ref.get('title', '')}"
         ),
-        _print_verified_urls=lambda ref, vd, url, errors: print(''),
+        _print_verified_urls=print_verified_urls,
         _display_non_unverified_errors=lambda errors, debug_mode, print_output: None,
         _display_unverified_error_with_subreason=lambda *args, **kwargs: None,
     )
@@ -80,6 +82,7 @@ def test_parallel_printer_labels_llm_verified_source(capsys):
     output = capsys.readouterr().out
     assert '       Matched Database: LLM search' in output
     assert '       Verified URL: https://doi.org/10.1007/978-3-030-10973-8' in output
+    print_verified_urls.assert_not_called()
     assert output.index('       Matched Database: LLM search') < output.index('       Verified URL:')
     assert '\n\n       Matched Database: LLM search' in output
     assert '\n\n\n       Matched Database: LLM search' not in output

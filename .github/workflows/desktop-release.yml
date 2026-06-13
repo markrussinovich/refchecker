@@ -1,0 +1,414 @@
+name: Desktop release
+
+# Builds the Tauri desktop app for macOS (arm64 + x86_64), Windows, and Linux.
+# On a `desktop-v*` tag push it also generates a Tauri updater `latest.json`
+# manifest and attaches everything to a draft GitHub Release.
+#
+# Signing:
+#   - macOS code-sign / notarize when APPLE_* secrets are present.
+#   - Tauri updater signature when TAURI_SIGNING_PRIVATE_KEY is present.
+# Without the secrets the workflow still builds unsigned artifacts so forks
+# and PRs from contributors without your keys keep working.
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 0.1.0). Leave blank to use package.json."
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "tauri-app/**"
+      - ".github/workflows/desktop-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Apple Silicon — covers M1/M2/M3+ Macs natively, and Intel Macs via Rosetta 2.
+          - { name: "macos-arm64",  os: "macos-14", rust_target: "aarch64-apple-darwin",     python_arch: "arm64", updater_target: "darwin-aarch64" }
+          # Re-enable when you want a native Intel build. GH's free macos-13 runner pool
+          # queues for 30-90 min — pinning it back here will slow every release by ~1h.
+          # - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64", updater_target: "darwin-x86_64" }
+          - { name: "windows",      os: "windows-latest", rust_target: "x86_64-pc-windows-msvc", python_arch: "x64", updater_target: "windows-x86_64" }
+          - { name: "linux",        os: "ubuntu-22.04",   rust_target: "x86_64-unknown-linux-gnu", python_arch: "x64", updater_target: "linux-x86_64" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref_name }}" == desktop-v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#desktop-v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="$(node -p "require('./tauri-app/package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync version into tauri-app/package.json
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          node -e "
+            const fs=require('fs');
+            const f='tauri-app/package.json';
+            const j=JSON.parse(fs.readFileSync(f,'utf8'));
+            j.version='$VERSION';
+            fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n');
+            console.log('Set tauri-app/package.json version =>', '$VERSION');
+          "
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.platform.python_arch }}
+
+      - name: Set up Rust
+        # Was `dtolnay/rust-toolchain@stable` — codeload.github.com has
+        # been flaking on the action archive download (intermittent
+        # 404s), wedging the whole release pipeline. Direct rustup
+        # avoids the action-archive path entirely. Runners ship with
+        # rustup pre-installed.
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.platform.rust_target }}
+          rustc --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tauri-app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ matrix.platform.rust_target }}-${{ hashFiles('tauri-app/src-tauri/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.platform.rust_target }}-
+
+      - name: Install Linux deps
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Build sidecar (macOS / Linux)
+        if: matrix.platform.os != 'windows-latest'
+        env:
+          TARGET: ${{ matrix.platform.rust_target }}
+        run: bash tauri-app/scripts/build-sidecar.sh
+
+      - name: Build sidecar (Windows)
+        if: matrix.platform.os == 'windows-latest'
+        env:
+          TARGET: ${{ matrix.platform.rust_target }}
+        shell: pwsh
+        run: tauri-app/scripts/build-sidecar.ps1
+
+      - name: Install tauri-app deps
+        working-directory: tauri-app
+        run: npm ci
+
+      # ---------------------------------------------------------------
+      # Apple signing (only runs when APPLE_CERTIFICATE secret is set)
+      # ---------------------------------------------------------------
+      - name: Import Apple signing certificate
+        if: startsWith(matrix.platform.os, 'macos') && env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | xargs)
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Pre-sign PyInstaller sidecar (macOS)
+        if: startsWith(matrix.platform.os, 'macos') && env.APPLE_SIGNING_IDENTITY != ''
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          BIN=$(find tauri-app/src-tauri/binaries -name "refchecker-server-*" -type f | head -n1)
+          echo "Signing sidecar: $BIN"
+          codesign --force --options runtime --timestamp \
+            --entitlements tauri-app/src-tauri/entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$BIN"
+          codesign --verify --verbose=2 "$BIN"
+
+      # ---------------------------------------------------------------
+      # Validate the updater signing key BEFORE handing it to tauri build.
+      # Tauri hard-fails if TAURI_SIGNING_PRIVATE_KEY is set but malformed
+      # (e.g. user pasted only the base64 body without the
+      # "untrusted comment:" header). We'd rather degrade to an unsigned
+      # build than fail the whole release pipeline on a paste mistake.
+      # ---------------------------------------------------------------
+      # Read the secret under a different name, validate it, then only
+      # re-export it to $GITHUB_ENV under the real TAURI_SIGNING_PRIVATE_KEY
+      # name if it parses. The Build Tauri bundle step deliberately does
+      # NOT reference secrets.TAURI_SIGNING_PRIVATE_KEY in its env: block,
+      # so this step is the single source of truth for whether updater
+      # signing is enabled in this run.
+      #
+      # Also emits `updater_enabled` (true|false) so the build step can
+      # disable bundle.createUpdaterArtifacts when no key is available —
+      # Tauri hard-fails when artifacts are requested but no private key
+      # is present, even if a public key is configured in tauri.conf.json.
+      - name: Validate Tauri updater signing key
+        id: updater_key
+        env:
+          UPDATER_KEY_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PWD_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -e
+          enabled=false
+          if [[ -n "$UPDATER_KEY_INPUT" ]]; then
+            decoded=$(printf '%s' "$UPDATER_KEY_INPUT" | base64 -d 2>/dev/null || true)
+            if [[ "$decoded" == *"untrusted comment:"* && "$decoded" == *"rsign"* ]]; then
+              echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid — enabling updater signing"
+              enabled=true
+              {
+                echo "TAURI_SIGNING_PRIVATE_KEY<<__RC_EOF__"
+                printf '%s\n' "$UPDATER_KEY_INPUT"
+                echo "__RC_EOF__"
+                echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__RC_EOF__"
+                printf '%s\n' "$UPDATER_PWD_INPUT"
+                echo "__RC_EOF__"
+              } >> "$GITHUB_ENV"
+            else
+              echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key. Building without updater artifacts this run — fix the secret to re-enable."
+            fi
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY not set — building without updater artifacts"
+          fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------
+      # Tauri build (writes signed updater artifacts when
+      # TAURI_SIGNING_PRIVATE_KEY is set; falls back to unsigned otherwise)
+      # ---------------------------------------------------------------
+      - name: Build Tauri bundle
+        working-directory: tauri-app
+        env:
+          APPLE_SIGNING_IDENTITY:     ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                   ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:             ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:              ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE:          ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # TAURI_SIGNING_PRIVATE_KEY / _PASSWORD are exported in $GITHUB_ENV
+          # by the previous step ONLY when the key parses, so a malformed
+          # or missing secret doesn't block the build.
+          CI: "true"
+        shell: bash
+        run: |
+          # If no valid updater key is available, disable updater-artifact
+          # generation for this build (Tauri refuses to build otherwise).
+          EXTRA_CONFIG=""
+          if [[ "${{ steps.updater_key.outputs.enabled }}" != "true" ]]; then
+            EXTRA_CONFIG='--config {"bundle":{"createUpdaterArtifacts":false}}'
+            echo "Updater signing disabled this run — passing --config to skip updater artifacts."
+          fi
+          npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG
+
+      - name: Collect artifacts
+        id: collect
+        shell: bash
+        run: |
+          OUT="dist-${{ matrix.platform.name }}"
+          mkdir -p "$OUT"
+          BUNDLE_DIR=tauri-app/src-tauri/target/${{ matrix.platform.rust_target }}/release/bundle
+          if [ -d "$BUNDLE_DIR" ]; then
+            # End-user installer/disk-image bundles
+            find "$BUNDLE_DIR" -type f \
+              \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \
+                 -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
+              -exec cp {} "$OUT"/ \;
+            # Tauri 2.x updater signs the installers directly, so .sig files
+            # live next to each one. Also cover the macOS .app.tar.gz format
+            # and the legacy .msi.zip / .nsis.zip / .AppImage.tar.gz from
+            # older Tauri versions just in case.
+            find "$BUNDLE_DIR" -type f \
+              \( -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \
+                 -o -name "*.msi.sig" -o -name "*.exe.sig" \
+                 -o -name "*.AppImage.sig" -o -name "*.deb.sig" -o -name "*.rpm.sig" \
+                 -o -name "*.msi.zip" -o -name "*.msi.zip.sig" \
+                 -o -name "*.nsis.zip" -o -name "*.nsis.zip.sig" \
+                 -o -name "*.AppImage.tar.gz" -o -name "*.AppImage.tar.gz.sig" \) \
+              -exec cp {} "$OUT"/ \;
+          fi
+          ls -la "$OUT" || true
+          echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: refchecker-desktop-${{ matrix.platform.name }}
+          path: dist-${{ matrix.platform.name }}/**
+          if-no-files-found: warn
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#desktop-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Build Tauri updater manifest (latest.json)
+        id: manifest
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Map per-platform updater artifact patterns to Tauri's updater target IDs.
+          declare -A TARGETS=(
+            ["darwin-aarch64"]="refchecker-desktop-macos-arm64"
+            ["windows-x86_64"]="refchecker-desktop-windows"
+            ["linux-x86_64"]="refchecker-desktop-linux"
+          )
+
+          PLATFORMS_JSON='{}'
+
+          # Per-target preference list — first existing (bundle, sig) pair
+          # found wins. Names that the Tauri updater can consume directly.
+          declare -A PREFERRED=(
+            ["darwin-aarch64"]="*.app.tar.gz"
+            ["windows-x86_64"]="*.msi *.nsis.zip *.msi.zip *-setup.exe"
+            ["linux-x86_64"]="*.AppImage *.deb *.rpm *.AppImage.tar.gz"
+          )
+
+          for target in "${!TARGETS[@]}"; do
+            DIR="artifacts/${TARGETS[$target]}"
+            if [ ! -d "$DIR" ]; then
+              echo "::warning::No artifacts dir for $target ($DIR)"
+              continue
+            fi
+            BUNDLE=""
+            for pat in ${PREFERRED[$target]}; do
+              BUNDLE=$(find "$DIR" -maxdepth 1 -type f -name "$pat" ! -name "*.sig" | head -n1 || true)
+              if [ -n "$BUNDLE" ] && [ -f "${BUNDLE}.sig" ]; then
+                break
+              fi
+              BUNDLE=""
+            done
+            if [ -z "$BUNDLE" ]; then
+              echo "::warning::No signed updater bundle found for $target — skipping"
+              continue
+            fi
+            SIG=$(cat "${BUNDLE}.sig")
+            FNAME=$(basename "$BUNDLE")
+            URL="https://github.com/${REPO}/releases/download/${TAG}/${FNAME}"
+            echo "▶ $target → $URL"
+            PLATFORMS_JSON=$(jq --arg t "$target" --arg url "$URL" --arg sig "$SIG" \
+              '. + {($t): {url: $url, signature: $sig}}' <<< "$PLATFORMS_JSON")
+          done
+
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --argjson platforms "$PLATFORMS_JSON" \
+            '{version: $version, notes: ("RefChecker Desktop " + $version), pub_date: $pub_date, platforms: $platforms}' \
+            > latest.json
+
+          echo "--- latest.json ---"
+          cat latest.json
+
+      - name: Stage release files
+        shell: bash
+        run: |
+          mkdir -p release-files
+          # Copy everything from artifacts into a flat dir
+          find artifacts -type f -exec cp {} release-files/ \;
+          # Add stable per-platform aliases so README download buttons can
+          # point at /releases/latest/download/<stable-name> and keep working
+          # across version bumps. Glob over what was actually produced.
+          cd release-files
+          for f in RefChecker_*_aarch64.dmg; do
+            [ -f "$f" ] && cp "$f" "RefChecker-macos-arm64.dmg"
+          done
+          for f in RefChecker_*_x64_en-US.msi; do
+            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64.msi"
+          done
+          for f in RefChecker_*_x64-setup.exe; do
+            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64-setup.exe"
+          done
+          for f in RefChecker_*_amd64.AppImage; do
+            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.AppImage"
+          done
+          for f in RefChecker_*_amd64.deb; do
+            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.deb"
+          done
+          cd ..
+          # Then add the manifest
+          cp latest.json release-files/
+          ls -la release-files
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RefChecker Desktop ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          draft: true
+          files: release-files/*

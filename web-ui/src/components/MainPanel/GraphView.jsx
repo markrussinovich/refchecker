@@ -1,0 +1,816 @@
+import { useMemo, useRef, useEffect, useState, lazy, Suspense } from 'react'
+import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { fetchCitationGraph, expandPaper } from '../../utils/api'
+import { openExternal } from '../../utils/tauriBridge'
+
+// Lazy-load the heavy graph lib so the rest of the app stays light when
+// the user never opens the Graph tab.
+const ForceGraph2D = lazy(() => import('react-force-graph-2d'))
+
+const STATUS_COLOR = {
+  verified: '#22c55e',
+  warning: '#f59e0b',
+  error: '#ef4444',
+  unverified: '#94a3b8',
+  hallucinated: '#a855f7',
+  suggestion: '#3b82f6',
+  pending: '#64748b',
+}
+
+const GRAPH_LABEL_MAX_WIDTH = 280
+const GRAPH_LABEL_MAX_LINES = 3
+
+function wrapCanvasLabel(ctx, text, maxWidth, maxLines) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean)
+  const lines = []
+  let current = ''
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (ctx.measureText(next).width <= maxWidth || !current) {
+      current = next
+      continue
+    }
+    lines.push(current)
+    current = word
+    if (lines.length >= maxLines) break
+  }
+  if (current && lines.length < maxLines) lines.push(current)
+
+  if (lines.length === maxLines && words.length) {
+    let last = lines[lines.length - 1]
+    while (last.length > 1 && ctx.measureText(`${last}...`).width > maxWidth) {
+      last = last.slice(0, -1).trimEnd()
+    }
+    if (last !== lines[lines.length - 1] || words.join(' ').length > lines.join(' ').length) {
+      lines[lines.length - 1] = `${last}...`
+    }
+  }
+  return lines.length ? lines : ['']
+}
+
+function graphToCanvasPoint(transform, x, y) {
+  const m = transform
+  return {
+    x: m.a * x + m.c * y + m.e,
+    y: m.b * x + m.d * y + m.f,
+  }
+}
+
+/**
+ * Obsidian-style citation graph view.
+ *
+ * Nodes: every reference RefChecker pulled out of the paper. Sized by the
+ *   ref's Semantic Scholar citationCount (real measure of influence —
+ *   not an author-overlap proxy), colored by verification status. Plus a
+ *   centre node for the source paper.
+ * Edges: real inter-reference citations from the S2 graph API: an edge
+ *   A → B means A's bibliography cites B. Orphan refs (cited by nothing
+ *   else in this bibliography) drift to the rim.
+ * Click a node → details inline; double-click → expand one hop (pull in
+ * that paper's top outgoing references and add them as new nodes).
+ */
+export default function GraphView({ references, paperTitle }) {
+  const containerRef = useRef(null)
+  const fgRef = useRef(null)
+  const autoFittingRef = useRef(false)
+  const lastNodeClickRef = useRef({ id: null, at: 0 })
+  const [dims, setDims] = useState({ w: 800, h: 560 })
+  const [selected, setSelected] = useState(null)
+  const [hovered, setHovered] = useState(null)
+  const [serverGraph, setServerGraph] = useState(null) // { byId: {local_id: {paperId, citationCount}}, edges: [{source,target}] }
+  const [loadingGraph, setLoadingGraph] = useState(false)
+  const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
+  const [expanding, setExpanding] = useState(null)
+  const [hasUserNavigated, setHasUserNavigated] = useState(false)
+  const [graphTheme, setGraphTheme] = useState(() => ({
+    background: '#f7f7f8',
+    text: '#0d0d0d',
+    border: '#e5e5e5',
+  }))
+  // Source spokes are now always shown — the toggle that hid them was
+  // removed in v0.7.18 because users didn't find it useful and the
+  // rosette layout is the most readable default. Kept as a constant
+  // so the existing branches in graphData don't need restructuring.
+  const hideSourceSpokes = false
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setDims({ w: el.clientWidth, h: Math.max(420, Math.min(720, window.innerHeight - 280)) })
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    window.addEventListener('resize', update)
+    return () => { ro.disconnect(); window.removeEventListener('resize', update) }
+  }, [])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const update = () => {
+      const rootStyles = getComputedStyle(root)
+      const graphStyles = containerRef.current ? getComputedStyle(containerRef.current) : null
+      setGraphTheme({
+        background: graphStyles?.backgroundColor || rootStyles.getPropertyValue('--color-bg-secondary').trim() || '#f7f7f8',
+        text: rootStyles.getPropertyValue('--color-text-primary').trim() || '#0d0d0d',
+        border: rootStyles.getPropertyValue('--color-border').trim() || '#e5e5e5',
+      })
+    }
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    window.addEventListener('resize', update)
+    return () => { observer.disconnect(); window.removeEventListener('resize', update) }
+  }, [])
+
+  // Fetch the real S2-backed citation graph once references stabilize.
+  useEffect(() => {
+    const refs = (references || []).filter(r => r && (r.doi || r.arxiv_id))
+    if (!refs.length) { setServerGraph(null); return }
+    let cancelled = false
+    setLoadingGraph(true)
+    const payload = refs.map((r, i) => ({
+      id: String(r.id ?? r.index ?? `ref-${i}`),
+      title: r.title,
+      doi: r.doi,
+      arxiv_id: r.arxiv_id,
+    }))
+    fetchCitationGraph({ references: payload, paper_title: paperTitle })
+      .then(res => {
+        if (cancelled) return
+        const byId = {}
+        for (const n of (res.data?.nodes || [])) {
+          byId[n.id] = n
+        }
+        setServerGraph({ byId, edges: res.data?.edges || [] })
+      })
+      .catch(() => { if (!cancelled) setServerGraph(null) })
+      .finally(() => { if (!cancelled) setLoadingGraph(false) })
+    return () => { cancelled = true }
+  }, [references, paperTitle])
+
+  const graphData = useMemo(() => {
+    const refs = (references || []).filter(Boolean)
+    const nodes = [{
+      id: '__source__',
+      label: paperTitle || '(source paper)',
+      type: 'source',
+      val: 30,
+      color: 'var(--color-text-primary)',
+    }]
+    const edges = []
+    const localById = {}
+
+    // First pass: count in-paper in-degree (how many other refs in this
+    // same bibliography cite each target). That's the size signal the
+    // user wants — not S2's global citationCount.
+    const inPaperInDegree = {}
+    if (serverGraph?.edges?.length) {
+      for (const e of serverGraph.edges) {
+        inPaperInDegree[e.target] = (inPaperInDegree[e.target] || 0) + 1
+      }
+    }
+
+    // Out-degree too — used along with in-degree to detect orphans
+    // (refs with no co-citation links at all) so they can be styled and
+    // visually pushed to the rim.
+    const inPaperOutDegree = {}
+    if (serverGraph?.edges?.length) {
+      for (const e of serverGraph.edges) {
+        inPaperOutDegree[e.source] = (inPaperOutDegree[e.source] || 0) + 1
+      }
+    }
+
+    refs.forEach((r, i) => {
+      const id = String(r.id ?? r.index ?? `ref-${i}`)
+      const status = getEffectiveReferenceStatus(r, true)
+      const serverNode = serverGraph?.byId?.[id]
+      const citationCount = serverNode?.citationCount || 0
+      const inDegree = inPaperInDegree[id] || 0
+      const outDegree = inPaperOutDegree[id] || 0
+      const isOrphan = inDegree === 0 && outDegree === 0
+      // Size by in-paper in-degree (primary), with a small log-scaled
+      // boost from global citationCount so orphan-but-famous refs still
+      // read at a glance.
+      const val = 4 + inDegree * 2.5 + Math.log10(citationCount + 1) * 0.8
+      // paperId for expansion: prefer the S2 graph result, fall back
+      // to DOI:/arXiv: tokens (which the /papers/expand endpoint also
+      // accepts) so double-click expansion works even when the
+      // co-citation graph endpoint returned nothing (.docx uploads,
+      // unindexed papers).
+      const fallbackPaperId = r.doi ? `DOI:${r.doi}`
+        : r.arxiv_id ? `arXiv:${r.arxiv_id}`
+        : null
+      const node = {
+        id,
+        label: (r.title || '(no title)').slice(0, 80),
+        type: 'reference',
+        status,
+        ref: r,
+        paperId: serverNode?.paperId || fallbackPaperId,
+        citationCount,
+        inDegree,
+        outDegree,
+        isOrphan,
+        val,
+        color: STATUS_COLOR[status] || STATUS_COLOR.pending,
+      }
+      nodes.push(node)
+      localById[id] = node
+      // The source-paper spoke is optional — hiding it lets the
+      // co-citation structure read clearly without the centre node
+      // dragging everything into a rosette.
+      if (!hideSourceSpokes) {
+        edges.push({ source: '__source__', target: id, spoke: true })
+      }
+    })
+
+    // Real inter-reference citation edges
+    if (serverGraph?.edges?.length) {
+      for (const e of serverGraph.edges) {
+        if (!localById[e.source] || !localById[e.target]) continue
+        edges.push({ source: e.source, target: e.target, citation: true })
+      }
+    }
+
+    // Expanded one-hop nodes (from double-click). Sized by the
+    // expanded paper's S2 citation count so the user can pick out
+    // landmark-influential refs at a glance. Coloured by the 2nd-degree
+    // verify status when it's known (the expand endpoint probes the
+    // Seen-Refs cache and returns `verified_status`) — that's the
+    // "shows the references status of the references in the article"
+    // 2nd-degree analysis. Unknown / un-probed nodes fall back to cyan
+    // so they're still distinguishable from the in-paper nodes.
+    const EXPANDED_FALLBACK = '#0ea5e9'
+    for (const ex of expandedNodes) {
+      const expStatus = ex.verified_status
+      const expColor = expStatus && expStatus !== 'unknown'
+        ? (STATUS_COLOR[expStatus] || EXPANDED_FALLBACK)
+        : EXPANDED_FALLBACK
+      nodes.push({
+        id: ex.id,
+        label: (ex.title || '(no title)').slice(0, 80),
+        type: 'expanded',
+        ref: ex,
+        paperId: ex.paperId,
+        status: expStatus || 'unknown',
+        citationCount: ex.citationCount,
+        val: Math.max(4, Math.log10((ex.citationCount || 0) + 1) * 4.5 + 4),
+        color: expColor,
+        aiBand: ex.ai_detection_band || null,
+      })
+      if (ex.parent) edges.push({ source: ex.parent, target: ex.id, expanded: true })
+    }
+
+    return { nodes, links: edges }
+  }, [references, paperTitle, serverGraph, expandedNodes, hideSourceSpokes])
+
+  // Tune the force-graph engine: orphans (refs with no co-citation
+  // edges) should drift outward so they cluster at the rim — that's the
+  // visual cue the user asked for ("hallucinated refs land there
+  // visually"). We do this by overriding the charge force per-node so
+  // orphans repel everyone harder than well-connected nodes.
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg || typeof fg.d3Force !== 'function') return
+    try {
+      const charge = fg.d3Force('charge')
+      if (charge && typeof charge.strength === 'function') {
+        charge.strength((node) => {
+          if (node.type === 'source') return -180
+          if (node.isOrphan) return -260
+          // Connected refs pull each other inward more gently.
+          return -60 - Math.min(8, (node.inDegree || 0)) * 12
+        })
+      }
+      // Re-heat the simulation so the new strengths take effect.
+      if (typeof fg.d3ReheatSimulation === 'function') fg.d3ReheatSimulation()
+    } catch {
+      /* d3Force not yet wired — next data update will re-trigger */
+    }
+  }, [graphData])
+
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg || typeof fg.zoomToFit !== 'function' || !graphData.nodes.length) return
+    if (hasUserNavigated && expandedNodes.length === 0) return
+
+    const timers = [250, 900].map((delay) => setTimeout(() => {
+      try {
+        autoFittingRef.current = true
+        fg.zoomToFit(450, 44)
+        window.setTimeout(() => { autoFittingRef.current = false }, 520)
+      } catch {
+        autoFittingRef.current = false
+        /* Graph may not be initialized yet; next timer/data update retries. */
+      }
+    }, delay))
+    return () => timers.forEach(clearTimeout)
+  }, [graphData, dims.w, dims.h, expandedNodes.length, hasUserNavigated])
+
+  const handleExpand = async (node) => {
+    if (!node || !node.paperId) return
+    if (expanding) return
+    setExpanding(node.id)
+    try {
+      // Pass title so the backend can fall back to title-search when
+      // the DOI/arXiv-keyed /references lookup returns empty.
+      const refTitle = node.ref?.title || node.label || null
+      const res = await expandPaper({ paper_id: node.paperId, limit: 6, title: refTitle, ai_detection: aiGenMode })
+      const items = res.data?.items || []
+      const additions = items
+        .filter(it => it.paperId)
+        .map(it => ({
+          id: `exp:${node.id}:${it.paperId}`,
+          parent: node.id,
+          paperId: it.paperId,
+          title: it.title,
+          year: it.year,
+          authors: it.authors,
+          citationCount: it.citationCount,
+          doi: it.doi,
+          arxiv_id: it.arxiv_id,
+          ai_detection_band: it.ai_detection_band,
+          ai_detection_score: it.ai_detection_score,
+          // 2nd-degree verify status (from Seen-Refs cache probe on the
+          // backend). Lets the graph colour expanded nodes by their
+          // verification result instead of a uniform cyan.
+          verified_status: it.verified_status || 'unknown',
+          pre_verified: !!it.pre_verified,
+          times_seen: it.times_seen || 0,
+          verified_url: it.doi ? `https://doi.org/${it.doi}` : (it.arxiv_id ? `https://arxiv.org/abs/${it.arxiv_id}` : `https://www.semanticscholar.org/paper/${it.paperId}`),
+        }))
+      // Dedup against existing expanded entries
+      setExpandedNodes(prev => {
+        const seen = new Set(prev.map(p => p.id))
+        return [...prev, ...additions.filter(a => !seen.has(a.id))]
+      })
+    } catch (e) {
+      // swallow — graph is best-effort
+    } finally {
+      setExpanding(null)
+    }
+  }
+
+  const handleNodeClick = (node, event) => {
+    const now = Date.now()
+    const last = lastNodeClickRef.current
+    const isDoubleClick = event?.detail >= 2 || (last.id === node?.id && now - last.at < 360)
+    lastNodeClickRef.current = { id: node?.id, at: now }
+
+    setSelected(node)
+    if (isDoubleClick) {
+      handleExpand(node)
+    }
+  }
+
+  // ── 2nd-level auto-expansion ─────────────────────────────────────
+  // Expand every verified reference one hop in parallel (capped at 4 in
+  // flight) so the user sees the references-of-references tree without
+  // having to double-click each node. Heavy on the S2 API — gated behind
+  // an explicit toggle.
+  const [autoExpanding, setAutoExpanding] = useState(false)
+  const [autoExpanded, setAutoExpanded] = useState(false)
+  // When on, 2nd-degree expansion also asks the backend for an AI-generated
+  // -text likelihood band per expanded article (computed locally from the
+  // abstract, free/offline — advisory only, usually inconclusive).
+  const [aiGenMode, setAiGenMode] = useState(false)
+  // Eligible-for-expansion: prefer serverGraph nodes (already paperId-
+  // keyed) but fall back to any ref with a DOI / arxiv id so the
+  // 2nd-degree toggle still shows up for bibliographies where the S2
+  // co-citation graph endpoint returned nothing (e.g. .docx uploads
+  // with bare metadata, or papers S2 hasn't indexed yet).
+  const eligibleNodes = useMemo(() => {
+    const fromGraph = Object.values(serverGraph?.byId || {}).filter(n => n?.paperId)
+    if (fromGraph.length) return fromGraph
+    // Fallback: synthesize paperId-shaped entries from any ref that
+    // carries a usable identifier. S2 /papers/expand accepts:
+    //   - DOI:<doi>
+    //   - arXiv:<id>
+    //   - the S2 paperId tail of semanticscholar.org/paper/<id> URLs
+    // We also accept refs whose authoritative_urls includes any of
+    // those, since verified refs often have the identifier there
+    // even when the top-level r.doi / r.arxiv_id wasn't extracted.
+    return (references || [])
+      .map((r, i) => {
+        const id = String(r.id ?? r.index ?? `ref-${i}`)
+        if (r.doi) return { id, paperId: `DOI:${r.doi}`, title: r.title }
+        if (r.arxiv_id) return { id, paperId: `arXiv:${r.arxiv_id}`, title: r.title }
+        // Probe authoritative_urls / verified_url for embedded IDs.
+        const urls = []
+        if (Array.isArray(r.authoritative_urls)) urls.push(...r.authoritative_urls.map(u => (u || {}).url || ''))
+        if (typeof r.verified_url === 'string') urls.push(r.verified_url)
+        for (const u of urls) {
+          if (!u) continue
+          const doiMatch = u.match(/10\.\d{4,9}\/[\w.\-;()/:]+/)
+          if (doiMatch) return { id, paperId: `DOI:${doiMatch[0].replace(/[.,]$/, '')}`, title: r.title }
+          const arxivMatch = u.match(/arxiv\.org\/abs\/([\w.\-/]+)/i)
+          if (arxivMatch) return { id, paperId: `arXiv:${arxivMatch[1].replace(/v\d+$/, '')}`, title: r.title }
+          const s2Match = u.match(/semanticscholar\.org\/paper\/([0-9a-f]+)/i)
+          if (s2Match) return { id, paperId: s2Match[1], title: r.title }
+        }
+        return null
+      })
+      .filter(Boolean)
+  }, [serverGraph, references])
+
+  const runAutoExpand = async () => {
+    if (autoExpanding || !eligibleNodes.length) return
+    setAutoExpanding(true)
+    try {
+      // Budget: 60 refs × 8 children = 480 potential 2nd-degree nodes.
+      // v0.7.28 ran 6 workers concurrently which hammered S2's per-IP
+      // rate limit (HTTP 429). v0.7.29 drops to 2 workers + a 350ms
+      // pause between each call per worker — slower but completes
+      // reliably without rate-limit storms.
+      const queue = eligibleNodes.slice(0, 60)
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+      const worker = async () => {
+        while (queue.length) {
+          const node = queue.shift()
+          try {
+            // Pass title so the backend can fall back to title-search
+            // when /references comes back empty for this DOI/arXiv.
+            const res = await expandPaper({ paper_id: node.paperId, limit: 8, title: node.title, ai_detection: aiGenMode })
+            const items = res.data?.items || []
+            const additions = items
+              .filter(it => it.paperId)
+              .map(it => ({
+                id: `exp:${node.id}:${it.paperId}`,
+                parent: node.id,
+                paperId: it.paperId,
+                title: it.title,
+                year: it.year,
+                authors: it.authors,
+                citationCount: it.citationCount,
+                doi: it.doi,
+                arxiv_id: it.arxiv_id,
+                ai_detection_band: it.ai_detection_band,
+                ai_detection_score: it.ai_detection_score,
+                // 2nd-degree verify status carried over from the backend
+                // Seen-Refs probe — without this, auto-expanded nodes
+                // rendered uniformly cyan and masked the verification
+                // signal the single-node expand path already shows.
+                verified_status: it.verified_status || 'unknown',
+                pre_verified: !!it.pre_verified,
+                times_seen: it.times_seen || 0,
+                verified_url: it.doi ? `https://doi.org/${it.doi}` : (it.arxiv_id ? `https://arxiv.org/abs/${it.arxiv_id}` : `https://www.semanticscholar.org/paper/${it.paperId}`),
+              }))
+            setExpandedNodes(prev => {
+              const seen = new Set(prev.map(p => p.id))
+              return [...prev, ...additions.filter(a => !seen.has(a.id))]
+            })
+          } catch { /* skip this one */ }
+          // Pace requests to stay under S2's per-IP rate limit. With
+          // 2 workers running, this gives ~5-6 req/s sustained — well
+          // under the 100 req/5min anonymous limit and tolerated by
+          // the per-key limit too.
+          await sleep(350)
+        }
+      }
+      // 2 workers — tradeoff: slower wall-time but no 429 storms.
+      // Backend already retries on 429 with backoff, so any single
+      // burst that slips through still recovers.
+      await Promise.all([worker(), worker()])
+      setAutoExpanded(true)
+    } finally {
+      setAutoExpanding(false)
+    }
+  }
+
+  const graphHint = loadingGraph
+    ? 'Fetching S2 citation graph…'
+    : hovered
+      ? hovered.paperId
+        ? 'Double-click this node to expand one hop'
+        : 'This node cannot expand: no DOI, arXiv ID, or Semantic Scholar paperId'
+      : eligibleNodes.length > 0
+        ? `Double-click expandable nodes (${eligibleNodes.length} with DOI/arXiv/S2 IDs)`
+        : 'No expandable nodes: expansion needs DOI, arXiv, or Semantic Scholar IDs'
+
+  return (
+    <div ref={containerRef} className="rounded-lg border overflow-hidden relative"
+      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', minHeight: 420 }}>
+      <div
+        className="absolute top-2 left-2 z-10 text-xs px-2 py-1 rounded flex items-center gap-2 flex-wrap"
+        style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+      >
+        <span>
+          {graphHint}
+        </span>
+        {/* The "Hide source spokes" toggle was removed in v0.7.18 —
+            user feedback was that the option served no clear purpose
+            in the typical view, and the rosette layout the spokes
+            produce is the most readable default. */}
+        {/* Always render the 2nd-degree toggle. When no refs carry an
+            identifier (no DOI / arXiv / S2 paperId / authoritative_url
+            match) it disables itself with an explanatory title so the
+            user doesn't think the feature is hidden — they just see
+            "needs refs with DOI / arXiv to expand". */}
+        <button
+          onClick={runAutoExpand}
+          disabled={autoExpanding || eligibleNodes.length === 0}
+          className="ml-1 px-2 py-0.5 rounded"
+          style={{
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-secondary)',
+            color: autoExpanded
+              ? 'var(--color-success, #16a34a)'
+              : eligibleNodes.length === 0
+                ? 'var(--color-text-muted)'
+                : 'var(--color-text-secondary)',
+            opacity: (autoExpanding || eligibleNodes.length === 0) ? 0.6 : 1,
+            cursor: eligibleNodes.length === 0 ? 'not-allowed' : 'pointer',
+          }}
+          title={eligibleNodes.length === 0
+            ? '2nd-degree expansion needs refs with a DOI, arXiv ID, or Semantic Scholar paperId. None of the refs in this paper carry one.'
+            : `Pull each ref's own bibliography (2nd-degree). ${eligibleNodes.length} refs eligible. Each new node is coloured by its check status (verified / unverified / hallucinated).`}
+        >
+          {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ Showing 2nd-degree refs' : '⊕ Show 2nd-degree refs + status'}
+        </button>
+        {/* 2nd-degree mode: reference check only vs also AI-gen status. AI-gen
+            on expanded refs is computed locally from each article's abstract
+            (free, offline, advisory) — most come back inconclusive. */}
+        <span className="inline-flex items-center rounded overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          {[['refs', 'Refs only'], ['ai', '+ AI-gen']].map(([val, label]) => {
+            const active = (val === 'ai') === aiGenMode
+            return (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setAiGenMode(val === 'ai')}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--color-bg-hover)' }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                className="px-2 py-0.5 transition-colors"
+                style={{
+                  background: active ? 'var(--color-bg-tertiary)' : 'transparent',
+                  color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                }}
+                title={val === 'ai'
+                  ? 'Also estimate an AI-generated-text band for each expanded article, from its abstract via the free offline local model. Advisory only (most abstracts are too short → inconclusive); needs the local model downloaded in Settings → AI Detection.'
+                  : 'Only check the reference/verification status of expanded articles.'}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </span>
+        {expandedNodes.length > 0 && (
+          <button
+            onClick={() => setExpandedNodes([])}
+            className="underline"
+            style={{ color: 'var(--color-accent, #3b82f6)' }}
+          >
+            Clear expanded ({expandedNodes.length})
+          </button>
+        )}
+      </div>
+
+      {/* Colour legend — bottom-right corner. Disambiguates the cyan
+          "expanded but unknown verification status" from the green
+          "verified" without forcing the user to hover each node. */}
+      <div
+        className="absolute bottom-2 right-2 z-10 text-[10px] px-2 py-1 rounded flex items-center gap-2 flex-wrap"
+        style={{
+          background: 'var(--color-bg-tertiary)',
+          color: 'var(--color-text-secondary)',
+          border: '1px solid var(--color-border)',
+          maxWidth: 320,
+        }}
+        title="Node colours map to verification status. Expanded 2nd-degree refs inherit their status from your Seen References cache when present; otherwise S2's index decides — items with a paperId + DOI/arXiv read as verified, items with only a paperId read as unverified, and only nodes that resolved to neither stay cyan."
+      >
+        <LegendDot color={STATUS_COLOR.verified} label="verified" />
+        <LegendDot color={STATUS_COLOR.warning} label="warning" />
+        <LegendDot color={STATUS_COLOR.error} label="error" />
+        <LegendDot color={STATUS_COLOR.unverified} label="unverified" />
+        <LegendDot color={STATUS_COLOR.hallucinated} label="hallucinated" />
+        <LegendDot color="#0ea5e9" label="expanded · no S2 metadata" />
+        {aiGenMode && <LegendDot color="#ef4444" label="◯ AI-gen ring (high/amber=med)" />}
+      </div>
+      <Suspense fallback={
+        <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Loading graph…
+        </div>
+      }>
+        <ForceGraph2D
+          ref={fgRef}
+          graphData={graphData}
+          width={dims.w}
+          height={dims.h}
+          backgroundColor="transparent"
+          nodeRelSize={4}
+          nodeColor={(n) => n.color}
+          // Co-citation edges (inter-ref) are the load-bearing signal,
+          // so they get the loudest stroke. Expanded one-hop edges are
+          // cyan to match their nodes. Source-spoke edges (when shown)
+          // are subdued so they fade behind the co-citation structure.
+          linkColor={(l) =>
+            l.citation
+              ? 'rgba(59,130,246,0.7)'
+              : l.expanded
+                ? 'rgba(14,165,233,0.75)'
+                : 'rgba(148,163,184,0.22)'
+          }
+          linkWidth={(l) => (l.citation ? 1.8 : l.expanded ? 1.5 : 0.6)}
+          linkDirectionalArrowLength={(l) => (l.citation || l.expanded ? 3 : 0)}
+          linkDirectionalArrowRelPos={1}
+          cooldownTicks={140}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.4}
+          onZoomEnd={() => { if (!autoFittingRef.current) setHasUserNavigated(true) }}
+          onNodeClick={handleNodeClick}
+          onNodeHover={(n) => setHovered(n || null)}
+          onRenderFramePost={(ctx, globalScale = 1) => {
+            const nodes = graphData.nodes || []
+            const labelNodes = nodes.filter((node) => {
+              if (!node || typeof node.x !== 'number' || typeof node.y !== 'number') return false
+              return hovered?.id === node.id
+                || selected?.id === node.id
+                || (!hovered && !selected && node.type === 'source')
+                || globalScale > 2.5
+            })
+            if (!labelNodes.length) return
+
+            const canvas = ctx.canvas
+            const margin = 6
+            const graphTransform = ctx.getTransform()
+            ctx.save()
+            ctx.setTransform(1, 0, 0, 1, 0, 0)
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'top'
+
+            for (const node of labelNodes) {
+              const label = node.label || ''
+              if (!label) continue
+              const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
+              const point = graphToCanvasPoint(graphTransform, node.x, node.y)
+              const scaledRadius = radius * globalScale
+              const fontSize = 13
+              const lineHeight = 16
+              const padX = 6
+              const padY = 4
+              ctx.font = `600 ${fontSize}px -apple-system, sans-serif`
+              const maxTextWidth = Math.min(GRAPH_LABEL_MAX_WIDTH, Math.max(120, canvas.width - margin * 2 - padX * 2))
+              const lines = wrapCanvasLabel(ctx, label, maxTextWidth, GRAPH_LABEL_MAX_LINES)
+              const textWidth = Math.min(
+                maxTextWidth,
+                Math.max(...lines.map((line) => ctx.measureText(line).width), 0),
+              )
+              const boxWidth = textWidth + padX * 2
+              const boxHeight = lines.length * lineHeight + padY * 2
+
+              let x = point.x + scaledRadius + 8
+              if (x + boxWidth > canvas.width - margin) {
+                x = point.x - scaledRadius - 8 - boxWidth
+              }
+              x = Math.max(margin, Math.min(x, canvas.width - margin - boxWidth))
+
+              let y = point.y - boxHeight / 2
+              y = Math.max(margin, Math.min(y, canvas.height - margin - boxHeight))
+
+              ctx.fillStyle = graphTheme.background
+              ctx.fillRect(x, y, boxWidth, boxHeight)
+              ctx.strokeStyle = graphTheme.border
+              ctx.lineWidth = 1
+              ctx.strokeRect(x + 0.5, y + 0.5, boxWidth - 1, boxHeight - 1)
+              ctx.fillStyle = graphTheme.text
+              lines.forEach((line, lineIndex) => {
+                ctx.fillText(line, x + padX, y + padY + lineIndex * lineHeight)
+              })
+            }
+
+            ctx.restore()
+          }}
+          nodeCanvasObject={(node, ctx, globalScale) => {
+            const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
+            const isHovered = hovered?.id === node.id
+            const isSelected = selected?.id === node.id
+            // Soft halo on hover / selection so the user knows which
+            // node they're targeting.
+            if (isHovered || isSelected) {
+              ctx.fillStyle = isHovered ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)'
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false)
+              ctx.fill()
+            }
+            // Filled disc — primary node visual.
+            ctx.fillStyle = node.color || '#888'
+            ctx.beginPath()
+            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false)
+            ctx.fill()
+            // Status-aware emphasis rings. Orphan refs that also carry a
+            // problem status (hallucinated, error, unverified) get a
+            // ring in the node's own status colour — the rim position
+            // already conveys "isolated", the ring layers on top to
+            // call attention to the refs reviewers should look at
+            // first. Verified orphans intentionally get no ring so we
+            // don't visually conflate them with hallucinated colour.
+            // Expanded (one-hop) nodes get a faint white ring to mark
+            // them as 2nd-degree.
+            const problemStatuses = new Set(['hallucinated', 'error', 'unverified'])
+            if (node.isOrphan && node.type === 'reference' && problemStatuses.has(node.status)) {
+              ctx.strokeStyle = node.color || 'rgba(168, 85, 247, 0.8)'
+              ctx.lineWidth = Math.max(1.4, 1.8 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 2.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            } else if (node.type === 'expanded') {
+              ctx.strokeStyle = 'rgba(255,255,255,0.6)'
+              ctx.lineWidth = Math.max(1, 1.2 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 1.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            }
+            // AI-generated-text ring (2nd-degree AI-gen mode). High = red,
+            // medium = amber — an outer ring layered over the status disc so
+            // it never hides the verification colour. Advisory only.
+            if (node.aiBand === 'high' || node.aiBand === 'medium') {
+              ctx.strokeStyle = node.aiBand === 'high' ? '#ef4444' : '#f59e0b'
+              ctx.lineWidth = Math.max(1.4, 2 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 3.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            }
+          }}
+        />
+      </Suspense>
+      {selected && (
+        <div
+          className="absolute bottom-2 left-2 right-2 max-w-md rounded-lg border p-3 text-xs"
+          style={{
+            backgroundColor: 'var(--color-bg-primary)',
+            borderColor: 'var(--color-border)',
+            color: 'var(--color-text-primary)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          }}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="font-semibold mb-1">{selected.label}</div>
+            <button onClick={() => setSelected(null)} className="text-xs px-2 py-0.5 rounded border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>×</button>
+          </div>
+          {selected.ref && (
+            <div style={{ color: 'var(--color-text-secondary)' }}>
+              {selected.ref.authors ? <div>{Array.isArray(selected.ref.authors) ? selected.ref.authors.join(', ') : selected.ref.authors}</div> : null}
+              {selected.ref.year ? <div>{selected.ref.year}{selected.ref.venue ? ` · ${selected.ref.venue}` : ''}</div> : null}
+              {typeof selected.inDegree === 'number' && selected.inDegree > 0 && (
+                <div>Cited by {selected.inDegree} other ref{selected.inDegree === 1 ? '' : 's'} in this paper</div>
+              )}
+              {typeof selected.citationCount === 'number' && selected.citationCount > 0 && (
+                <div style={{ opacity: 0.7 }}>{selected.citationCount.toLocaleString()} total citations on Semantic Scholar</div>
+              )}
+              {selected.status && (
+                <div className="mt-1" style={{ color: STATUS_COLOR[selected.status] || STATUS_COLOR.pending }}>
+                  Status: {selected.status}
+                </div>
+              )}
+              {(selected.aiBand === 'high' || selected.aiBand === 'medium') && (
+                <div
+                  className="mt-1"
+                  style={{ color: selected.aiBand === 'high' ? 'var(--color-error)' : 'var(--color-warning)' }}
+                  title="AI-generated-text likelihood estimated locally from the abstract. The score is a model score, NOT a probability that a human wrote this. Advisory only — not proof, and unreliable on short/technical text."
+                >
+                  AI-likelihood: {selected.aiBand}
+                  {typeof selected.ref.ai_detection_score === 'number' ? ` · score ${Math.round(selected.ref.ai_detection_score * 100)}` : ''}
+                  {' · from abstract'}
+                </div>
+              )}
+              {(selected.ref.verified_url || selected.ref.cited_url) && (
+                <a
+                  href={selected.ref.verified_url || selected.ref.cited_url}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    openExternal(selected.ref.verified_url || selected.ref.cited_url)
+                  }}
+                  className="block mt-1 underline"
+                  style={{ color: 'var(--color-accent, #3b82f6)' }}
+                >
+                  Open source
+                </a>
+              )}
+              {selected.paperId && (
+                <button
+                  onClick={() => handleExpand(selected)}
+                  disabled={expanding === selected.id}
+                  className="mt-1 underline text-xs"
+                  style={{ color: 'var(--color-accent, #3b82f6)' }}
+                >
+                  {expanding === selected.id ? 'Expanding…' : 'Expand one hop'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      <span>{label}</span>
+    </span>
+  )
+}

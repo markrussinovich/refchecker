@@ -26,6 +26,7 @@ Usage:
 """
 
 import logging
+import os
 import random
 import requests
 import threading
@@ -64,10 +65,12 @@ class EnhancedHybridReferenceChecker:
                  db_path: Optional[str] = None,
                  db_paths: Optional[Dict[str, str]] = None,
                  contact_email: Optional[str] = None,
+                 paperclip_api_key: Optional[str] = None,
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
                  enable_acl_anthology: bool = True,
+                 enable_paperclip: Optional[bool] = None,
                  debug_mode: bool = False,
                  cache_dir: Optional[str] = None):
         """
@@ -75,6 +78,7 @@ class EnhancedHybridReferenceChecker:
         
         Args:
             semantic_scholar_api_key: Optional API key for Semantic Scholar
+            paperclip_api_key: Optional API key for Paperclip secondary verification
             db_path: Optional path to local Semantic Scholar database
             contact_email: Email for polite pool access to APIs
             enable_openalex: Whether to use OpenAlex API
@@ -163,6 +167,33 @@ class EnhancedHybridReferenceChecker:
                 'acl_anthology', 'ACLAnthologyReferenceChecker', 'ACL Anthology checker',
                 email=contact_email
             )
+
+        # Paperclip is an OPTIONAL secondary tier — biomedical full-text
+        # corpus (PMC, bioRxiv, medRxiv) plus arXiv. Auth-gated.
+        #
+        # Activation: enable_paperclip defaults to "auto" — when None,
+        # the tier turns itself on if PAPERCLIP_API_KEY is present in
+        # the environment. Callers that explicitly want it off (e.g.
+        # offline tests) pass False; callers that always want it on
+        # despite a missing key (e.g. testing the dry-run path) pass
+        # True. End users only need to set the API key — no constructor
+        # flag, no pip install — and the tier activates on the next
+        # run.
+        if enable_paperclip is None:
+            enable_paperclip = bool(paperclip_api_key or os.environ.get('PAPERCLIP_API_KEY'))
+        self.paperclip = None
+        if enable_paperclip:
+            self.paperclip = self._initialize_checker(
+                'paperclip', 'PaperclipReferenceChecker', 'Paperclip secondary checker',
+                api_key=paperclip_api_key
+            )
+            if self.paperclip is not None and not getattr(self.paperclip, 'enabled', False):
+                # _initialize_checker succeeded but PAPERCLIP_API_KEY was
+                # missing or the SDK isn't installed — drop the instance
+                # so the fallback list doesn't try a permanently-disabled
+                # checker.
+                logger.debug("Paperclip instance created but not enabled; dropping")
+                self.paperclip = None
         
         # Google Scholar removed - using more reliable APIs only
 
@@ -171,7 +202,7 @@ class EnhancedHybridReferenceChecker:
         all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
         for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
                         self.openalex, self.crossref, self.openreview, self.dblp,
-                        self.acl_anthology):
+                        self.acl_anthology, self.paperclip):
             if checker is not None:
                 checker.cache_dir = cache_dir
 
@@ -184,6 +215,7 @@ class EnhancedHybridReferenceChecker:
             'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'dblp': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'acl_anthology': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'paperclip': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
         }
         for checker_key, _, _ in self.local_db_checkers:
             self.api_stats.setdefault(
@@ -209,6 +241,10 @@ class EnhancedHybridReferenceChecker:
             'dblp': threading.Semaphore(2),
             'openreview': threading.Semaphore(2),
             'acl_anthology': threading.Semaphore(2),
+            # Conservative concurrency cap for Paperclip — pricing /
+            # rate limits aren't publicly documented, so hold at 2 to
+            # avoid burst-hammering the service in bulk mode.
+            'paperclip': threading.Semaphore(2),
         }
         for checker_key, _, _ in self.local_db_checkers:
             self._api_semaphores.setdefault(checker_key, threading.Semaphore(100))
@@ -372,8 +408,24 @@ class EnhancedHybridReferenceChecker:
             # Consider it successful if we found data or verification errors (i.e., we could verify something)
             success = verified_data is not None or len(errors) > 0
             self._update_api_stats(api_name, success, duration)
-            
+
             if success:
+                # v0.7.63 (Allen 2021 vs Zhang 2010): wrong-paper rejection.
+                # When a checker title-matched to a paper with a HUGE year gap
+                # AND zero author-surname overlap, it's almost certainly the
+                # WRONG paper (Semantic Scholar's /paper/search/match returns
+                # the most-cited paper sharing the title, regardless of year
+                # or author). Reject the candidate so the next API in the
+                # priority list (or the local DB) gets a chance. Skip this
+                # for DOI/ArXiv-anchored matches — those identifiers are
+                # authoritative and any year/author mismatch is a real
+                # error we want to surface, not a wrong-paper drift.
+                if self._is_wrong_paper_match(reference, verified_data, errors, api_name):
+                    logger.debug(
+                        f"Enhanced Hybrid: {api_name} returned wrong-paper match "
+                        f"(year+author both off) — rejecting and falling through to next API"
+                    )
+                    return None, [], None, False, 'not_found', ''
                 verified_data = self._annotate_match_source(verified_data, api_name, api_instance)
                 retry_info = " (retry)" if is_retry else ""
                 logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s{retry_info}, URL: {url}")
@@ -560,6 +612,234 @@ class EnhancedHybridReferenceChecker:
         
         return merged_data, merged_errors
 
+    def _is_wrong_paper_match(self, reference, verified_data, errors, api_name):
+        """Detect when a checker matched the WRONG paper.
+
+        v0.7.63 fired on year-gap-≥5 + zero-author-overlap (Allen 2021 vs
+        Zhang 2010). v0.7.67 broadens this with three additional signals
+        for cases where the year is close enough to slip through:
+
+          - SHORT cited title (≤3 tokens, e.g. "Osteoporosis", "Discoid
+            meniscus") is a generic word/phrase that re-occurs across
+            many papers. Treat zero-surname-overlap as wrong-paper even
+            when the year gap is small.
+          - Year-gap-≥2 + venue-mismatch + zero-overlap is also wrong-
+            paper signature (Niu/Warindra discoid meniscus case: 2022
+            Clin Sports Med vs 2024 Orthopaedic Proceedings).
+          - Same-authors but the cited title is a SHORT generic phrase
+            AND the actual title is far longer (length ratio ≥3) AND
+            venue doesn't match → wrong paper. Catches the Ensrud 2017
+            "Osteoporosis" review vs same-authors 2025 JAMA Netw Open
+            "Identifying Younger Postmenopausal Women..." case.
+
+        Always skipped when the match is DOI/ArXiv/PMID-anchored — those
+        identifiers are authoritative and any drift is a real citation
+        error worth surfacing.
+        """
+        if not verified_data:
+            return False
+
+        # DOI/ArXiv/PMID-anchored matches are authoritative; never reject.
+        try:
+            cited_doi = (reference.get('doi') or '').strip()
+            if cited_doi:
+                for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
+                    if cited_doi.lower().startswith(prefix):
+                        cited_doi = cited_doi[len(prefix):]
+                        break
+                vd_doi = (verified_data.get('doi') or '').strip()
+                vd_ext = verified_data.get('externalIds') or {}
+                vd_doi = vd_doi or vd_ext.get('DOI') or vd_ext.get('doi') or ''
+                if vd_doi and cited_doi.lower() == str(vd_doi).strip().lower():
+                    return False
+            # ArXiv ID anchored?
+            ref_url = (reference.get('url') or '') + ' ' + (reference.get('venue') or '')
+            if 'arxiv.org' in ref_url.lower() or (reference.get('externalIds', {}) or {}).get('ArXiv'):
+                return False
+            # PMID anchored?
+            cited_pmid = (
+                reference.get('pmid')
+                or (reference.get('externalIds') or {}).get('PubMed')
+                or (reference.get('externalIds') or {}).get('PMID')
+                or ''
+            )
+            cited_pmid = str(cited_pmid or '').strip()
+            if cited_pmid:
+                vd_ext = verified_data.get('externalIds') or {}
+                vd_pmid = (
+                    str(verified_data.get('pmid') or '').strip()
+                    or str(vd_ext.get('PubMed') or '').strip()
+                    or str(vd_ext.get('PMID') or '').strip()
+                )
+                if vd_pmid and cited_pmid == vd_pmid:
+                    return False
+        except Exception:
+            pass
+
+        # ── Year-gap calculation ──
+        try:
+            cited_year = int(reference.get('year')) if reference.get('year') else None
+        except (TypeError, ValueError):
+            cited_year = None
+        actual_year = verified_data.get('year')
+        try:
+            actual_year = int(actual_year) if actual_year else None
+        except (TypeError, ValueError):
+            actual_year = None
+
+        year_gap = None
+        if cited_year and actual_year:
+            year_gap = abs(cited_year - actual_year)
+        else:
+            for err in errors or []:
+                etype = err.get('error_type') or err.get('warning_type') or ''
+                if etype != 'year':
+                    continue
+                try:
+                    correct_year = int(err.get('ref_year_correct') or 0)
+                    cy = cited_year or int((err.get('cited_value') or '0') or 0)
+                    if correct_year and cy:
+                        year_gap = abs(correct_year - cy)
+                        break
+                except (TypeError, ValueError):
+                    continue
+
+        # ── Surname-overlap calculation ──
+        try:
+            from refchecker.utils.text_utils import normalize_diacritics_simple
+        except Exception:
+            normalize_diacritics_simple = lambda s: s  # noqa: E731
+
+        def _surnames(names):
+            out = set()
+            for n in (names or []):
+                if isinstance(n, dict):
+                    n = n.get('name') or n.get('full_name') or ''
+                if not n:
+                    continue
+                s = normalize_diacritics_simple(str(n).strip().lower())
+                toks = [t for t in s.replace(',', ' ').split() if t]
+                if not toks:
+                    continue
+                while toks and len(toks[-1].rstrip('.')) <= 3 and toks[-1].rstrip('.').isalpha():
+                    if len(toks) == 1:
+                        break
+                    toks.pop()
+                if toks:
+                    for t in toks[-2:]:
+                        if len(t) >= 3:
+                            out.add(t)
+            return out
+
+        cited_surnames = _surnames(reference.get('authors'))
+        actual_surnames = _surnames(verified_data.get('authors') or [])
+        if not cited_surnames or not actual_surnames:
+            # Can't determine overlap; for the title+venue branch we may
+            # still proceed below, but it requires title/venue mismatch.
+            surname_overlap = None
+        else:
+            surname_overlap = len(cited_surnames & actual_surnames)
+
+        # ── Title/venue helpers ──
+        def _str(x):
+            return str(x or '').strip()
+
+        cited_title = _str(reference.get('title'))
+        actual_title = _str(verified_data.get('title'))
+        cited_title_tokens = len(cited_title.split())
+        actual_title_tokens = len(actual_title.split())
+        short_cited = 0 < cited_title_tokens <= 3
+        if cited_title_tokens > 0 and actual_title_tokens > 0:
+            length_ratio = max(cited_title_tokens, actual_title_tokens) / max(
+                1, min(cited_title_tokens, actual_title_tokens)
+            )
+        else:
+            length_ratio = 1.0
+        title_length_mismatch = length_ratio >= 3.0
+
+        venue_match = self._venues_compatible(
+            reference.get('venue') or reference.get('journal') or '',
+            verified_data.get('venue') or verified_data.get('journal') or '',
+        )
+
+        # ── Rules ──
+        # Zero-author-overlap branch
+        if surname_overlap == 0:
+            if year_gap is not None and year_gap >= 5:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — year_gap={year_gap}, "
+                    f"zero author overlap"
+                )
+                return True
+            if short_cited:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — short cited title "
+                    f"'{cited_title}' with zero author overlap"
+                )
+                return True
+            if year_gap is not None and year_gap >= 2 and not venue_match:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — year_gap={year_gap}, "
+                    f"venue mismatch, zero author overlap"
+                )
+                return True
+
+        # Same-authors-but-generic-title branch (Ensrud "Osteoporosis"):
+        # short cited title + wide title-length mismatch + venue mismatch
+        # → wrong paper regardless of author overlap.
+        if short_cited and title_length_mismatch and not venue_match:
+            logger.debug(
+                f"Enhanced Hybrid: wrong-paper on {api_name} — short generic cited title "
+                f"'{cited_title}' ({cited_title_tokens} tok) vs much longer actual "
+                f"({actual_title_tokens} tok), venue mismatch"
+            )
+            return True
+
+        return False
+
+    def _venues_compatible(self, cited_venue, actual_venue):
+        """Cheap venue-equivalence check used by `_is_wrong_paper_match`.
+
+        Tries (in order):
+          1. Exact match after lowercase + punctuation strip
+          2. Substring containment either direction
+          3. `is_acceptable_abbreviation` from `venue_abbreviations`
+             (handles NLM abbreviation ↔ full title pairs)
+
+        Returns True when either string is empty (don't penalise missing
+        venue data) and True on any positive signal. Conservative — when
+        in doubt, return True (don't trigger wrong-paper rejection on a
+        venue we simply can't classify).
+        """
+        cv = (cited_venue or '').strip()
+        av = (actual_venue or '').strip()
+        if not cv or not av:
+            return True  # missing data — don't reject on venue signal
+
+        def _norm(s):
+            import re as _re
+            s = s.lower()
+            s = _re.sub(r'[\.,;:\(\)\[\]\"\'`]', ' ', s)
+            s = _re.sub(r'\s+', ' ', s).strip()
+            return s
+
+        cv_n = _norm(cv)
+        av_n = _norm(av)
+        if not cv_n or not av_n:
+            return True
+        if cv_n == av_n:
+            return True
+        if cv_n in av_n or av_n in cv_n:
+            return True
+
+        try:
+            from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation
+            if is_acceptable_abbreviation(cv, av) or is_acceptable_abbreviation(av, cv):
+                return True
+        except Exception:
+            pass
+        return False
+
     def _has_major_author_discrepancy(self, errors):
         """Check if errors indicate a major author discrepancy.
         
@@ -577,7 +857,14 @@ class EnhancedHybridReferenceChecker:
             actual_str = error.get('ref_authors_correct', '')
             if not actual_str or not details:
                 continue
-            # Only flag if it says "not found in author list" (zero match)
+            # Only flag if it says no authors matched at all.
+            details_lower = details.lower()
+            if 'no matching authors' in details_lower:
+                logger.debug(
+                    "Enhanced Hybrid: Major author discrepancy — no cited authors overlap with actual '%s'",
+                    actual_str,
+                )
+                return True
             if 'not found in author list' not in details:
                 continue
             # Extract cited author name from the error details
@@ -672,6 +959,53 @@ class EnhancedHybridReferenceChecker:
             return ss_result
         return None
 
+    def _handle_arxiv_result(self, result, reference):
+        """Return an ArXiv verification result, short-circuiting wrong IDs.
+
+        The ArXiv citation checker is authoritative for an explicit cited
+        ArXiv ID.  A title error with very low similarity means that ID points
+        at a different paper, so do not let a later title search against a
+        database mask the bad cited URL.
+        """
+        verified_data, errors, url = result
+
+        has_title_error = any(
+            e.get('error_type') == 'title' for e in (errors or [])
+        )
+        if has_title_error:
+            cited_title = reference.get('title', 'unknown')
+            actual_title = (verified_data or {}).get('title', 'unknown')
+            # Compute similarity to distinguish "completely different paper"
+            # from "same paper, revised title between versions". Truly
+            # different papers score 0.0-0.1; revised titles score higher.
+            from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+            title_sim = compare_titles_with_latex_cleaning(cited_title, actual_title)
+            if title_sim < 0.25:
+                arxiv_url = reference.get('cited_url') or reference.get('url', '') or url
+                logger.debug(
+                    f"Enhanced Hybrid: ArXiv URL points to a different paper "
+                    f"(cited: '{cited_title}', actual: '{actual_title}', "
+                    f"sim={title_sim:.2f}) — returning as unverified"
+                )
+                return None, [
+                    {
+                        'error_type': 'unverified',
+                        'error_details': f'Could not verify: {cited_title}',
+                    },
+                    {
+                        'error_type': 'url',
+                        'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
+                    },
+                ], arxiv_url
+
+            logger.debug(
+                f"Enhanced Hybrid: ArXiv title mismatch but titles "
+                f"are similar (sim={title_sim:.2f}), treating as "
+                f"version update: '{cited_title}' vs '{actual_title}'"
+            )
+
+        return result
+
     def _verify_non_arxiv_parallel(self, reference, failed_apis, attempted_apis, skip_ss: bool = False):
         """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
         
@@ -713,7 +1047,13 @@ class EnhancedHybridReferenceChecker:
             fallback_apis.append(('dblp', self.dblp))
         if self.acl_anthology:
             fallback_apis.append(('acl_anthology', self.acl_anthology))
-        
+        # Paperclip runs at the END of the priority list — it's a
+        # secondary/biomedical-fallback signal, not a primary metadata
+        # source. Only opted-in users (PAPERCLIP_API_KEY set + SDK
+        # installed) ever hit this.
+        if self.paperclip:
+            fallback_apis.append(('paperclip', self.paperclip))
+
         if fallback_apis:
             logger.debug(f"Enhanced Hybrid: SS failed, launching {len(fallback_apis)} fallback APIs in parallel")
             futures = {}
@@ -722,8 +1062,8 @@ class EnhancedHybridReferenceChecker:
                     self._append_attempted_api(attempted_apis, api_name)
                     futures[api_name] = pool.submit(
                         self._try_api, api_name, api_instance, reference)
-            
-            priority = ['crossref', 'openalex', 'dblp', 'acl_anthology']
+
+            priority = ['crossref', 'openalex', 'dblp', 'acl_anthology', 'paperclip']
             for api_name in priority:
                 if api_name not in futures:
                     continue
@@ -744,6 +1084,10 @@ class EnhancedHybridReferenceChecker:
                         last_crossref_result = (verified_data, errors, url)
                     elif api_name == 'openalex':
                         last_openalex_result = (verified_data, errors, url)
+
+        arxiv_title_result = self._try_arxiv_title_search(reference, attempted_apis)
+        if arxiv_title_result is not None:
+            return arxiv_title_result, {}
         
         # Try OpenReview as a secondary step (not parallelized — rare path)
         if self.openreview:
@@ -788,9 +1132,130 @@ class EnhancedHybridReferenceChecker:
             incomplete['openalex'] = last_openalex_result
         return None, incomplete
 
+    def _try_arxiv_title_search(self, reference, attempted_apis):
+        """Try ArXiv title search for non-ArXiv citations before loose venue fallbacks."""
+        if not self.arxiv_citation or not hasattr(self.arxiv_citation, 'find_arxiv_id_by_title'):
+            return None
+
+        title = reference.get('title', '').strip()
+        if not title:
+            return None
+
+        try:
+            arxiv_id, _ = self.arxiv_citation.extract_arxiv_id(reference)
+        except Exception:
+            arxiv_id = None
+        if arxiv_id:
+            return None
+
+        try:
+            arxiv_id = self.arxiv_citation.find_arxiv_id_by_title(
+                title,
+                authors=reference.get('authors', []),
+                year=reference.get('year'),
+            )
+        except Exception as exc:
+            logger.debug("Enhanced Hybrid: ArXiv title search failed: %s", exc)
+            return None
+
+        if not arxiv_id:
+            return None
+
+        arxiv_reference = dict(reference)
+        arxiv_reference['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+        self._append_attempted_api(attempted_apis, 'arxiv_citation')
+        verified_data, errors, url, success, _failure_type, _failure_detail = self._try_api(
+            'arxiv_citation',
+            self.arxiv_citation,
+            arxiv_reference,
+        )
+        if success and verified_data is not None:
+            logger.debug("Enhanced Hybrid: ArXiv title search verification succeeded for %s", arxiv_id)
+            return verified_data, errors, url
+        return None
+
     # ------------------------------------------------------------------
     # Post-verification checks (shared by CLI, WebUI, and bulk paths)
     # ------------------------------------------------------------------
+
+    def _extract_verified_arxiv_id(
+        self,
+        reference: Dict[str, Any],
+        verified_data: Optional[Dict[str, Any]],
+        url: Optional[str],
+    ) -> Optional[str]:
+        """Return the best ArXiv ID available from reference or verified data."""
+        from refchecker.utils.url_utils import extract_arxiv_id_from_url
+
+        for candidate in (
+            reference.get('url'),
+            reference.get('cited_url'),
+            reference.get('venue'),
+            url,
+        ):
+            arxiv_id = extract_arxiv_id_from_url(candidate or '')
+            if arxiv_id:
+                return arxiv_id
+
+        if verified_data:
+            ext = verified_data.get('externalIds') or {}
+            arxiv_id = ext.get('ArXiv') or ext.get('arxiv')
+            if arxiv_id:
+                return str(arxiv_id)
+
+        return None
+
+    def _apply_arxiv_version_warnings(
+        self,
+        verified_data: Optional[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        url: Optional[str],
+        reference: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """Convert version-only ArXiv metadata mismatches to warnings.
+
+        This normalizes the result at the shared checker layer so CLI, bulk,
+        and WebUI all see the same warning-only record before any presentation
+        or hallucination code runs.
+        """
+        if not self.arxiv_citation or not errors:
+            return verified_data, errors, url
+        if any(e.get('warning_type') and 'update' in e.get('warning_type', '').lower() for e in errors):
+            return verified_data, errors, url
+
+        arxiv_id = self._extract_verified_arxiv_id(reference, verified_data, url)
+        if not arxiv_id:
+            return verified_data, errors, url
+
+        try:
+            arxiv_ref = dict(reference)
+            arxiv_ref['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+            arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(arxiv_ref)
+        except Exception as exc:
+            logger.debug("Enhanced Hybrid: shared ArXiv version check failed: %s", exc)
+            return verified_data, errors, url
+
+        if not arxiv_data or not arxiv_errors:
+            return verified_data, errors, url
+
+        has_version_warning = any(
+            e.get('warning_type') and 'update' in e.get('warning_type', '').lower()
+            for e in arxiv_errors
+        )
+        has_real_error = any(e.get('error_type') for e in arxiv_errors)
+        if not has_version_warning or has_real_error:
+            return verified_data, errors, url
+
+        annotated_data = self._annotate_match_source(
+            arxiv_data,
+            'arxiv_citation',
+            self.arxiv_citation,
+        )
+        logger.debug(
+            "Enhanced Hybrid: ArXiv version update converted errors to warnings for %s",
+            arxiv_id,
+        )
+        return annotated_data, arxiv_errors, arxiv_url or url
 
     def _check_arxiv_id_mismatch(self, reference: Dict[str, Any],
                                   verified_data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1002,7 +1467,13 @@ class EnhancedHybridReferenceChecker:
             if re_result is not None:
                 errors, url, verified_data = re_result
 
-        # 2. Independent ArXiv ID check — skip when the hybrid checker
+        # 2. Convert ArXiv version-only metadata differences to warnings.
+        if errors and verified_data is not None:
+            verified_data, errors, url = self._apply_arxiv_version_warnings(
+                verified_data, errors, url, reference,
+            )
+
+        # 3. Independent ArXiv ID check — skip when the hybrid checker
         #    already verified the paper with no errors (avoids false
         #    positives from paraphrased titles in the S2 API).
         #    Also skip when version checking already converted title errors
@@ -1034,7 +1505,104 @@ class EnhancedHybridReferenceChecker:
         verified_data, errors, url = self._postprocess_verification(
             verified_data, errors, url, reference,
         )
+
+        # Cross-attribution: after a primary match lands, ask the
+        # secondary signal sources (Paperclip + Wikidata) whether they
+        # also have this paper. Stamp the union as `_verified_by` so
+        # the FE renders "via Semantic Scholar + Paperclip + Wikidata"
+        # instead of single-source attribution. Cheap: Paperclip is a
+        # single DOI/title lookup, Wikidata is a single SPARQL — both
+        # gated on Paperclip being enabled / Wikidata being reachable.
+        if isinstance(verified_data, dict):
+            try:
+                self._cross_verify_secondary(verified_data, reference)
+            except Exception as e:
+                logger.debug("Cross-attribution skipped: %s", e)
+
         return verified_data, errors, url
+
+    def _cross_verify_secondary(self, verified_data: Dict[str, Any], reference: Dict[str, Any]) -> None:
+        """Ask Paperclip + Wikidata whether they also confirm the matched paper.
+
+        The primary verifier already stamped `_matched_database`. This
+        adds any secondary confirmations to `_verified_by` so users see
+        all sources that independently confirmed the same paper.
+
+        Mutates `verified_data` in place — appending to `_verified_by`.
+        Doesn't raise; any source that errors out is silently skipped.
+        """
+        primary = verified_data.get('_matched_database') or verified_data.get('_matched_checker') or 'verified'
+        confirmations = [primary]
+
+        # Canonical DOI for cross-source lookup: prefer the primary
+        # verifier's DOI, fall back to the cited DOI.
+        doi = (
+            verified_data.get('doi')
+            or verified_data.get('DOI')
+            or (verified_data.get('ids') or {}).get('doi')
+            or (verified_data.get('externalIds') or {}).get('DOI')
+            or reference.get('doi')
+        )
+        if isinstance(doi, str):
+            doi = doi.strip()
+            for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
+                if doi.lower().startswith(prefix):
+                    doi = doi[len(prefix):]
+                    break
+
+        # --- Paperclip cross-check ---
+        # Don't re-query when Paperclip WAS the primary source.
+        if self.paperclip and 'paperclip' not in primary.lower() and 'Paperclip' != primary:
+            try:
+                pc_ref = dict(reference)
+                if doi:
+                    pc_ref['doi'] = doi
+                pc_data, _pc_errors, _pc_url = self.paperclip.verify_reference(pc_ref)
+                if pc_data:
+                    confirmations.append('Paperclip')
+            except Exception as e:
+                logger.debug("Paperclip cross-check failed: %s", e)
+
+        # --- Wikidata cross-check ---
+        # Single SPARQL query: ?work wdt:P356 "<DOI>" — returns a binding
+        # iff Wikidata has this paper as an entity. No auth required;
+        # short timeout so a slow Wikidata can't drag verification.
+        if doi:
+            try:
+                import requests
+                sparql = (
+                    'SELECT ?work WHERE { '
+                    f'?work wdt:P356 "{doi.upper()}" . '
+                    '} LIMIT 1'
+                )
+                resp = requests.get(
+                    'https://query.wikidata.org/sparql',
+                    params={'query': sparql, 'format': 'json'},
+                    headers={
+                        'User-Agent': 'RefChecker/0.7 (https://github.com/ArioMoniri/refchecker)',
+                        'Accept': 'application/sparql-results+json',
+                    },
+                    timeout=4.0,
+                )
+                if resp.status_code == 200:
+                    bindings = (resp.json().get('results') or {}).get('bindings') or []
+                    if bindings:
+                        confirmations.append('Wikidata')
+            except Exception as e:
+                logger.debug("Wikidata cross-check failed: %s", e)
+
+        # Dedup-preserve-order. Stamp even on single-confirmation so the
+        # FE always has the verified_by list (matches enrichment.py's
+        # contract of falling back to [source_label]).
+        seen = set()
+        deduped = []
+        for s in confirmations:
+            key = (s or '').strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(s)
+        verified_data['_verified_by'] = deduped
 
     def _verify_reference_core(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """Core verification logic — parallel API calls + retries + fallbacks."""
@@ -1059,9 +1627,15 @@ class EnhancedHybridReferenceChecker:
         # ── PHASE 1: Parallel API calls ──
         
         if is_arxiv:
-            # For ArXiv refs: try local DB first (instant). If result looks
-            # clean, use it. If there's a major discrepancy (e.g., wrong
-            # authors from a corrupt S2 entry), fall back to ArXiv BibTeX.
+            # For explicit ArXiv refs, the cited ArXiv ID/URL is the source of
+            # truth. Verify it before local DB title search so a clean-looking
+            # database match cannot hide a wrong cited ArXiv target.
+            result = self._verify_arxiv_parallel(reference, failed_apis, attempted_apis)
+            if result is not None:
+                return self._handle_arxiv_result(result, reference)
+
+            # ArXiv was unavailable or returned no result; fall back to local
+            # DB lookups so offline/bulk runs can still verify by metadata.
             for local_key, _, local_checker in self._iter_local_db_checkers():
                 self._append_attempted_api(attempted_apis, local_key)
                 verified_data, errors, url, success, failure_type, failure_detail = self._try_api(
@@ -1089,63 +1663,6 @@ class EnhancedHybridReferenceChecker:
                         'failure_detail': failure_detail,
                         'active': True,
                     })
-            
-            # Local DB failed or had discrepancy — use ArXiv citation checker
-            result = self._verify_arxiv_parallel(reference, failed_apis, attempted_apis)
-            if result is not None:
-                verified_data, errors, url = result
-                # Check if the ArXiv URL points to a completely different paper.
-                # A title *error* (not warning) means the cited title didn't match
-                # ANY version of the ArXiv paper at this ID — the URL is wrong.
-                # However, version checking may have failed (rate-limiting,
-                # timeout) even though the paper IS the same — just with a
-                # revised title.  Only short-circuit when the titles are truly
-                # unrelated (similarity < 0.5); moderate similarity suggests a
-                # title revision that the version checker couldn't confirm.
-                has_title_error = any(
-                    e.get('error_type') == 'title' for e in errors
-                )
-                if has_title_error:
-                    cited_title = reference.get('title', 'unknown')
-                    actual_title = (verified_data or {}).get('title', 'unknown')
-                    # Compute similarity to distinguish "completely different
-                    # paper" from "same paper, revised title between versions".
-                    # Truly different papers score 0.0–0.1; revised titles
-                    # score 0.3–0.5+.  Use 0.25 as a conservative cutoff.
-                    from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
-                    title_sim = compare_titles_with_latex_cleaning(cited_title, actual_title)
-                    if title_sim < 0.25:
-                        # Titles are truly unrelated — the ArXiv ID points to
-                        # a different paper.  Short-circuit to avoid wasting
-                        # time on fallback APIs for a likely fabricated ref.
-                        arxiv_url = reference.get('cited_url') or reference.get('url', '')
-                        logger.debug(
-                            f"Enhanced Hybrid: ArXiv URL points to a different paper "
-                            f"(cited: '{cited_title}', actual: '{actual_title}', "
-                            f"sim={title_sim:.2f}) — returning as unverified"
-                        )
-                        return None, [
-                            {
-                                'error_type': 'unverified',
-                                'error_details': f'Could not verify: {cited_title}',
-                            },
-                            {
-                                'error_type': 'url',
-                                'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
-                            },
-                        ], arxiv_url
-                    else:
-                        # Titles share significant overlap — likely the same
-                        # paper with a revised title.  Return the ArXiv data
-                        # so downstream can evaluate it normally.
-                        logger.debug(
-                            f"Enhanced Hybrid: ArXiv title mismatch but titles "
-                            f"are similar (sim={title_sim:.2f}), treating as "
-                            f"version update: '{cited_title}' vs '{actual_title}'"
-                        )
-                        return result
-                else:
-                    return result
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
             for local_key, _, local_checker in self._iter_local_db_checkers():

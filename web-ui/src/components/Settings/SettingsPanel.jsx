@@ -1,39 +1,72 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAiDetectionStore } from '../../stores/useAiDetectionStore'
 import { useAuthStore } from '../../stores/useAuthStore'
 import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { invokeTauri, isTauri, openExternal, getAppVersion } from '../../utils/tauriBridge'
+import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
+
+const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
 
 /**
  * Settings panel component - ChatGPT-style with left navigation
  */
 export default function SettingsPanel({ theme, onThemeChange }) {
-  const { 
-    settings, 
-    isLoading, 
+  const {
+    settings,
+    isLoading,
     version,
-    isSettingsOpen, 
-    closeSettings, 
+    isSettingsOpen,
+    closeSettings,
     updateSetting,
-    fetchSettings
+    fetchSettings,
+    initialSection,
   } = useSettingsStore()
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
 
+  // Honor deep-links from the onboarding banner (and anywhere else that
+  // calls openSettings(section)) by jumping to the requested pane.
+  useEffect(() => {
+    if (isSettingsOpen && initialSection) {
+      setActiveSection(initialSection)
+    }
+  }, [isSettingsOpen, initialSection])
+
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
+
+  // AI-generated-text detection (opt-in, client preference + local model mgmt)
+  const aiDetection = useAiDetectionStore()
+  const [aiDetKey, setAiDetKey] = useState('')
+  useEffect(() => {
+    if (isSettingsOpen && activeSection === 'AI Detection') {
+      aiDetection.fetchModelStatus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSettingsOpen, activeSection])
   
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
+  // Paperclip — same lifecycle as the SS key (Set / Edit / Remove).
+  // Multi-user keeps it browser-only; single-user stores it locally so
+  // the secondary tier auto-activates after restarts.
+  const [pcApiKey, setPcApiKey] = useState('')
+  const [pcIsEditing, setPcIsEditing] = useState(false)
+  const [pcIsSaving, setPcIsSaving] = useState(false)
+  const [pcError, setPcError] = useState(null)
+  const [pcServerHasKey, setPcServerHasKey] = useState(false)
   const [ssIsSaving, setSsIsSaving] = useState(false)
   const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
   const [ssServerHasKey, setSsServerHasKey] = useState(false)
   const ssHasKey = hasKey('semantic_scholar') || ssServerHasKey
+  const pcHasKey = hasKey('paperclip') || pcServerHasKey
 
   // Local DB path state
   const [dbPathLocal, setDbPathLocal] = useState(settings.db_path?.value || '')
@@ -46,6 +79,143 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirError, setCacheDirError] = useState(null)
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
+
+  // Dynamic Tauri bundle version. Falls back to the backend's CLI
+  // version when running outside the desktop wrapper.
+  const [appVersion, setAppVersion] = useState(null)
+  useEffect(() => {
+    let mounted = true
+    if (isTauri()) {
+      getAppVersion()
+        .then((v) => { if (mounted) setAppVersion(v) })
+        .catch(() => {})
+    }
+    return () => { mounted = false }
+  }, [])
+
+  // Tauri auto-updater UI state. The web-ui is also served outside the
+  // desktop wrapper (Docker, plain pip install), so we avoid pulling
+  // @tauri-apps/plugin-updater as a build-time dep and instead invoke
+  // its commands at runtime via the global Tauri IPC bridge. The plugin
+  // is registered Rust-side and covered by the `updater:default` and
+  // `process:default` capability permissions.
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState(null) // { kind, text }
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus(null)
+    if (!isTauri()) {
+      setUpdateStatus({ kind: 'info', text: 'Update checks only work inside the desktop app.' })
+      return
+    }
+    setUpdateChecking(true)
+    try {
+      // plugin:updater|check returns:
+      //   null  — no newer version OR signature/platform check failed
+      //   { version, current_version, body, date, available?, ... }
+      //
+      // The plugin returns null silently when the running platform has
+      // no matching `platforms.<target>` entry in the manifest (this
+      // is how Intel Mac users on an Apple-Silicon-only release see
+      // "You're on the latest"). Surface the raw response in the
+      // status so the user can distinguish that case from a genuine
+      // "up to date" answer.
+      const update = await invokeTauri('plugin:updater|check')
+      // eslint-disable-next-line no-console
+      console.info('[updater] check response:', update)
+      const noUpdate = !update || update.available === false ||
+        (update.version && appVersion && update.version === appVersion)
+      if (noUpdate) {
+        const hint = appVersion
+          ? `You're on ${appVersion}. If a newer version is published but this still says "latest," your Mac may be an Intel build and only arm64 builds ship — grab the right installer from the release page.`
+          : "You're on the latest version."
+        setUpdateStatus({ kind: 'ok', text: hint })
+        return
+      }
+      setUpdateStatus({ kind: 'info', text: `Downloading ${update.version || 'update'}…` })
+      // Tauri 2's `download_and_install` requires the `rid` (resource id)
+      // returned by `check` and an `onEvent` Channel for progress events.
+      // Pass both — null `onEvent` makes the plugin reject the call,
+      // missing `rid` makes it reject with "missing required key rid".
+      const { Channel } = await import('@tauri-apps/api/core')
+      const channel = new Channel()
+      await invokeTauri('plugin:updater|download_and_install', { rid: update.rid, onEvent: channel })
+      setUpdateStatus({ kind: 'ok', text: `Update ${update.version || ''} installed — restarting…` })
+      setTimeout(() => { invokeTauri('plugin:process|restart').catch(() => {}) }, 600)
+    } catch (err) {
+      const msg = (err && (err.message || err.toString && err.toString())) || 'Update check failed.'
+      setUpdateStatus({ kind: 'error', text: msg })
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
+  const handleShowReleaseNotes = () => openExternal(`${REPO_URL}/releases/latest`)
+
+  // Diagnostics state
+  const [diagBuilding, setDiagBuilding] = useState(false)
+  const [diagReport, setDiagReport] = useState(null)
+  const [diagCopied, setDiagCopied] = useState(false)
+  const handleBuildDiagnostics = async () => {
+    setDiagBuilding(true)
+    setDiagCopied(false)
+    try {
+      const report = await collectDiagnostics()
+      setDiagReport(report)
+    } catch (err) {
+      setDiagReport({ error: err?.message || String(err) })
+    } finally {
+      setDiagBuilding(false)
+    }
+  }
+  const handleCopyDiagnostics = async () => {
+    if (!diagReport) return
+    try {
+      await navigator.clipboard.writeText(diagnosticsToText(diagReport))
+      setDiagCopied(true)
+      setTimeout(() => setDiagCopied(false), 1500)
+    } catch { /* clipboard unavailable */ }
+  }
+  const handleDownloadDiagnostics = () => {
+    if (!diagReport) return
+    const text = diagnosticsToText(diagReport)
+    const blob = new Blob([text], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `refchecker-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  const handleOpenIssueWithDiagnostics = async () => {
+    // GitHub rejects ?body= URLs above ~8 KB with a "Whoa there!
+    // Your request URL is too long" page. Diagnostic JSON commonly
+    // runs 4-20 KB, so we copy the body to the clipboard and open a
+    // bare new-issue page. The placeholder body just tells the user
+    // to paste — they'll have a single Cmd/Ctrl-V to drop the full
+    // report into the issue.
+    const body = diagReport
+      ? '## What I expected\n\n\n## What happened\n\n\n## Diagnostic report\n\n```json\n' + diagnosticsToText(diagReport) + '\n```\n'
+      : '## What I expected\n\n\n## What happened\n\n'
+    try {
+      await navigator.clipboard.writeText(body)
+    } catch { /* clipboard may be unavailable in some contexts */ }
+    const shortBody = diagReport
+      ? '## What I expected\n\n\n## What happened\n\n\n<!-- Diagnostic report was copied to your clipboard. Paste it here (Cmd/Ctrl-V). -->\n'
+      : '## What I expected\n\n\n## What happened\n\n'
+    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
+    openExternal(url)
+  }
+
+  // Local DB downloader state — drives the "Build local databases" inline
+  // section under the db_path field. Selected DBs run via the existing
+  // local_database_updater script through /api/databases/download.
+  const [dbBuildOpen, setDbBuildOpen] = useState(false)
+  const [dbBuildPick, setDbBuildPick] = useState({ s2: true, dblp: true, openalex: true })
+  const [dbBuildMinYear, setDbBuildMinYear] = useState('2020')
+  const [dbBuildStatus, setDbBuildStatus] = useState({}) // { s2: {status, log_tail, error}, ... }
+  const [dbBuildStarting, setDbBuildStarting] = useState(false)
+  const [dbBuildError, setDbBuildError] = useState(null)
 
   // Sync local db path when settings are fetched from the server
   useEffect(() => {
@@ -85,6 +255,88 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
   }
 
+  // Poll download status while the panel is open AND any task is running.
+  useEffect(() => {
+    if (!dbBuildOpen) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await api.getDatabaseDownloadStatus()
+        if (cancelled) return
+        setDbBuildStatus(res.data.tasks || {})
+      } catch (e) {
+        // settings panel can stay open in multiuser mode where caller isn't admin
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dbBuildOpen])
+
+  const handleDbBuildStart = async () => {
+    setDbBuildError(null)
+    const databases = Object.entries(dbBuildPick).filter(([, v]) => v).map(([k]) => k)
+    if (!databases.length) {
+      setDbBuildError('Pick at least one database to build.')
+      return
+    }
+    setDbBuildStarting(true)
+    try {
+      const payload = { databases }
+      const minYear = parseInt(dbBuildMinYear, 10)
+      if (!Number.isNaN(minYear) && minYear >= 1900 && minYear <= 2100) {
+        payload.openalex_min_year = minYear
+      }
+      if (dbPathLocal && dbPathLocal.trim()) {
+        payload.directory = dbPathLocal.trim()
+      }
+      const res = await api.triggerDatabaseDownload(payload)
+      if (res.data?.directory && !dbPathLocal) {
+        setDbPathLocal(res.data.directory)
+      }
+      fetchSettings()
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message
+      setDbBuildError(detail || 'Failed to start')
+    } finally {
+      setDbBuildStarting(false)
+    }
+  }
+
+  const handleDbBuildCancel = async (dbName) => {
+    try {
+      await api.cancelDatabaseDownload(dbName)
+    } catch (e) {
+      // ignore — UI will reflect the next poll
+    }
+  }
+
+  // One-click "use default location" — backend resolves the canonical
+  // path under the per-user data dir, creates it, and persists the
+  // setting in a single round-trip.
+  const handleAutoCreate = async (setting) => {
+    try {
+      const res = await api.autoCreatePath(setting)
+      const path = res.data?.path
+      if (!path) return
+      if (setting === 'cache_dir') {
+        setCacheDirLocal(path)
+        setCacheDirError(null)
+        setCacheDirSuccess('Default cache directory created.')
+        updateSetting('cache_dir', path)
+      } else if (setting === 'db_path') {
+        setDbPathLocal(path)
+        setDbPathError(null)
+        setDbPathSuccess('Default database directory created.')
+      }
+      fetchSettings()
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Failed to auto-create'
+      if (setting === 'cache_dir') setCacheDirError(msg)
+      else setDbPathError(msg)
+    }
+  }
+
   const handleCacheDirSave = async () => {
     setCacheDirError(null)
     setCacheDirSuccess(null)
@@ -116,6 +368,15 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }).catch(() => {})
   }, [])
 
+  // Same for Paperclip — server tells us whether a local key is on file.
+  // In multi-user mode the endpoint returns browser-only/no server key,
+  // while useKeyStore tracks the user's browser-cached key.
+  useEffect(() => {
+    api.getPaperclipKeyStatus().then(res => {
+      setPcServerHasKey(res.data.has_key)
+    }).catch(() => {})
+  }, [])
+
   // Close on escape key
   useEffect(() => {
     const handleEscape = (e) => {
@@ -143,6 +404,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   }, [isSettingsOpen, closeSettings])
 
   if (!isSettingsOpen) return null
+
+  const notifyApiKeyStatusChanged = () => {
+    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch {}
+  }
 
   const handleSettingChange = (key, value) => {
     logger.info('SettingsPanel', `Updating setting ${key} to ${value}`)
@@ -178,6 +443,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         setSsServerHasKey(true)
         logger.info('SettingsPanel', 'SS API key saved to local database')
       }
+      notifyApiKeyStatusChanged()
       setSsIsValidating(false)
       setSsIsEditing(false)
       setSsApiKey('')
@@ -204,6 +470,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setSsIsEditing(false)
       setSsApiKey('')
       setSsError(null)
+      notifyApiKeyStatusChanged()
       logger.info('SettingsPanel', 'SS API key removed')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to delete SS key', err)
@@ -216,6 +483,266 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     setSsIsEditing(false)
     setSsApiKey('')
     setSsError(null)
+  }
+
+  // Paperclip key handlers — same shape as SS but no separate
+  // /validate endpoint (Paperclip has no public validate API).
+  const handlePcSave = async () => {
+    if (!pcApiKey.trim()) {
+      setPcError('API key cannot be empty')
+      return
+    }
+    try {
+      setPcIsSaving(true)
+      setPcError(null)
+      if (multiuser) {
+        setKey('paperclip', pcApiKey.trim())
+        setPcServerHasKey(false)
+      } else {
+        await api.setPaperclipKey(pcApiKey.trim())
+        deleteKey('paperclip')
+        setPcServerHasKey(true)
+      }
+      setPcIsEditing(false)
+      setPcApiKey('')
+      notifyApiKeyStatusChanged()
+      logger.info('SettingsPanel', 'Paperclip API key saved')
+    } catch (err) {
+      logger.error('SettingsPanel', 'Failed to save Paperclip key', err)
+      setPcError(err.response?.data?.detail || 'Failed to save API key')
+    } finally {
+      setPcIsSaving(false)
+    }
+  }
+
+  const handlePcDelete = async () => {
+    setPcIsSaving(true)
+    try {
+      if (multiuser) {
+        deleteKey('paperclip')
+      } else {
+        await api.deletePaperclipKey()
+        deleteKey('paperclip')
+      }
+      setPcServerHasKey(false)
+      setPcIsEditing(false)
+      setPcApiKey('')
+      setPcError(null)
+      notifyApiKeyStatusChanged()
+      logger.info('SettingsPanel', 'Paperclip API key removed')
+    } catch (err) {
+      logger.error('SettingsPanel', 'Failed to delete Paperclip key', err)
+    } finally {
+      setPcIsSaving(false)
+    }
+  }
+
+  const handlePcCancel = () => {
+    setPcIsEditing(false)
+    setPcApiKey('')
+    setPcError(null)
+  }
+
+  const renderAIDetectionSection = () => {
+    const ms = aiDetection.modelStatus
+    const backend = aiDetection.backend
+    const fmtMB = (b) => (b ? `${(b / (1024 * 1024)).toFixed(0)} MB` : '')
+    const aiKeyName = aiDetection.service // 'pangram' | 'gptzero'
+    const accent = 'var(--color-accent, #3b82f6)'
+    return (
+      <div className="space-y-4">
+        {/* Permanent honesty banner — warning token pair so it flips between
+            light/dark, matching AIDetectionPanel's medium-band styling. */}
+        <div
+          className="rounded-lg p-3 text-sm border"
+          style={{ borderColor: 'var(--color-warning)', backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-text-secondary)' }}
+        >
+          <strong style={{ color: 'var(--color-text-primary)' }}>Read before enabling.</strong> AI-text
+          detection is unreliable on academic, technical, and non-native-English writing, and on
+          human text polished with AI. Results are an advisory self-check — <strong>never</strong> proof
+          of misconduct, and never a basis for an accusation, grade, or decision.
+        </div>
+
+        {/* Enable toggle */}
+        <label className="flex items-center justify-between gap-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <span>
+            <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Detect AI-generated text</span>
+            <span className="block text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              When on, each checked article also gets an AI-likelihood band. Off by default.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={aiDetection.enabled}
+            onChange={(e) => aiDetection.setEnabled(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }}
+          />
+        </label>
+
+        {/* Engine selector */}
+        <div className="py-1">
+          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Detection engine</div>
+          {[
+            ['local', 'Local model (offline, calibrated)', 'desklib DeBERTa — runs on your machine after a one-time download. Recommended for reproducibility.'],
+            ['llm-judge', 'LLM judge (uses hallucination-check LLM)', 'Reuses the same provider, API key, and model selected for hallucination checks. No download, but scores are uncalibrated.'],
+            ['api', 'External API (Pangram / GPTZero)', 'Sends manuscript text to a third-party service. Requires a key and explicit consent.'],
+          ].map(([id, label, desc]) => (
+            <label key={id} className="flex items-start gap-2 py-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="ai-detection-backend"
+                checked={backend === id}
+                onChange={() => aiDetection.setBackend(id)}
+                style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+              />
+              <span>
+                <span style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+                <span className="block text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {/* Local model management */}
+        {backend === 'local' && (
+          <div className="rounded-lg p-3 border" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Local detection model</div>
+                <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  {ms == null && 'Checking status…'}
+                  {ms && ms.installed && `Installed${ms.size_bytes ? ` · ${fmtMB(ms.size_bytes)}` : ''} · ${ms.repo}`}
+                  {ms && !ms.installed && ms.deps_available && 'Not downloaded yet.'}
+                  {ms && !ms.installed && !ms.deps_available &&
+                    'Runtime not installed. Install onnxruntime + transformers (or torch + transformers), or use another engine.'}
+                </div>
+                {aiDetection.modelError && (
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.modelError}</div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {ms && !ms.installed && (
+                  <button
+                    type="button"
+                    disabled={aiDetection.modelBusy || (ms && !ms.deps_available)}
+                    onClick={() => aiDetection.downloadModel()}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                    style={{ backgroundColor: accent, color: 'white', opacity: (aiDetection.modelBusy || !ms.deps_available) ? 0.5 : 1, cursor: (aiDetection.modelBusy || !ms.deps_available) ? 'not-allowed' : 'pointer' }}
+                  >
+                    {aiDetection.modelBusy ? 'Downloading…' : 'Download model'}
+                  </button>
+                )}
+                {ms && ms.installed && (
+                  <button
+                    type="button"
+                    disabled={aiDetection.modelBusy}
+                    onClick={() => aiDetection.deleteModel()}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', opacity: aiDetection.modelBusy ? 0.5 : 1, cursor: aiDetection.modelBusy ? 'not-allowed' : 'pointer' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* LLM-judge note */}
+        {backend === 'llm-judge' && (
+          <div className="text-sm rounded-lg p-3 border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            Uses the same provider, API key, and model selected for hallucination checks under{' '}
+            <strong>LLM</strong> / <strong>API Keys</strong>. No extra setup needed.
+          </div>
+        )}
+
+        {/* External API config */}
+        {backend === 'api' && (
+          <div className="rounded-lg p-3 border space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Service</div>
+              <select
+                value={aiDetection.service}
+                onChange={(e) => aiDetection.setService(e.target.value)}
+                className="px-2 py-1.5 rounded border text-sm"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+              >
+                <option value="pangram">Pangram</option>
+                <option value="gptzero">GPTZero</option>
+              </select>
+            </div>
+            <div>
+              <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>API key</div>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={aiDetKey}
+                  placeholder={hasKey(aiKeyName) ? '•••••••• (saved)' : `${aiKeyName} API key`}
+                  onChange={(e) => setAiDetKey(e.target.value)}
+                  className="flex-1 px-2 py-1.5 rounded border text-sm"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+                />
+                <button
+                  type="button"
+                  disabled={!aiDetKey.trim()}
+                  onClick={() => { if (aiDetKey.trim()) { setKey(aiKeyName, aiDetKey.trim()); setAiDetKey('') } }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{ backgroundColor: accent, color: 'white', opacity: aiDetKey.trim() ? 1 : 0.5, cursor: aiDetKey.trim() ? 'pointer' : 'not-allowed' }}
+                >
+                  Save
+                </button>
+                {hasKey(aiKeyName) && (
+                  <button
+                    type="button"
+                    onClick={() => deleteKey(aiKeyName)}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              <input
+                type="checkbox"
+                checked={aiDetection.consent}
+                onChange={(e) => aiDetection.setConsent(e.target.checked)}
+                style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+              />
+              <span>
+                I understand the manuscript text (which may be unpublished) will be sent to{' '}
+                <strong>{aiDetection.service}</strong>, a third-party service, for analysis.
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Attribution for the open-source detectors / services used. */}
+        <div className="pt-2 mt-1 border-t text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+          <div className="mb-1">Detection sources & credits:</div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {[
+              ['desklib/ai-text-detector (local model, MIT)', 'https://huggingface.co/desklib/ai-text-detector-v1.01'],
+              ['harshaneel/humanize (LLM-judge rubric, MIT)', 'https://github.com/harshaneel/humanize'],
+              ['distil-labs/distil-ai-slop-detector', 'https://github.com/distil-labs/distil-ai-slop-detector'],
+              ['Pangram', 'https://www.pangram.com'],
+              ['GPTZero', 'https://gptzero.me'],
+            ].map(([label, url]) => (
+              <button
+                key={url}
+                type="button"
+                onClick={() => openExternal(url)}
+                className="underline"
+                style={{ color: 'var(--color-accent, #3b82f6)' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const navItems = [
@@ -236,10 +763,70 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
       </svg>
     )},
+    { id: 'AI Detection', label: 'AI Detection', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+      </svg>
+    )},
   ]
 
   const renderGeneralSection = () => (
     <div className="space-y-1">
+      {/* App updates — only meaningful inside the Tauri desktop app */}
+      {isTauri() && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div>
+              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>App updates</div>
+              <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {appVersion ? `Currently on v${appVersion}` : 'Check the manifest for a newer signed build.'}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCheckForUpdates}
+                disabled={updateChecking}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                style={{
+                  backgroundColor: 'var(--color-accent, #3b82f6)',
+                  color: 'white',
+                  opacity: updateChecking ? 0.6 : 1,
+                }}
+                type="button"
+              >
+                {updateChecking ? 'Checking…' : 'Check for updates'}
+              </button>
+              <button
+                onClick={handleShowReleaseNotes}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                type="button"
+              >
+                Show changes
+              </button>
+            </div>
+          </div>
+          {updateStatus && (
+            <div
+              className="text-xs"
+              style={{
+                color: updateStatus.kind === 'ok'
+                  ? 'var(--color-success, #22c55e)'
+                  : updateStatus.kind === 'error'
+                    ? 'var(--color-error, #ef4444)'
+                    : 'var(--color-text-secondary)',
+              }}
+            >
+              {updateStatus.text}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Theme Setting */}
       <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>
@@ -272,6 +859,46 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </svg>
         </div>
       </div>
+
+      {/* Reference Extraction Mode */}
+      {settings.extraction_mode && (
+        <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex-1 mr-3">
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              {settings.extraction_mode.label || 'Reference Extraction'}
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {settings.extraction_mode.description}
+            </div>
+          </div>
+          <div className="relative">
+            <select
+              value={settings.extraction_mode.value || 'cascade'}
+              onChange={(e) => handleSettingChange('extraction_mode', e.target.value)}
+              className="appearance-none px-4 py-2 pr-8 rounded-lg border text-sm cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+                colorScheme: 'light dark',
+                minWidth: '180px',
+              }}
+            >
+              <option value="cascade" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>Cascade (cheap-first)</option>
+              <option value="llm-only" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>LLM only</option>
+            </select>
+            <svg
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+      )}
 
       {/* Concurrency Setting (single-user only) */}
       {!multiuser && (
@@ -338,6 +965,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             >
               {dbPathSaving ? '...' : 'Save'}
             </button>
+            <button
+              onClick={() => handleAutoCreate('db_path')}
+              disabled={dbPathSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default database directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
+            </button>
           </div>
           {dbPathError && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{dbPathError}</div>
@@ -348,6 +989,161 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           {settings.db_path?.value && settings.db_path?.current_snapshot && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
               Current Semantic Scholar snapshot: {settings.db_path.current_snapshot}
+            </div>
+          )}
+
+          {/* Build local databases — only useful in the single-user desktop
+              flow, so it sits inside the same single-user-gated section. */}
+          <div className="mt-3">
+            <button
+              onClick={() => setDbBuildOpen((v) => !v)}
+              className="text-xs underline"
+              style={{ color: 'var(--color-accent, #3b82f6)' }}
+              type="button"
+            >
+              {dbBuildOpen ? 'Hide local database builder' : 'Build local databases (Semantic Scholar, DBLP, OpenAlex)'}
+            </button>
+          </div>
+
+          {dbBuildOpen && (
+            <div
+              className="mt-3 p-3 rounded-lg border"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
+            >
+              <div className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                Runs the bundled <code>local_database_updater</code> against the directory above (or
+                a default under the app data dir if blank). First builds can be large (multi-GB) and
+                run in the background — close this panel anytime, status persists.
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                {[
+                  ['s2', 'Semantic Scholar'],
+                  ['dblp', 'DBLP'],
+                  ['openalex', 'OpenAlex'],
+                ].map(([key, label]) => {
+                  const state = dbBuildStatus[key]
+                  return (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 text-sm"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!dbBuildPick[key]}
+                        onChange={(e) => setDbBuildPick({ ...dbBuildPick, [key]: e.target.checked })}
+                      />
+                      <span className="flex-1">{label}</span>
+                      {state && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor:
+                              state.status === 'success' ? 'var(--color-success, #22c55e)' :
+                              state.status === 'failed' ? 'var(--color-error, #ef4444)' :
+                              state.status === 'cancelled' ? 'var(--color-warning, #f59e0b)' :
+                              'var(--color-accent, #3b82f6)',
+                            color: 'white',
+                          }}
+                        >
+                          {state.status}
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 mb-3">
+                <label className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  OpenAlex minimum year
+                </label>
+                <input
+                  type="number"
+                  min="1900"
+                  max="2100"
+                  step="1"
+                  value={dbBuildMinYear}
+                  onChange={(e) => setDbBuildMinYear(e.target.value)}
+                  className="px-2 py-1 rounded border text-sm"
+                  style={{
+                    width: '90px',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                />
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  (caps OpenAlex partitions to keep the dump manageable)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDbBuildStart}
+                  disabled={dbBuildStarting}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-accent, #3b82f6)',
+                    color: 'white',
+                    opacity: dbBuildStarting ? 0.6 : 1,
+                  }}
+                  type="button"
+                >
+                  {dbBuildStarting ? 'Starting…' : 'Start build'}
+                </button>
+                {Object.entries(dbBuildStatus).some(([, s]) => s.status === 'running') && (
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    Building in background. Cancel a job from its tag above —
+                    {' '}
+                    {Object.entries(dbBuildStatus)
+                      .filter(([, s]) => s.status === 'running')
+                      .map(([k]) => (
+                        <button
+                          key={k}
+                          onClick={() => handleDbBuildCancel(k)}
+                          className="underline ml-1"
+                          style={{ color: 'var(--color-accent, #3b82f6)' }}
+                          type="button"
+                        >
+                          cancel {k}
+                        </button>
+                      ))}
+                  </span>
+                )}
+              </div>
+
+              {dbBuildError && (
+                <div className="text-xs mt-2" style={{ color: 'var(--color-error, #ef4444)' }}>
+                  {dbBuildError}
+                </div>
+              )}
+
+              {Object.entries(dbBuildStatus).some(([, s]) => s.log_tail) && (
+                <details className="mt-3">
+                  <summary
+                    className="text-xs cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    Show last log lines per database
+                  </summary>
+                  {Object.entries(dbBuildStatus).map(([k, s]) =>
+                    s.log_tail ? (
+                      <div key={k} className="mt-2">
+                        <div className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{k}</div>
+                        <pre
+                          className="text-xs p-2 rounded overflow-x-auto"
+                          style={{
+                            backgroundColor: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >{s.log_tail}</pre>
+                      </div>
+                    ) : null
+                  )}
+                </details>
+              )}
             </div>
           )}
         </div>
@@ -390,6 +1186,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             >
               {cacheDirSaving ? '...' : 'Save'}
             </button>
+            <button
+              onClick={() => handleAutoCreate('cache_dir')}
+              disabled={cacheDirSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default cache directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
+            </button>
           </div>
           {cacheDirError && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{cacheDirError}</div>
@@ -399,6 +1209,73 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
         </div>
       )}
+
+      {/* Diagnostics — Settings → General → bottom. Builds a sanitized
+          JSON report (env, backend health, settings, recent console)
+          that the user can paste into a GitHub issue. */}
+      <div className="py-3" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="mb-2">
+          <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Diagnostics</div>
+          <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            Build a sanitized report of the running environment for bug reports. API keys, secrets, and paths are redacted before display.
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleBuildDiagnostics}
+            disabled={diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium"
+            style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: 'white', opacity: diagBuilding ? 0.6 : 1 }}
+            type="button"
+          >
+            {diagBuilding ? 'Collecting…' : 'Generate report'}
+          </button>
+          <button
+            onClick={handleCopyDiagnostics}
+            disabled={!diagReport || diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagReport && !diagBuilding ? 1 : 0.5 }}
+            type="button"
+          >
+            {diagCopied ? '✓ Copied' : 'Copy JSON'}
+          </button>
+          <button
+            onClick={handleDownloadDiagnostics}
+            disabled={!diagReport || diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagReport && !diagBuilding ? 1 : 0.5 }}
+            type="button"
+          >
+            Download
+          </button>
+          <button
+            onClick={handleOpenIssueWithDiagnostics}
+            disabled={diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagBuilding ? 0.5 : 1 }}
+            type="button"
+            title="Open a new GitHub issue with the report prefilled"
+          >
+            Open issue with report
+          </button>
+        </div>
+        {diagReport && (
+          <details className="mt-3">
+            <summary className="text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+              Preview report (click to expand)
+            </summary>
+            <pre
+              className="text-[11px] p-2 mt-2 rounded overflow-auto"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                color: 'var(--color-text-secondary)',
+                maxHeight: '300px',
+                border: '1px solid var(--color-border)',
+              }}
+            >{diagnosticsToText(diagReport)}</pre>
+          </details>
+        )}
+      </div>
     </div>
   )
 
@@ -535,6 +1412,104 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </div>
         )}
       </div>
+
+        {/* Paperclip API Key — OPTIONAL biomedical full-text +
+          arXiv secondary verification tier. In multi-user mode the
+          key stays in the browser cache and is sent per request; in
+          single-user mode it is stored locally and restored on restart. */}
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              Paperclip API Key
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Optional. Activates a secondary biomedical full-text + arXiv lookup tier
+              (PMC, bioRxiv, medRxiv, arXiv) on top of OpenAlex / CrossRef / Semantic
+              Scholar. Get a key at{' '}
+              <a
+                href="https://paperclip.gxl.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--color-link, #3b82f6)' }}
+              >paperclip.gxl.ai/keys</a>.
+              {' '}The next check picks it up automatically.
+              {multiuser && ' Stored in this browser only.'}
+            </div>
+          </div>
+          {!pcIsEditing && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPcIsEditing(true)}
+                className="text-xs px-2 py-1 rounded cursor-pointer"
+                style={{ color: 'var(--color-accent)' }}
+              >
+                {pcHasKey ? 'Edit' : 'Set'}
+              </button>
+              {pcHasKey && (
+                <button
+                  onClick={handlePcDelete}
+                  disabled={pcIsSaving}
+                  className="text-xs px-2 py-1 rounded cursor-pointer"
+                  style={{ color: 'var(--color-error)' }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {pcIsEditing && (
+          <div className="mt-2 space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={pcApiKey}
+                onChange={(e) => setPcApiKey(e.target.value)}
+                placeholder="Enter Paperclip API key…"
+                className="flex-1 px-2 py-1.5 text-sm rounded border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: pcError ? 'var(--color-error)' : 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                disabled={pcIsSaving}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && pcApiKey.trim()) handlePcSave()
+                  if (e.key === 'Escape') handlePcCancel()
+                }}
+              />
+              <button
+                onClick={handlePcSave}
+                disabled={pcIsSaving || !pcApiKey.trim()}
+                className="px-3 py-1.5 text-xs rounded cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'white',
+                  opacity: pcIsSaving || !pcApiKey.trim() ? 0.5 : 1,
+                }}
+              >
+                {pcIsSaving ? '…' : 'Save'}
+              </button>
+              <button
+                onClick={handlePcCancel}
+                disabled={pcIsSaving}
+                className="px-3 py-1.5 text-xs rounded border cursor-pointer"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {pcError && (
+              <div className="text-xs" style={{ color: 'var(--color-error)' }}>
+                {pcError}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 
@@ -591,8 +1566,15 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             ))}
           </nav>
 
-          <div className="px-4 mt-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Version {version || '—'}
+          <div className="px-4 mt-6 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+            {appVersion && (
+              <div>
+                Desktop <span style={{ color: 'var(--color-text-secondary)' }}>v{appVersion}</span>
+              </div>
+            )}
+            <div>
+              {appVersion ? 'Engine' : 'Version'} {version || '—'}
+            </div>
           </div>
         </div>
 
@@ -619,6 +1601,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 {activeSection === 'General' && renderGeneralSection()}
                 {activeSection === 'LLM' && renderLLMSection()}
                 {activeSection === 'API Keys' && renderAPIKeysSection()}
+                {activeSection === 'AI Detection' && renderAIDetectionSection()}
               </>
             )}
           </div>

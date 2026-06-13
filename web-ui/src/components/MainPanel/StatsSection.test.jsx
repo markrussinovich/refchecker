@@ -85,6 +85,45 @@ describe('StatsSection warning count excludes refs that also have errors', () =>
 })
 
 describe('StatsSection hallucination count', () => {
+  it('uses backend processed_refs instead of deriving progress from status buckets', () => {
+    const references = [
+      ...Array.from({ length: 24 }, () => makeRef('verified')),
+      ...Array.from({ length: 14 }, () => makeRef('error', {
+        errors: [{ error_type: 'author', message: 'author mismatch' }],
+      })),
+      ...Array.from({ length: 8 }, () => makeRef('warning', {
+        warnings: [{ message: 'venue differs' }],
+      })),
+      ...Array.from({ length: 4 }, () => makeRef('unverified', {
+        errors: [{ error_type: 'unverified', message: 'not found' }],
+        hallucination_check_pending: true,
+      })),
+    ]
+
+    render(
+      <StatsSection
+        stats={{
+          total_refs: 59,
+          processed_refs: 50,
+          refs_verified: 24,
+          refs_with_errors: 14,
+          refs_with_warnings_only: 8,
+          unverified_count: 4,
+          hallucination_count: 0,
+        }}
+        isComplete={false}
+        references={references}
+        paperTitle="Test Paper"
+        paperSource="https://example.com/paper"
+      />
+    )
+
+    expect(screen.getByText('50/59 checked')).toBeTruthy()
+    expect(screen.getByText('of 50')).toBeTruthy()
+    expect(screen.queryByTitle(/could not be verified/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /unverified/i })).toBeNull()
+  })
+
   it('does not count LLM-found matching metadata as hallucinated', () => {
     const references = [
       makeRef('hallucination', {

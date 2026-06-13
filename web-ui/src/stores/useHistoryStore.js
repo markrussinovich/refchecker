@@ -3,6 +3,8 @@ import { logger } from '../utils/logger'
 import * as api from '../utils/api'
 import { useCheckStore } from './useCheckStore'
 
+const DETAIL_CACHE_TTL_MS = 30 * 1000
+
 /**
  * Store for check history management
  */
@@ -11,8 +13,18 @@ export const useHistoryStore = create((set, get) => ({
   history: [],
   selectedCheckId: null,
   selectedCheck: null,
+  // Batch summary selection (v0.7.45). When the user clicks a Batch
+  // row header in the sidebar, this gets set and the MainPanel
+  // renders BatchSummaryView instead of the normal check view.
+  // Clicking a child paper in the batch sets selectedCheckId AND
+  // remembers selectedBatchId so the per-paper view can render a
+  // "← Back to batch" link.
+  selectedBatchId: null,
+  selectedBatch: null, // { batch_id, batch_label?, total, checks: [...] }
+  isLoadingBatch: false,
   isLoading: false,
   isLoadingDetail: false,
+  detailCache: {}, // checkId -> { check, fetchedAt }
   error: null,
   placeholderAdded: false, // tracks whether we've already injected the placeholder automatically
   scrollTrigger: 0, // incremented to trigger scroll-to-top in HistoryList
@@ -67,6 +79,7 @@ export const useHistoryStore = create((set, get) => ({
               refs_verified: detail.refs_verified || verifiedCount,
               progress_percent: 100,
             },
+            aiDetection: detail.ai_detection || null,
             completedCheckId: detail.status === 'completed' ? detail.id : null,
           })
         } catch (hydrateErr) {
@@ -83,9 +96,10 @@ export const useHistoryStore = create((set, get) => ({
         try {
           const detail = (await api.getCheckDetail(item.id)).data
           
-          // Calculate processed_refs from results array (completed checks have status != pending/checking)
+          // Prefer backend progress; processed count is pipeline progress, not a
+          // status bucket. The fallback is only for older API responses.
           const results = Array.isArray(detail.results) ? detail.results : []
-          const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+          const processedRefs = detail.processed_refs ?? results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
           
           // Update the item with full progress info
           historyWorking = historyWorking.map(h => h.id === item.id
@@ -276,9 +290,10 @@ export const useHistoryStore = create((set, get) => ({
           try {
             const detail = (await api.getCheckDetail(item.id)).data
             
-            // Calculate processed_refs from results array
+            // Prefer backend progress; processed count is pipeline progress, not
+            // a status bucket. The fallback is only for older API responses.
             const results = Array.isArray(detail.results) ? detail.results : []
-            const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+            const processedRefs = detail.processed_refs ?? results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
             
             // Update the item with full progress info
             historyWorking = historyWorking.map(h => h.id === item.id
@@ -397,15 +412,52 @@ export const useHistoryStore = create((set, get) => ({
     }, 5000)
   },
 
-  selectCheck: async (id) => {
+  selectCheck: async (id, opts) => {
+    const force = !!(opts && opts.force)
     // Special placeholder for starting a new check without hitting the API
     if (id === -1) {
       set({ selectedCheckId: -1, selectedCheck: null, isLoadingDetail: false, error: null })
       return
     }
 
-    // Check if we already have in-memory data for an in-progress check (from WebSocket updates)
-    const existingHistoryItem = get().history.find(h => h.id === id)
+    const stateSnapshot = get()
+    const existingHistoryItem = stateSnapshot.history.find(h => h.id === id)
+    const cachedDetail = stateSnapshot.detailCache[id]
+    const cacheIsFresh = !!(cachedDetail && (Date.now() - cachedDetail.fetchedAt) < DETAIL_CACHE_TTL_MS)
+
+    // v0.7.54 (per full-stack review): clear selectedBatchId if the
+    // newly-selected check doesn't belong to the same batch. Without
+    // this the "← Back to batch" link from MainPanel leaked onto
+    // unrelated checks after the user navigated away from a batch
+    // child via the sidebar.
+    const stale = stateSnapshot.selectedBatchId
+    if (stale) {
+      // v0.7.56 (per full-stack review round 3): only clear when we
+      // KNOW the target's batch_id differs. If existingHistoryItem is
+      // undefined (cold-load, history still hydrating), don't clear —
+      // a fast click on a batch child during boot was wrongly nulling
+      // the batch context.
+      if (existingHistoryItem) {
+        const targetBatchId = existingHistoryItem.batch_id || null
+        if (targetBatchId !== stale) {
+          set({ selectedBatchId: null, selectedBatch: null })
+        }
+      }
+    }
+
+    // If user re-selects the currently shown check, avoid unnecessary work —
+    // unless caller forces a refetch (e.g. after Apply Fix / Re-verify, where
+    // the live results must update the badge + summary tiles).
+    if (!force && stateSnapshot.selectedCheckId === id && stateSnapshot.selectedCheck && !stateSnapshot.isLoadingDetail) {
+      return
+    }
+
+    // Fast-path for recently loaded completed/cancelled/error checks.
+    if (!force && cacheIsFresh && cachedDetail?.check?.status !== 'in_progress') {
+      set({ selectedCheckId: id, selectedCheck: cachedDetail.check, isLoadingDetail: false, error: null })
+      return
+    }
+
     // If we have an in-progress check with results in memory, use that directly without API call
     if (existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.results?.length > 0) {
       set({ 
@@ -415,6 +467,27 @@ export const useHistoryStore = create((set, get) => ({
         error: null 
       })
       return
+    }
+
+    // Show whatever local data we have immediately to reduce perceived selection latency.
+    if (existingHistoryItem) {
+      const hasLocalResults = Array.isArray(existingHistoryItem.results) && existingHistoryItem.results.length > 0
+      set({
+        selectedCheckId: id,
+        selectedCheck: existingHistoryItem,
+        isLoadingDetail: !hasLocalResults,
+        error: null,
+      })
+
+      // Completed checks with local results are normally already fully
+      // viewable — skip the API roundtrip. But `force` callers (Remove,
+      // Restore, Apply Fix, Re-verify) need the *server's* fresh results
+      // to land so the HealthBadge and Summary counters track the
+      // mutation; without this short-circuit bypass, the optimistic UI
+      // update gets reverted by stale local data on the next reload.
+      if (!force && hasLocalResults && existingHistoryItem.status !== 'in_progress') {
+        return
+      }
     }
 
     // Set selectedCheckId immediately so UI can react
@@ -482,10 +555,20 @@ export const useHistoryStore = create((set, get) => ({
           selectedCheck: mergedSelectedCheck,
           isLoadingDetail: false,
           selectedCheckId: id,
+          detailCache: {
+            ...state.detailCache,
+            [id]: { check: mergedSelectedCheck, fetchedAt: Date.now() },
+          },
           history: state.history.map(h =>
             h.id === id
               ? keepExisting
-                ? h  // Keep existing history item as-is
+                ? {
+                    ...h,
+                    // Keep fresher in-memory status/progress, but ensure results are present
+                    // so sidebar counts can be derived with the same logic as Summary.
+                    results: h.results?.length ? h.results : (useExistingResults ? existingResults : fetchedResults),
+                    paper_title: check.paper_title || h.paper_title,
+                  }
                 : {
                     ...h,
                     status: check.status,
@@ -498,6 +581,7 @@ export const useHistoryStore = create((set, get) => ({
                     hallucination_count: check.hallucination_count || 0,
                     refs_with_errors: check.refs_with_errors,
                     refs_with_warnings_only: check.refs_with_warnings_only,
+                    results: useExistingResults ? existingResults : fetchedResults,
                     paper_title: check.paper_title || h.paper_title,
                   }
               : h
@@ -516,7 +600,125 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   clearSelection: () => {
+    set({ selectedCheckId: null, selectedCheck: null, selectedBatchId: null, selectedBatch: null })
+  },
+
+  // Select a batch — opens the BatchSummaryView in MainPanel. Also
+  // fetches the batch detail so the view can render immediately.
+  selectBatch: async (batchId) => {
+    if (!batchId) {
+      set({ selectedBatchId: null, selectedBatch: null })
+      return
+    }
+    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true })
+    try {
+      const resp = await api.getBatch(batchId)
+      // v0.7.55 (per full-stack review round 2): only commit the
+      // result if `selectedBatchId` is still THIS batch. Without
+      // this guard a rapid sidebar click between selectBatch and
+      // its await landed the resolved batch into `selectedBatch`
+      // even after `selectCheck` had nulled `selectedBatchId`,
+      // leaving an orphan data object that the UI never showed.
+      if (get().selectedBatchId === batchId) {
+        set({ selectedBatch: resp.data, isLoadingBatch: false })
+      } else {
+        set({ isLoadingBatch: false })
+      }
+    } catch (e) {
+      logger.error('HistoryStore', 'selectBatch failed', e)
+      // v0.7.56 (per full-stack review round 3): same race-token
+      // guard on the error path. A failed fetch that resolves AFTER
+      // the user navigated away should NOT surface its error toast
+      // onto the unrelated view they're now on.
+      if (get().selectedBatchId === batchId) {
+        set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+      } else {
+        set({ isLoadingBatch: false })
+      }
+    }
+  },
+
+  // Open a child of the currently-selected batch. Keeps selectedBatchId
+  // set so the per-paper view can render "← Back to batch".
+  openBatchChild: async (checkId) => {
+    const currentBatchId = get().selectedBatchId
+    // Preserve the batch context — we want selectedBatchId to stick
+    // so the BatchBackLink component knows where to navigate back to.
+    set({ selectedCheckId: checkId })
+    if (currentBatchId) {
+      // Re-fetch the check detail through the normal selectCheck flow
+      // but DON'T clear selectedBatchId.
+      try {
+        const detail = (await api.getCheckDetail(checkId)).data
+        const fetchedAt = Date.now()
+        // v0.7.56 (per full-stack review round 3): same race-token
+        // guard as selectBatch — a backToBatch click while this
+        // getCheckDetail was in flight would otherwise write the
+        // resolved detail into selectedCheck even though
+        // selectedCheckId has been nulled by backToBatch, leaving
+        // orphan data the UI might still render against.
+        if (get().selectedCheckId === checkId) {
+          set(state => ({
+            selectedCheck: detail,
+            detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
+          }))
+        } else {
+          // Cache the fetched detail anyway so a return click is fast,
+          // but don't overwrite the now-irrelevant selectedCheck.
+          set(state => ({
+            detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
+          }))
+        }
+      } catch (e) {
+        logger.error('HistoryStore', 'openBatchChild detail fetch failed', e)
+      }
+    } else {
+      get().selectCheck(checkId)
+    }
+  },
+
+  // Return to the batch summary from a child paper.
+  backToBatch: () => {
+    const batchId = get().selectedBatchId
+    if (!batchId) return
     set({ selectedCheckId: null, selectedCheck: null })
+    // Re-fetch the batch so progress counters reflect any updates
+    // since the user drilled in.
+    get().selectBatch(batchId)
+  },
+
+  /**
+   * Optimistically mark a reference as "verified" in the currently
+   * selected check, merging the verifier's `corrected_reference` into
+   * the stored metadata and clearing the existing errors/warnings.
+   * Used by Apply Fix so the health-badge moves immediately, before
+   * the slower /verify roundtrip lands. The /verify call afterwards
+   * is the authoritative update; this just keeps the UI snappy.
+   */
+  optimisticApplyCorrection: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    const findHit = (r, i) => (
+      String(r.id ?? '') === idStr ||
+      String(r.index ?? '') === idStr ||
+      String(i) === idStr
+    )
+    const nextResults = selectedCheck.results.map((r, i) => {
+      if (!findHit(r, i)) return r
+      const corrected = r.corrected_reference || {}
+      const merged = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
+          merged[k] = corrected[k]
+        }
+      }
+      merged.status = 'verified'
+      merged.errors = []
+      merged.warnings = []
+      return merged
+    })
+    set({ selectedCheck: { ...selectedCheck, results: nextResults } })
   },
 
   updateLabel: async (id, label) => {
@@ -546,10 +748,26 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryProgress called with no id')
       return
     }
-    set(state => ({
-      history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
-      selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
-    }))
+    const cleanPayload = Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined)
+    )
+    set(state => {
+      const nextCache = { ...state.detailCache }
+      // Invalidate cached detail when progress/status changes for this check.
+      if (nextCache[id] && (
+        cleanPayload.status !== undefined ||
+        cleanPayload.processed_refs !== undefined ||
+        cleanPayload.results !== undefined
+      )) {
+        delete nextCache[id]
+      }
+
+      return {
+        history: state.history.map(h => h.id === id ? { ...h, ...cleanPayload } : h),
+        selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...cleanPayload } : state.selectedCheck,
+        detailCache: nextCache,
+      }
+    })
   },
 
   // Update a single reference result within a history item (for concurrent session updates)
@@ -558,26 +776,26 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryReference called with invalid args', { checkId, refIndex })
       return
     }
+
+    const upsertReference = (item) => {
+      if (!item) return item
+      const size = Math.max(item.results?.length || 0, item.total_refs || 0, refIndex + 1)
+      const newResults = Array.from({ length: size }, (_, index) => item.results?.[index] || { index, status: 'pending' })
+      newResults[refIndex] = { ...newResults[refIndex], ...refData, index: refIndex }
+      return { ...item, results: newResults }
+    }
     
     set(state => {
       // Update in history array
       const newHistory = state.history.map(h => {
         if (h.id !== checkId) return h
-        if (!h.results || refIndex >= h.results.length) return h
-        
-        const newResults = [...h.results]
-        newResults[refIndex] = { ...newResults[refIndex], ...refData }
-        return { ...h, results: newResults }
+        return upsertReference(h)
       })
       
       // Update in selectedCheck if it matches
       let newSelectedCheck = state.selectedCheck
-      if (state.selectedCheck?.id === checkId && state.selectedCheck?.results) {
-        const newResults = [...state.selectedCheck.results]
-        if (refIndex < newResults.length) {
-          newResults[refIndex] = { ...newResults[refIndex], ...refData }
-          newSelectedCheck = { ...state.selectedCheck, results: newResults }
-        }
+      if (state.selectedCheck?.id === checkId) {
+        newSelectedCheck = upsertReference(state.selectedCheck)
       }
       
       return { history: newHistory, selectedCheck: newSelectedCheck }

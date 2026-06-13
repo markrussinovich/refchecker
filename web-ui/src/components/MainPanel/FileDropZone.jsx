@@ -53,7 +53,7 @@ export default function FileDropZone({
           ref={inputRef}
           type="file"
           onChange={onFileSelect}
-          accept=".pdf,.txt,.tex,.latex,.bib"
+          accept=".pdf,.txt,.tex,.latex,.bib,.bbl,.docx,.odt,.rtf,.md,.markdown,.html,.htm"
           className="hidden"
           disabled={disabled}
         />
@@ -120,7 +120,7 @@ export default function FileDropZone({
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              PDF, TXT, TEX, LaTeX, or BibTeX (max 200MB)
+              PDF · DOCX · ODT · RTF · TXT · TEX · LaTeX · BibTeX (.bib / .bbl) · Markdown · HTML (max 200MB)
             </p>
           </div>
         )}

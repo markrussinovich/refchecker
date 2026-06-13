@@ -10,7 +10,9 @@ import { logger } from '../../utils/logger'
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
 const DEFAULT_WIDTH = 280
+const COLLAPSED_WIDTH = 48
 const STORAGE_KEY = 'refchecker-sidebar-width'
+const COLLAPSED_KEY = 'refchecker-sidebar-collapsed'
 
 /**
  * Sidebar component containing LLM selector and history list.
@@ -30,6 +32,20 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   })
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef(null)
+  // Sidebar collapsed state. When true, the sidebar shrinks to a thin
+  // rail (just the expand button) so the user gets max horizontal room
+  // for the main content. Persisted to localStorage so the choice
+  // survives reloads. Desktop-only — mobile keeps the drawer.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false }
+  })
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(c => {
+      const next = !c
+      try { localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0') } catch { /* quota */ }
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     // Don't fetch configs until auth check has finished
@@ -82,7 +98,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const sidebarContent = (
     <>
       {/* New Refcheck button - fixed at top */}
-      <div className="flex-shrink-0 px-3 py-3">
+      <div className="flex-shrink-0 pl-3 pr-11 py-3">
         <button 
           onClick={() => {
             ensureNewRefcheckItem()
@@ -163,26 +179,66 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside 
+      <aside
         ref={sidebarRef}
         className="sidebar-desktop flex flex-col h-full relative"
-        style={{ 
-          width: `${width}px`,
-          minWidth: `${MIN_WIDTH}px`,
-          maxWidth: `${MAX_WIDTH}px`,
+        style={{
+          width: collapsed ? `${COLLAPSED_WIDTH}px` : `${width}px`,
+          minWidth: collapsed ? `${COLLAPSED_WIDTH}px` : `${MIN_WIDTH}px`,
+          maxWidth: collapsed ? `${COLLAPSED_WIDTH}px` : `${MAX_WIDTH}px`,
           backgroundColor: 'var(--color-bg-secondary)',
+          transition: 'width 160ms ease, min-width 160ms ease, max-width 160ms ease',
         }}
       >
-        {sidebarContent}
-
-        {/* Resize handle (desktop only) */}
-        <div
-          onMouseDown={startResizing}
-          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
+        {/* Collapse / expand toggle — compact icon control, always visible
+            so the user can hide or restore the panel from either state. */}
+        <button
+          onClick={toggleCollapsed}
+          className="sidebar-toggle absolute top-3 flex items-center justify-center rounded-md cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
           style={{
-            backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+            right: collapsed ? '50%' : '12px',
+            transform: collapsed ? 'translateX(50%)' : 'none',
+            width: 30,
+            height: 30,
+            color: 'var(--color-text-secondary)',
+            background: 'transparent',
           }}
-        />
+          title={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
+          aria-pressed={collapsed}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-5 h-5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.8}
+          >
+            <rect x="4" y="5" width="16" height="14" rx="2" />
+            <path strokeLinecap="round" d="M10 5v14" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d={collapsed ? 'M14 9l3 3-3 3' : 'M8 9l-3 3 3 3'}
+            />
+          </svg>
+        </button>
+
+        {/* Content. When collapsed the inner content is hidden — only
+            the toggle button + a thin rail remain. */}
+        {!collapsed && sidebarContent}
+
+        {/* Resize handle (desktop only) — disabled when collapsed. */}
+        {!collapsed && (
+          <div
+            onMouseDown={startResizing}
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
+            style={{
+              backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+            }}
+          />
+        )}
       </aside>
 
       {/* Mobile drawer overlay */}

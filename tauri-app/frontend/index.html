@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RefChecker</title>
+    <style>
+      :root { color-scheme: light dark; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #0f1115;
+        color: #e6e6e6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .wrap {
+        text-align: center;
+        max-width: 420px;
+        padding: 32px;
+      }
+      .spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid rgba(255,255,255,0.15);
+        border-top-color: #4f8cff;
+        border-radius: 50%;
+        margin: 0 auto 20px;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+      p { font-size: 13px; opacity: 0.7; margin: 0; }
+      .err { color: #ff7070; margin-top: 16px; font-size: 12px; white-space: pre-wrap; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="spinner"></div>
+      <h1>Starting RefChecker…</h1>
+      <p>Booting local server. This can take a few seconds on first launch.</p>
+      <div id="err" class="err"></div>
+    </div>
+  </body>
+</html>

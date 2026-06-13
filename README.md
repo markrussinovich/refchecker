@@ -14,6 +14,55 @@
   <a href="#deployment">Deployment</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
+    <img alt="Download for macOS" src="assets/download-macos.svg" height="56">
+  </a>
+  &nbsp;
+  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
+    <img alt="Download for Windows" src="assets/download-windows.svg" height="56">
+  </a>
+</p>
+
+<p align="center">
+  <sub>
+    Linux: <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
+    <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
+    <a href="https://github.com/ArioMoniri/refchecker/releases/latest">all builds</a>
+  </sub>
+</p>
+
+<p align="center">
+  <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
+</p>
+
+### What the desktop app adds (v0.6.19)
+
+- **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
+- **Global reference library (read + write, every code path).** Every verified reference — including ones that flow through post-processing rewriters like the hallucination resolver — is now persisted to the global identity cache (DOI / arXiv / normalized title key) via a single `emit_progress` hook. Previous builds only persisted along one of six code paths, which left a lot of refs uncached. Future verifications consult the cache automatically for instant matches. New *Seen References (library)* view at the top of the main panel.
+- **Find similar papers — multi-source, actively verified.** Pulls candidates from **Semantic Scholar** (recommendations + co-citation), **OpenAlex** (DOI-resolved co-citation), the user's configured **web-search provider** (OpenAI / Anthropic / Gemini), and the user's default **LLM** ("what else should I read?"). Candidates are deduped across sources, each row shows a source badge, and any cache-miss candidate is actively re-verified through the hybrid checker before display — so you see real ✓ verified or ? unconfirmed, not just metadata.
+- **Real citation graph.** Force-directed view of the paper's references, edges drawn from the real Semantic Scholar citation graph (ref A → ref B iff A cites B), **nodes sized by in-paper in-degree** (how many other refs in the same bibliography cite each one). Double-click any node to expand one hop further — pulls in that paper's top outgoing references as new nodes.
+- **Citation context.** Each reference card shows the sentence in the paper where it's cited — now matches both numeric markers (`[12]`) AND author-year style (`(Smith et al., 2020)`, `Smith (2020)`), so APA / Chicago papers light up too. Up to two sentences per ref, captured at parse time with no extra LLM call.
+- **Live citation health badge.** Score recomputes on every edit (Apply Fix / Add / Remove). Copy as Markdown for a README badge.
+- **Add / Remove / Suggest alternative — everywhere.** Now in both the References tab and the Corrections tab. Newly-added references are re-verified live, and *Apply Fix* in the Corrections tab also re-runs the verifier on the corrected metadata so the citation-health chip moves in real time. *Suggest alternative* combines an LLM-backed "what real paper did the author probably mean?" with Semantic Scholar title-search — **and each candidate is rendered in your currently-selected citation style** (APA / IEEE / BibTeX / your custom template) with a one-click Copy button, so the replacement drops into your bibliography in the right format.
+- **Minimal Grammarly-style citation-health chip** sits inline in the Summary header — color-coded, hover for breakdown, recomputes on every edit. No copy / download clutter; the score follows you.
+- **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. now expose Max-authors, et-al threshold, and Include-URL toggles. Need a journal-specific format? *Customize style → New custom style* lets you save a template like `{authors} ({year}). {title}. {venue}. {doi}` and pick it from the dropdown forever after.
+- **Seen References — live + clearable.** The library auto-refreshes whenever a check finishes (newly-verified refs appear immediately) and a *Clear cache* button wipes the whole identity table when you need a fresh start.
+- **LLM token + cost meter.** Inline chip in the Summary header tracks total tokens and an estimated USD cost across every provider you've used (OpenAI / Anthropic / Gemini) with a per-provider breakdown on hover. Counters persist across restarts via `llm_usage.json`. Cost rates are list-price USD-per-1K-tokens, hand-curated per model.
+- **Smoother citation graph.** Labels are now hover-on-demand (one node at a time, source always labelled) so the canvas stays readable; hovered node gets a soft outline ring. Slower force-cooldown lets the network breathe.
+- **Bullet-proof external links.** *Open in browser* / GitHub / DOI / arXiv buttons now use an explicit `shell:allow-open` scope (`https://**`, `http://**`, `mailto:**`, `tel:**`) so the Tauri shell plugin actually opens them — the default scope was silently empty.
+- **Apply Fix actually moves the citation-health chip.** Accepting a correction now merges the verifier's suggested metadata back into the stored reference before re-verifying, so the ref flips to *verified* and the badge updates in real time. Apply-all-visible parallelises the re-verifies at 4 in flight.
+- **Better "Similar Papers" diagnostics.** When nothing comes back, the panel now shows which sources were tried and how many candidates each produced, and explicit hints for the common causes (rate limits, refs without DOIs, no web-search-capable LLM provider).
+- **Token meter shows per-kind breakdown + cascade savings hint.** Hover the chip for tokens grouped by call kind (extraction / hallucination / suggest-alt / web-search). When cascade saved measurable cost vs an LLM-only path, the savings are estimated and surfaced at the bottom of the tooltip.
+- **Desktop version visible in Settings.** Settings → footer now shows both the desktop bundle version (e.g. `Desktop v0.6.6`) and the underlying Python engine version separately so you can tell at a glance which build you're on.
+- **Reference-manager export (RIS).** New *Export → RIS* option produces a `.ris` file that imports directly into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — including the verifier's corrected metadata (DOI, arXiv ID, fixed authors) instead of the wrong-as-cited values. The export menu also gets a *Sort* control: citation order, alphabetical (first author), or year ascending/descending.
+- **References tab honors the citation-style picker live.** Pick APA / IEEE / BibTeX / your custom template in the References-tab header and each card renders a styled preview line above the structured metadata. Title / authors / venue rows stay below so per-field badges keep working.
+- **Tab pill counts respect Summary filters.** Click "Errors" in the Summary chips and the References tab pill drops to "3" instead of staying at the full bibliography count — so the tab header matches the in-page header.
+- **Author rendering no longer leaks `[object Object]`.** `formatAuthors` now normalises every author shape we've seen from upstream (bare strings, `{name}`, `{display_name}`, OpenAlex `{author:{display_name}}`, CSL JSON `{family, given}`, JSON-encoded arrays).
+- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
+
+---
+
 RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
@@ -29,6 +78,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 - [Web UI](#web-ui)
 - [CLI](#cli)
 - [Hallucination Detection](#hallucination-detection)
+- [AI-Generated Text Detection](#ai-generated-text-detection)
 - [Bulk Checking](#bulk-checking)
 - [OpenReview Integration](#openreview-integration)
 - [Output & Reports](#output--reports)
@@ -84,6 +134,7 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
 | **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters, LLM deep web search, and metadata reverification when the LLM finds a better match |
+| **AI-generated-text detection** (opt-in) | Optionally analyzes the body text of each checked article for AI-generated-likelihood, returning a low/medium/high band plus advisory flagged passages. Three engines: a local calibrated model (offline, downloadable), an LLM judge (reuses your configured LLM), or an external API (Pangram/GPTZero). **Advisory only** — detection is unreliable on technical and non-native-English academic writing, so results are framed as a self-check and never as proof of misconduct. Enable under Settings → AI Detection. |
 | **Bulk checking** | Upload multiple files or a ZIP in the Web UI; use `--paper-list` or `--openreview` in the CLI |
 | **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
 | **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
@@ -327,6 +378,42 @@ Hallucination assessments appear inline in CLI output, in Web UI reference cards
 
 ---
 
+## AI-Generated Text Detection
+
+> **Opt-in and advisory only.** AI-text detection is unreliable on academic, technical, and non-native-English writing, and on human text polished with AI. RefChecker frames every result as a low/medium/high *likelihood band* with a permanent disclaimer — **never** a binary verdict or proof of misconduct, and never a basis for an accusation, grade, or decision. Below ~300 words, or on equation/code/citation-heavy passages, it abstains (`inconclusive`).
+
+When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. If both reference checking and AI detection are on, they run **in parallel**. Results show a band + score, an optional list of advisory flagged passages, and the engine/model used.
+
+### Detection engines (pick one in Settings)
+
+| Engine | What it is | Cost | Notes |
+|--------|-----------|------|-------|
+| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via ONNX/Transformers | Free | One-time download (managed in Settings); calibrated, reproducible; no data leaves your machine |
+| **LLM judge** | Reuses your configured LLM provider (OpenAI/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
+| **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
+
+### Usage & cost tracking
+
+AI-detection work is metered in the same per-check token/$ badge under an **"AI-generated-text detection"** flow: the **local** model records the processed word count at **$0**; the **API** backends record words sent plus an estimated dollar cost; the **LLM-judge** records real input/output tokens and their cost.
+
+### Graph 2nd-degree expansion
+
+In the Graph tab, the 2nd-degree expansion has a **"Refs only"** vs **"+ AI-gen"** toggle. With "+ AI-gen", each expanded article also gets an AI-likelihood ring (red = high, amber = medium), estimated **locally from its abstract** (free, offline). Abstracts are short, so most come back `inconclusive` — this is an advisory signal, never a full-text analysis.
+
+### Sources & credits
+
+The detection engines build on these open-source projects and services:
+
+- [`desklib/ai-text-detector-v1.01`](https://huggingface.co/desklib/ai-text-detector-v1.01) — DeBERTa-v3 detector (MIT), the bundled local model
+- [`harshaneel/humanize`](https://github.com/harshaneel/humanize) — the `ai-check` forensic rubric (MIT) adapted for the LLM-judge prompt
+- [`distil-labs/distil-ai-slop-detector`](https://github.com/distil-labs/distil-ai-slop-detector) — the "small quantized classifier in-app" concept (Apache-2.0)
+- Zero-shot research: [Binoculars](https://github.com/ahans30/Binoculars) and [Fast-DetectGPT](https://github.com/baoguangsheng/fast-detect-gpt)
+- API services: [Pangram](https://www.pangram.com) and [GPTZero](https://gptzero.me)
+
+On the reliability of detectors for academic/non-native-English text, see Liang et al., [arXiv:2304.02819](https://arxiv.org/abs/2304.02819).
+
+---
+
 ## Bulk Checking
 
 ### Web UI
@@ -506,7 +593,7 @@ docker compose pull       # Update to latest
 
 ### Multi-User Server (OAuth)
 
-By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. LLM API keys are entered per-user in the Settings panel, stored in the **browser's `localStorage`**, and sent per-request — never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -607,9 +694,11 @@ LLM-powered extraction improves accuracy with complex bibliographies. Hallucinat
 |----------|--------------|---------------|
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4.1` |
-| Google | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
+| Google | `GOOGLE_API_KEY` | `gemini-3.1-flash-lite-preview` |
 | Azure | `AZURE_OPENAI_API_KEY` | `gpt-4.1` |
 | vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
+
+When running the Web UI, provider keys present in the server environment are added automatically as selectable LLM configurations in both single-user and multi-user mode. The key value is not returned to the browser; users can still enter a browser/session key to override the server environment key for their own run.
 
 ```bash
 export ANTHROPIC_API_KEY=your_key

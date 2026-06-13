@@ -15,13 +15,53 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-import time
 from typing import Any, Dict, List, Optional
 
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_HALLUCINATION_MODELS
+from refchecker.llm.google_retry import call_google_with_retry, extract_google_response_text
 
 logger = logging.getLogger(__name__)
+
+
+def _record_hallucination_usage(provider: str, model: str, response) -> None:
+    """Best-effort usage tracking for hallucination-verifier LLM calls.
+
+    Mirrors what `refchecker.llm.providers` does on the extraction path —
+    pushes tokens into BOTH the per-check FlowScope tracker (drives the
+    $ badge's per-flow breakdown) AND the process-wide tracker (drives
+    the global usage totals). Wrapped end-to-end so a tracking failure
+    never breaks the actual verification call.
+    """
+    try:
+        if provider == 'anthropic':
+            from refchecker.llm.providers import _track_anthropic_usage
+            _track_anthropic_usage(response, model)
+        elif provider in ('google', 'gemini'):
+            from refchecker.llm.providers import _track_google_usage
+            _track_google_usage(response, model)
+        else:
+            from refchecker.llm.providers import _track_openai_usage
+            _track_openai_usage(response, model)
+    except Exception as e:
+        logger.debug('hallucination per-check usage tracking skipped: %s', e)
+
+    try:
+        from backend import usage_tracker as _bg_ut
+        if provider == 'anthropic':
+            u = _bg_ut.extract_anthropic_usage(response)
+        elif provider in ('google', 'gemini'):
+            u = _bg_ut.extract_gemini_usage(response)
+        else:
+            u = _bg_ut.extract_openai_usage(response)
+        _bg_ut.record_usage(
+            'google' if provider == 'gemini' else provider,
+            model,
+            u['input_tokens'],
+            u['output_tokens'],
+            'hallucination',
+        )
+    except Exception as e:
+        logger.debug('hallucination global usage tracking skipped: %s', e)
 
 
 _ASSESSMENT_SYSTEM_PROMPT = """\
@@ -337,9 +377,6 @@ class LLMHallucinationVerifier:
 
     # Default models per provider (used when caller doesn't specify)
     _DEFAULT_MODELS = DEFAULT_HALLUCINATION_MODELS
-    _GOOGLE_RETRY_ATTEMPTS = 5
-    _GOOGLE_RETRY_INITIAL_DELAY_SECONDS = 1.0
-    _GOOGLE_RETRY_MAX_DELAY_SECONDS = 60.0
 
     def __init__(
         self,
@@ -426,6 +463,7 @@ class LLMHallucinationVerifier:
             tools=[{'type': 'web_search_preview'}],
             input=user_prompt,
         )
+        _record_hallucination_usage('openai', self.model, resp)
 
         text_parts: List[str] = []
         web_urls: List[str] = []
@@ -461,6 +499,7 @@ class LLMHallucinationVerifier:
         if not _is_openai_reasoning_model(self.model):
             kwargs['temperature'] = 0.0
         resp = self.client.chat.completions.create(**kwargs)
+        _record_hallucination_usage(self.provider or 'openai', self.model, resp)
         return (resp.choices[0].message.content or '').strip(), []
 
     # ------------------------------------------------------------------
@@ -484,6 +523,7 @@ class LLMHallucinationVerifier:
             }],
             messages=[{'role': 'user', 'content': user_prompt}],
         )
+        _record_hallucination_usage('anthropic', self.model, resp)
 
         text_parts: List[str] = []
         web_urls: List[str] = []
@@ -523,6 +563,7 @@ class LLMHallucinationVerifier:
             }],
             messages=[{'role': 'user', 'content': user_prompt}],
         )
+        _record_hallucination_usage('anthropic', self.model, resp)
         text = ''
         for block in resp.content:
             if getattr(block, 'type', '') == 'text':
@@ -582,12 +623,7 @@ class LLMHallucinationVerifier:
     @staticmethod
     def _extract_google_grounding(resp) -> tuple:
         """Extract response text and grounding URLs from a Gemini response."""
-        try:
-            text = resp.text or ''
-        except (TypeError, ValueError, AttributeError):
-            # resp.text can raise when the response has no text parts
-            # (e.g. only function_call parts, or content blocked by safety)
-            text = ''
+        text = extract_google_response_text(resp)
         web_urls: List[str] = []
         for candidate in getattr(resp, 'candidates', []):
             grounding = getattr(candidate, 'grounding_metadata', None)
@@ -613,62 +649,25 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
-        from google.genai import types
         resp = self._google_generate_content_with_retry(
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
+            config={'system_instruction': system_prompt},
             purpose='hallucination chat fallback',
         )
-        return (resp.text or '').strip(), []
+        return extract_google_response_text(resp).strip(), []
 
     def _google_generate_content_with_retry(self, *, contents: str, config: Any, purpose: str) -> Any:
         """Call Gemini with truncated exponential backoff for transient errors."""
-        attempts = self._GOOGLE_RETRY_ATTEMPTS
-        for attempt in range(attempts):
-            try:
-                return self.client.models.generate_content(
+        resp = call_google_with_retry(
+            lambda: self.client.models.generate_content(
                     model=self.model,
                     contents=contents,
                     config=config,
-                )
-            except Exception as exc:
-                if not self._is_google_retryable_error(exc) or attempt == attempts - 1:
-                    raise
-                wait_time = min(
-                    self._GOOGLE_RETRY_MAX_DELAY_SECONDS,
-                    self._GOOGLE_RETRY_INITIAL_DELAY_SECONDS * (2 ** attempt) + random.random(),
-                )
-                logger.debug(
-                    'Google %s transient error (%s); retrying in %.1fs (%d/%d)',
-                    purpose,
-                    exc,
-                    wait_time,
-                    attempt + 2,
-                    attempts,
-                )
-                time.sleep(wait_time)
-
-        raise RuntimeError('unreachable Google retry state')
-
-    @staticmethod
-    def _is_google_retryable_error(exc: Exception) -> bool:
-        text = str(exc).lower()
-        return (
-            '429' in text
-            or '408' in text
-            or '500' in text
-            or '502' in text
-            or '503' in text
-            or '504' in text
-            or 'resource_exhausted' in text
-            or 'rate limit' in text
-            or 'quota' in text
-            or 'timeout' in text
-            or 'temporarily unavailable' in text
-            or 'unavailable' in text
+            ),
+            purpose=purpose,
         )
+        _record_hallucination_usage('google', self.model, resp)
+        return resp
 
     # ------------------------------------------------------------------
     # Unified dispatch
@@ -832,8 +831,77 @@ class LLMHallucinationVerifier:
                         verdict = 'UNLIKELY'
                         explanation += ' (Web search found the paper.)'
                     elif web_verdict == 'NOT_FOUND' and verdict == 'UNCERTAIN':
-                        verdict = 'LIKELY'
-                        explanation += ' (Web search also found no evidence this paper exists.)'
+                        # v0.7.59: don't promote UNCERTAIN→LIKELY when
+                        # the venue is a non-English-indexed journal
+                        # (Chinese / Japanese / Korean / Russian /
+                        # Arabic / etc). S2/Crossref/PMC + web search
+                        # all skew toward English-indexed content;
+                        # "not found anywhere" for these venues is
+                        # poor evidence of hallucination. User example
+                        # that broke before this guard: a real paper
+                        # in "Chin J Orthop Trauma" got LIKELY because
+                        # the Chinese-language journal isn't in any
+                        # English index.
+                        venue_text = (
+                            (error_entry.get('ref_venue') or '')
+                            + ' '
+                            + (error_entry.get('ref_venue_correct') or '')
+                        ).lower()
+                        _non_english_markers = (
+                            'chin j', 'chinese j', 'zhonghua', 'zhongguo',
+                            'jpn j', 'japanese j', 'nihon', 'nippon',
+                            'korean j', 'kor j', 'taehan',
+                            'russ j', 'russian j', 'rossii',
+                            'arab j', 'farsi', 'persian',
+                            'rev port', 'rev esp', 'cirugia',  # PT/ES
+                            'rev bras',  # Brazilian Portuguese journals
+                            'turk', 'türk',
+                            'kafkas',  # Turkic-zone titles
+                        )
+                        non_english_venue = any(
+                            marker in venue_text for marker in _non_english_markers
+                        )
+                        # Also detect raw CJK / Cyrillic / Arabic chars
+                        # in venue/title (titles + venues with native
+                        # script almost certainly aren't English-indexed).
+                        title_text = (error_entry.get('ref_title') or '')
+                        scan_text = venue_text + ' ' + title_text
+                        has_non_latin = any(
+                            ord(ch) > 0x2E80 and (
+                                # CJK
+                                0x2E80 <= ord(ch) <= 0x9FFF
+                                # Hiragana/Katakana
+                                or 0x3040 <= ord(ch) <= 0x30FF
+                                # Hangul
+                                or 0xAC00 <= ord(ch) <= 0xD7A3
+                                # Cyrillic
+                                or 0x0400 <= ord(ch) <= 0x04FF
+                                # Arabic
+                                or 0x0600 <= ord(ch) <= 0x06FF
+                                # Hebrew
+                                or 0x0590 <= ord(ch) <= 0x05FF
+                            )
+                            for ch in scan_text
+                        )
+                        if non_english_venue or has_non_latin:
+                            logger.debug(
+                                'Holding UNCERTAIN — venue/title looks '
+                                'non-English-indexed (%r); web NOT_FOUND '
+                                'is poor evidence here',
+                                venue_text.strip()[:60],
+                            )
+                            explanation += (
+                                ' (Note: this looks like a non-English-indexed '
+                                'journal; absence from S2/Crossref/PMC isn\'t '
+                                'reliable evidence of hallucination. Manual '
+                                'review recommended.)'
+                            )
+                            # Leave verdict at UNCERTAIN, which falls
+                            # through to "unverified" downstream rather
+                            # than "hallucinated".
+                        else:
+                            verdict = 'LIKELY'
+                            explanation += ' (Web search also found no evidence this paper exists.)'
                 except Exception as exc:
                     logger.debug(f'Web search during assessment failed: {exc}')
 
@@ -948,6 +1016,29 @@ class LLMHallucinationVerifier:
         if not cited or not correct:
             return verdict, explanation
 
+        # v0.7.58: when the cited DOI matches the verified DOI, the
+        # author surface diff is *not* sufficient evidence of
+        # hallucination — the paper exists at that DOI and the author
+        # mismatch reflects formatting noise (honorifics/degrees/
+        # transliteration artifacts/wrong-citation-with-right-DOI),
+        # not a fabricated paper. User cases that broke before this
+        # guard: "S Sobti DA, E Sudhakar MJ" vs "A. Sobti, J. Sudhakar"
+        # (degrees appended), and the tennis-elbow paper where the
+        # cited DOI resolves to a different but real paper. Both were
+        # flipping verified→hallucinated based on the same heuristic.
+        cited_doi = (error_entry.get('ref_doi') or '').strip().lower()
+        verified_doi = (error_entry.get('ref_doi_correct')
+                        or (found_metadata or {}).get('doi')
+                        or '').strip().lower()
+        if cited_doi and verified_doi and cited_doi == verified_doi:
+            logger.debug(
+                'Skipping LIKELY override — cited DOI %s matches verified '
+                'paper DOI exactly; author diff is metadata-formatting, not '
+                'hallucination (ref=%r)',
+                cited_doi, error_entry.get('ref_title', ''),
+            )
+            return verdict, explanation
+
         from refchecker.core.hallucination_policy import _compute_author_overlap
 
         cited_list = error_entry.get('_ref_authors_cited_list')
@@ -1058,6 +1149,8 @@ class LLMHallucinationVerifier:
 
             if compare_titles_with_latex_cleaning(cited_title, found_title) >= 0.9:
                 return False
+            if LLMHallucinationVerifier._titles_are_compatible_prefixes(cited_title, found_title):
+                return False
 
         checked_urls = [
             error_entry.get('ref_url_cited', ''),
@@ -1078,6 +1171,39 @@ class LLMHallucinationVerifier:
 
         found_correct_overlap = _compute_author_overlap(found_authors, correct)
         return found_correct_overlap is not None and found_correct_overlap < 0.6
+
+    @staticmethod
+    def _titles_are_compatible_prefixes(cited_title: str, found_title: str) -> bool:
+        """Return True for title expansions/truncations of the same source.
+
+        This covers cases like ``Regularized rl`` vs
+        ``Demonstration-Regularized RL`` and book subtitles such as
+        ``Fairness and Machine Learning`` vs
+        ``Fairness and Machine Learning: Limitations and Opportunities``.
+        The author-overlap guard calls this only after the found authors
+        substantially match the cited authors.
+        """
+        import re
+
+        def normalize(title: str) -> list[str]:
+            return [
+                token for token in re.sub(r'[^a-z0-9]+', ' ', (title or '').lower()).split()
+                if token not in {'a', 'an', 'the'}
+            ]
+
+        cited_tokens = normalize(cited_title)
+        found_tokens = normalize(found_title)
+        if len(cited_tokens) < 2 or len(found_tokens) < 2:
+            return False
+
+        cited_phrase = ' '.join(cited_tokens)
+        found_phrase = ' '.join(found_tokens)
+        if cited_phrase in found_phrase or found_phrase in cited_phrase:
+            return True
+
+        cited_set = set(cited_tokens)
+        found_set = set(found_tokens)
+        return len(cited_set) >= 2 and cited_set.issubset(found_set)
 
     @staticmethod
     def _same_reference_url(left: str, right: str) -> bool:

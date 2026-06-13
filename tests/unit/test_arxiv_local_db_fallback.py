@@ -1,12 +1,11 @@
 """
-Regression test: ArXiv refs should use local DB first, then fall back
-to ArXiv citation checker if the local DB result has a major author
-discrepancy (e.g., corrupt S2 duplicate entry).
+Regression test: explicit ArXiv refs should verify the cited ArXiv target
+first, then fall back to local DB only when ArXiv cannot answer.
 
 Flow:
-1. Try local DB (instant) for ArXiv references
-2. If local DB result has no major discrepancy → use it
-3. If local DB result has major author discrepancy → fall back to ArXiv BibTeX
+1. Try ArXiv BibTeX for ArXiv references
+2. If ArXiv returns metadata or errors → use that authoritative result
+3. If ArXiv fails/no result → fall back to local DB
 
 Test case: DeepSeek-R1 (CorpusID:284488789 has fabricated authors
 "Adam Suma, Sam Dauncey" — the ArXiv BibTeX has the real 198 authors).
@@ -29,6 +28,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         checker.openalex = None
         checker.dblp = None
         checker.openreview = None
+        checker.acl_anthology = None
+        checker.paperclip = None
         checker.retry_base_delay = 0
         checker.max_retry_delay = 0
         checker.retry_backoff_factor = 1
@@ -101,8 +102,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
             'https://arxiv.org/abs/2501.12948',
         )
 
-    def test_local_db_used_when_no_discrepancy(self):
-        """If local DB result is clean, use it without calling ArXiv."""
+    def test_arxiv_used_before_clean_local_db(self):
+        """Explicit ArXiv refs use ArXiv even when local DB is clean."""
         local_db = MagicMock()
         arxiv_citation = MagicMock()
         arxiv_citation.is_arxiv_reference.return_value = True
@@ -110,18 +111,17 @@ class TestLocalDbArxivFallback(unittest.TestCase):
 
         good = self._good_local_db_result()
         local_db.verify_reference.return_value = good
+        arxiv_citation.verify_reference.return_value = self._arxiv_citation_result()
 
         checker = self._make_checker(local_db=local_db, arxiv_citation=arxiv_citation)
 
         ref = self._deepseek_ref()
         paper_data, errors, url = checker.verify_reference(ref)
 
-        # Local DB was called
-        local_db.verify_reference.assert_called_once()
-        # ArXiv citation was NOT called (no need — local DB was clean)
-        arxiv_citation.verify_reference.assert_not_called()
-        # Result comes from local DB
-        assert paper_data['paperId'] == 'correct_id'
+        arxiv_citation.verify_reference.assert_called_once()
+        local_db.verify_reference.assert_not_called()
+        assert url == 'https://arxiv.org/abs/2501.12948'
+        assert paper_data['_matched_database'] == 'ArXiv'
 
     def test_arxiv_fallback_on_author_discrepancy(self):
         """If local DB has major author discrepancy, fall back to ArXiv."""
@@ -141,16 +141,34 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         ref = self._deepseek_ref()
         paper_data, errors, url = checker.verify_reference(ref)
 
-        # Local DB was tried first
-        local_db.verify_reference.assert_called_once()
-        # ArXiv citation was called as fallback
+        # ArXiv citation was called first, so the corrupt local DB was never used.
         arxiv_citation.verify_reference.assert_called_once()
+        local_db.verify_reference.assert_not_called()
         # Result should NOT have corrupt authors
         if paper_data and 'authors' in paper_data:
             author_names = [a.get('name', a) if isinstance(a, dict) else a
                            for a in paper_data['authors']]
             assert 'Adam Suma' not in author_names
             assert 'Sam Dauncey' not in author_names
+
+    def test_local_db_fallback_when_arxiv_unavailable(self):
+        """If ArXiv cannot answer, fall back to local DB metadata."""
+        local_db = MagicMock()
+        arxiv_citation = MagicMock()
+        arxiv_citation.is_arxiv_reference.return_value = True
+        arxiv_citation.extract_arxiv_id.return_value = '2501.12948'
+        arxiv_citation.verify_reference.return_value = (None, [], None)
+
+        local_db.verify_reference.return_value = self._good_local_db_result()
+
+        checker = self._make_checker(local_db=local_db, arxiv_citation=arxiv_citation)
+
+        ref = self._deepseek_ref()
+        paper_data, errors, url = checker.verify_reference(ref)
+
+        arxiv_citation.verify_reference.assert_called_once()
+        local_db.verify_reference.assert_called_once()
+        assert paper_data['paperId'] == 'correct_id'
 
     def test_has_major_author_discrepancy_detects_corrupt(self):
         """_has_major_author_discrepancy should detect zero author overlap."""
@@ -187,6 +205,10 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         local_db = MagicMock()
         arxiv_citation = MagicMock()
         arxiv_citation.is_arxiv_reference.return_value = False
+        # The non-ArXiv title-search probe (_try_arxiv_title_search, added in
+        # v3.0.139) finds no ArXiv match for this ref, so it never falls through
+        # to an ArXiv verification — keep the probe a clean no-op.
+        arxiv_citation.find_arxiv_id_by_title.return_value = None
 
         good = self._good_local_db_result()
         local_db.verify_reference.return_value = good
@@ -203,7 +225,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         paper_data, errors, url = checker.verify_reference(ref)
 
         local_db.verify_reference.assert_called_once()
-        # No ArXiv fallback for non-ArXiv refs
+        # No ArXiv *verification* fallback for non-ArXiv refs (the title-search
+        # probe ran but found nothing, so verify_reference was never called).
         arxiv_citation.verify_reference.assert_not_called()
 
     def test_arxiv_title_revision_not_treated_as_different_paper(self):

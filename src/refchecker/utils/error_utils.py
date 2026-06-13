@@ -33,6 +33,38 @@ def print_labeled_multiline(label: str, text: str) -> None:
         print(fixed_indent + line)
 
 
+def is_unverified_issue(issue: Dict[str, Any]) -> bool:
+    """Return True when an error/warning/info entry represents unverified status."""
+    return (
+        issue.get('error_type') == 'unverified'
+        or issue.get('warning_type') == 'unverified'
+        or issue.get('info_type') == 'unverified'
+    )
+
+
+def sort_issues_for_cli_display(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return non-unverified issues in CLI display order: warnings, errors, information."""
+    priority = {
+        'warning_type': 0,
+        'error_type': 1,
+        'info_type': 2,
+    }
+
+    def sort_key(item):
+        index, issue = item
+        for key, rank in priority.items():
+            if key in issue:
+                return rank, index
+        return len(priority), index
+
+    display_items = [
+        (index, issue)
+        for index, issue in enumerate(issues or [])
+        if not is_unverified_issue(issue)
+    ]
+    return [issue for _, issue in sorted(display_items, key=sort_key)]
+
+
 def format_three_line_mismatch(mismatch_type: str, left: str, right: str) -> str:
     """
     Format a three-line mismatch message with fixed indentation.
@@ -450,6 +482,22 @@ def format_author_count_mismatch(cited_count: int, correct_count: int, cited_aut
     
     # Use the same format as other mismatches
     return format_three_line_mismatch(header, cited_list, correct_list)
+
+
+def format_no_matching_authors(cited_authors: list, correct_authors: list) -> str:
+    """
+    Format an author mismatch message for zero-overlap author lists.
+
+    Args:
+        cited_authors: List of cited author names
+        correct_authors: List of correct author names
+
+    Returns:
+        Formatted multi-line no-matching-authors message
+    """
+    cited_list = ", ".join(cited_authors) if cited_authors else "None"
+    correct_list = ", ".join(correct_authors) if correct_authors else "None"
+    return format_three_line_mismatch("no matching authors", cited_list, correct_list)
 
 
 def format_authors_list(authors: List[Dict[str, str]]) -> str:

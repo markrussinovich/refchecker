@@ -18,6 +18,9 @@ export const useCheckStore = create((set, get) => ({
   statusMessage: '',
   progress: 0,
   references: [],
+  // Document-level AI-generated-text detection result for the current check
+  // (null = not run). Set by the 'ai_detection_result' WS event.
+  aiDetection: null,
   stats: {
     total_refs: 0,
     processed_refs: 0,
@@ -30,6 +33,7 @@ export const useCheckStore = create((set, get) => ({
     refs_with_issues: 0,
     refs_with_errors: 0,
     refs_with_warnings_only: 0,
+    refs_with_suggestions_only: 0,
     refs_verified: 0,
     progress_percent: 0,
   },
@@ -40,6 +44,9 @@ export const useCheckStore = create((set, get) => ({
   // Actions
   startCheck: (sessionId, checkId = null, paperSource = null, sourceType = null, paperTitle = null) => {
     logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}, sourceType ${sourceType}, paperTitle ${paperTitle}`)
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:check-started', { detail: { sessionId, checkId } }))
+    } catch { /* SSR guard */ }
     // Record session→check mapping before overwriting state
     const prevMap = get().sessionToCheckMap
     const newMap = checkId ? { ...prevMap, [sessionId]: checkId } : prevMap
@@ -59,6 +66,7 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: 'Starting check...',
       progress: 0,
       references: [],
+      aiDetection: null,
       stats: {
         total_refs: 0,
         processed_refs: 0,
@@ -71,6 +79,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
+        refs_with_suggestions_only: 0,
         refs_verified: 0,
         progress_percent: 0,
       },
@@ -120,6 +129,7 @@ export const useCheckStore = create((set, get) => ({
       refs_with_issues = 0,
       refs_with_errors: payloadRefsWithErrors,
       refs_with_warnings_only: payloadRefsWithWarningsOnly,
+      refs_with_suggestions_only: payloadRefsWithSuggestionsOnly,
       refs_verified: payloadRefsVerified,
     } = payload || {}
 
@@ -130,21 +140,24 @@ export const useCheckStore = create((set, get) => ({
     // Compute paper-level counts from results if not provided
     let refs_with_errors = payloadRefsWithErrors ?? 0
     let refs_with_warnings_only = payloadRefsWithWarningsOnly ?? 0
+    let refs_with_suggestions_only = payloadRefsWithSuggestionsOnly ?? 0
     let refs_verified = payloadRefsVerified ?? 0
 
     if (Array.isArray(results) && results.length > 0 && 
-        refs_with_errors === 0 && refs_with_warnings_only === 0 && refs_verified === 0) {
+        refs_with_errors === 0 && refs_with_warnings_only === 0 && refs_with_suggestions_only === 0 && refs_verified === 0) {
       results.forEach(ref => {
         const hasErrors = ref.errors?.some(e => e.error_type !== 'unverified')
         const hasWarnings = ref.warnings?.length > 0
+        const hasSuggestions = ref.suggestions?.length > 0
         const status = (ref.status || '').toLowerCase()
         
-        if (status === 'error' || hasErrors) {
+        if (hasErrors) {
           refs_with_errors++
-        } else if (status === 'warning' || hasWarnings) {
+        } else if (hasWarnings) {
           refs_with_warnings_only++
+        } else if (hasSuggestions) {
+          refs_with_suggestions_only++
         } else if (status === 'verified' || status === 'suggestion') {
-          // Suggestion-only refs are considered verified (no errors or warnings)
           refs_verified++
         }
       })
@@ -175,6 +188,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues,
         refs_with_errors,
         refs_with_warnings_only,
+        refs_with_suggestions_only,
         refs_verified,
         progress_percent,
       },
@@ -189,14 +203,15 @@ export const useCheckStore = create((set, get) => ({
   },
 
   setStatusFilter: (filter) => {
+    // Multi-select toggle: clicking a chip adds it to the active set;
+    // clicking it again removes it. An empty array means "show all".
+    // Both the References list and the Corrections tab read this state,
+    // so the summary chips drive whichever tab is currently visible.
     const currentFilters = get().statusFilter
-    // Single-select: clicking active filter clears it, clicking another sets only that one
-    if (currentFilters.includes(filter) && currentFilters.length === 1) {
-      // Clicking the only active filter clears it
-      set({ statusFilter: [] })
+    if (currentFilters.includes(filter)) {
+      set({ statusFilter: currentFilters.filter(f => f !== filter) })
     } else {
-      // Set only this filter (single-select)
-      set({ statusFilter: [filter] })
+      set({ statusFilter: [...currentFilters, filter] })
     }
   },
 
@@ -258,10 +273,82 @@ export const useCheckStore = create((set, get) => ({
     // Extract data fields but preserve the local 0-based index
     const { index: _backendIndex, ...dataWithoutIndex } = data
     set(state => ({
-      references: state.references.map((ref, i) => 
+      references: state.references.map((ref, i) =>
         i === index ? { ...ref, ...dataWithoutIndex, index: i, ...(normalizedStatus ? { status: normalizedStatus } : {}) } : ref
       )
     }))
+  },
+
+  // Optimistically flip a reference to verified + clear errors/warnings
+  // in the live checkStore. Mirrors useHistoryStore.optimisticApplyCorrection
+  // but on the per-check feed, which is what displayRefs renders from
+  // while a check is current — without this, Apply Fix only moves the
+  // HealthBadge after the network roundtrip lands (and only for
+  // historical-view checks).
+  applyCorrectionInStore: (refId) => {
+    const idStr = String(refId)
+    set(state => {
+      const list = state.references || []
+      let touched = false
+      const next = list.map((r, i) => {
+        const matches =
+          String(r?.id ?? '') === idStr ||
+          String(r?.index ?? '') === idStr ||
+          String(i) === idStr
+        if (!matches) return r
+        touched = true
+        const corrected = r.corrected_reference || {}
+        const merged = { ...r }
+        for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+          if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
+            merged[k] = corrected[k]
+          }
+        }
+        merged.status = 'verified'
+        merged.errors = []
+        merged.warnings = []
+        return merged
+      })
+      return touched ? { references: next } : {}
+    })
+  },
+
+  // Optimistically drop a reference from the live check feed so the
+  // HealthBadge and ReferenceList react instantly. selectedCheck reload
+  // alone won't update this slice — when the user is viewing the
+  // currently-running check, displayRefs comes from this array, not
+  // from selectedCheck.results.
+  removeReference: (refId) => {
+    const id = String(refId)
+    set(state => {
+      const before = state.references || []
+      const after = before.filter((r, i) => {
+        const matches =
+          String(r?.id ?? '') === id ||
+          String(r?.index ?? '') === id ||
+          String(i) === id
+        return !matches
+      })
+      return { references: after }
+    })
+  },
+
+  // Re-insert a previously-removed reference so the Undo path can
+  // render it immediately. When `insertAt` is a number, splice the
+  // ref back at that 0-based position (matches the backend's
+  // insert_at_index honouring); otherwise append. reloadCheck()
+  // afterwards reconciles indices with the server.
+  restoreReference: (refData, insertAt) => {
+    if (!refData) return
+    set(state => {
+      const list = [...(state.references || [])]
+      if (typeof insertAt === 'number' && insertAt >= 0 && insertAt <= list.length) {
+        list.splice(insertAt, 0, { ...refData })
+      } else {
+        list.push({ ...refData })
+      }
+      return { references: list }
+    })
   },
 
   updateStats: (stats) => {
@@ -279,6 +366,9 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: 'Check completed',
       completedCheckId: checkId,
     })
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:check-completed', { detail: { checkId } }))
+    } catch { /* SSR guard */ }
   },
 
   cancelCheck: () => {
@@ -320,6 +410,7 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: '',
       progress: 0,
       references: [],
+      aiDetection: null,
       stats: {
         total_refs: 0,
         processed_refs: 0,
@@ -332,6 +423,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
+        refs_with_suggestions_only: 0,
         refs_verified: 0,
         progress_percent: 0,
       },
@@ -422,6 +514,7 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
           })
           break
@@ -442,6 +535,7 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
             extraction_method: data.extraction_method,
             // Clear in-memory results so selectCheck fetches authoritative data from API
@@ -465,6 +559,14 @@ export const useCheckStore = create((set, get) => ({
           })
           store.unregisterSession(messageSessionId)
           break
+        case 'ai_detection_result': {
+          // Mirror the AI-likelihood result into the peer check's history
+          // entry so a focused batch child reflects its band the moment it
+          // lands, not only after a refetch. (Parallels reference_result.)
+          const { check_id: _cid, ...detection } = data
+          historyStore.updateHistoryProgress(checkIdForMessage, { ai_detection: detection })
+          break
+        }
         default:
           // Other message types for concurrent sessions - ignore
           break
@@ -519,6 +621,9 @@ export const useCheckStore = create((set, get) => ({
             total_refs: data.total_refs,
             processed_refs: 0, // Reset to 0 when refs first extracted
             extraction_method: data.extraction_method,
+            results: Array.isArray(data.references)
+              ? data.references.map((ref, index) => ({ ...ref, index, status: ref.status || 'pending' }))
+              : undefined,
           })
         }
         // Store extraction_method in stats for real-time display
@@ -550,6 +655,10 @@ export const useCheckStore = create((set, get) => ({
               i === refIndex ? { ...ref, ...dataWithoutIndex, index: i, status: normalizedStatus } : ref
             )
           }))
+          useHistoryStore.getState().updateHistoryReference(store.currentCheckId, refIndex, {
+            ...dataWithoutIndex,
+            status: normalizedStatus,
+          })
         }
         break
         
@@ -574,16 +683,21 @@ export const useCheckStore = create((set, get) => ({
           verified_count: data.verified_count,
           refs_with_errors: data.refs_with_errors,
           refs_with_warnings_only: data.refs_with_warnings_only,
+          refs_with_suggestions_only: data.refs_with_suggestions_only,
           refs_verified: data.refs_verified,
         })
         break
         
-      case 'progress':
-        store.setProgress(data.percent || data.current / data.total * 100)
+      case 'progress': {
+        // Guard against NaN: a message-only 'progress' event (no
+        // percent/current/total) must not blank the bar to "NaN%".
+        const pct = data.percent ?? (data.total ? (data.current / data.total) * 100 : null)
+        if (Number.isFinite(pct)) store.setProgress(pct)
         if (data.message) {
           store.setStatusMessage(data.message)
         }
         break
+      }
 
       case 'phase':
         if (data.message) {
@@ -591,6 +705,22 @@ export const useCheckStore = create((set, get) => ({
         }
         break
         
+      case 'ai_detection_result':
+        // Document-level AI-likelihood result for the manuscript body. Stored
+        // separately from per-reference results (it has no reference index).
+        // Only apply when the event belongs to the displayed check, so a late
+        // result for a now-background check can't overwrite what's on screen.
+        {
+          const { check_id: _cid, ...detection } = data
+          if (!checkIdForMessage || checkIdForMessage === store.currentCheckId) {
+            set({ aiDetection: detection })
+          }
+          if (checkIdForMessage) {
+            useHistoryStore.getState().updateHistoryProgress(checkIdForMessage, { ai_detection: detection })
+          }
+        }
+        break
+
       case 'completed':
         store.completeCheck(data.check_id || store.currentCheckId)
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
@@ -605,6 +735,7 @@ export const useCheckStore = create((set, get) => ({
           verified_count: data.verified_count,
           refs_with_errors: data.refs_with_errors,
           refs_with_warnings_only: data.refs_with_warnings_only,
+          refs_with_suggestions_only: data.refs_with_suggestions_only,
           refs_verified: data.refs_verified,
           extraction_method: data.extraction_method,
         })
@@ -709,14 +840,19 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
           }
           break
 
-        case 'progress':
-          latestProgress = data.percent || (data.current / data.total * 100)
+        case 'progress': {
+          // NaN-guard (see the single-message handler): a message-only
+          // 'progress' must not overwrite the bar with NaN.
+          const pp = data.percent ?? (data.total ? (data.current / data.total) * 100 : null)
+          if (Number.isFinite(pp)) latestProgress = pp
           if (data.message) latestStatusMessage = data.message
           break
+        }
 
         default:
           // Non-hot-path message (started, extracting, etc.) – handle individually
@@ -751,6 +887,12 @@ export const useCheckStore = create((set, get) => ({
     // Update history store once with the latest payload (not per-message)
     if (historyPayload && store.currentCheckId) {
       useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, historyPayload)
+    }
+    if (refPatches.size > 0 && store.currentCheckId) {
+      const historyStore = useHistoryStore.getState()
+      for (const [idx, patch] of refPatches) {
+        historyStore.updateHistoryReference(store.currentCheckId, idx, patch)
+      }
     }
   },
 }))

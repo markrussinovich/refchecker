@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from refchecker.core.refchecker import ArxivReferenceChecker
 from refchecker.core.report_builder import ReportBuilder
@@ -124,3 +124,56 @@ def test_report_builder_trusts_precomputed_assessment():
     # Assessment is preserved as-is, not re-run
     assert records[0]['hallucination_assessment']['verdict'] == 'LIKELY'
     assert records[0]['hallucination_assessment']['explanation'] == 'A web search found nothing.'
+
+
+def test_parallel_applied_hallucination_assessment_is_not_reapplied():
+    """Bulk/parallel output and report counts must use the same applied verdict."""
+    checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    checker.report_builder = ReportBuilder()
+    checker.errors = []
+    checker.total_errors_found = 0
+    checker.total_warnings_found = 0
+    checker.total_info_found = 0
+    checker.total_unverified_refs = 0
+    checker._format_paper_authors = lambda paper: 'Source Author'
+    checker._get_source_paper_url = lambda paper: 'https://example.com/source'
+    checker.extract_arxiv_id_from_url = lambda url: ''
+    checker._display_unverified_error_with_subreason = MagicMock()
+    checker._display_non_unverified_errors = MagicMock()
+
+    paper = SimpleNamespace(
+        title='Source Paper',
+        published=SimpleNamespace(year=2026),
+        get_short_id=lambda: 'source-paper',
+    )
+    reference = {
+        'title': 'Suspicious Reference',
+        'authors': ['Author One'],
+        'year': 2025,
+        'venue': 'TestConf',
+        'url': '',
+        'raw_text': '[1] Suspicious Reference',
+    }
+    errors = [{'error_type': 'unverified', 'error_details': 'Reference could not be verified'}]
+    assessment = {'verdict': 'LIKELY', 'explanation': 'No matching paper was found.'}
+
+    with patch(
+        'refchecker.core.hallucination_policy.apply_hallucination_verdict',
+        side_effect=AssertionError('already-applied parallel verdict should not be reapplied'),
+    ) as apply_verdict:
+        checker._process_reference_result(
+            paper,
+            reference,
+            errors,
+            reference_url=None,
+            paper_errors=[],
+            unverified_count=0,
+            debug_mode=False,
+            print_output=False,
+            precomputed_hallucination=assessment,
+            precomputed_hallucination_applied=True,
+        )
+
+    apply_verdict.assert_not_called()
+    assert checker.errors[0]['hallucination_assessment'] == assessment
+    assert checker.total_unverified_refs == 1

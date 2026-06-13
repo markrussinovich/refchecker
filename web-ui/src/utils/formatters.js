@@ -1,6 +1,7 @@
 /**
  * Formatting utilities
  */
+import { shouldSuppressVenueWarning } from './venueAbbreviations'
 
 /**
  * Format a date for display
@@ -41,18 +42,69 @@ export function formatDate(date) {
  * @param {string[]} authors - Array of author names
  * @returns {string} Formatted author string
  */
+/**
+ * Coerce an author entry of unknown shape into a display string.
+ * Backends return a mix of bare strings ("Smith, J."), dicts
+ * ({name: "..."}), and OpenAlex-style nested dicts ({author: {display_name}}).
+ * Without this, .join(', ') on dict entries produces "[object Object]".
+ */
+function _authorToString(a) {
+  if (a == null) return ''
+  if (typeof a === 'string') return a
+  if (typeof a !== 'object') return String(a)
+  if (typeof a.name === 'string') return a.name
+  if (typeof a.full_name === 'string') return a.full_name
+  if (typeof a.display_name === 'string') return a.display_name
+  if (a.author && typeof a.author === 'object') {
+    if (typeof a.author.display_name === 'string') return a.author.display_name
+    if (typeof a.author.name === 'string') return a.author.name
+  }
+  // Family + given (CSL JSON style)
+  if (a.family || a.given) return [a.given, a.family].filter(Boolean).join(' ')
+  return ''
+}
+
+export function normalizeAuthors(authors) {
+  if (!authors) return []
+  if (typeof authors === 'string') {
+    // Sometimes backend returns a JSON-string of an array
+    if (authors.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(authors)
+        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean)
+      } catch { /* fall through to comma split */ }
+    }
+    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean)
+  }
+  if (!Array.isArray(authors)) return []
+  return authors.map(_authorToString).filter(Boolean)
+}
+
 export function formatAuthors(authors, truncate = false) {
-  if (!authors || authors.length === 0) return 'Unknown authors'
-  if (authors.length === 1) return authors[0]
-  if (authors.length === 2) return `${authors[0]} and ${authors[1]}`
+  const list = normalizeAuthors(authors)
+  if (list.length === 0) return 'Unknown authors'
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return `${list[0]} and ${list[1]}`
   if (truncate) {
-    return `${authors[0]} et al.`
+    return `${list[0]} et al.`
   }
   // Show all authors with "et al." suffix if list is very long
-  if (authors.length > 10) {
-    return `${authors.slice(0, 10).join(', ')}, et al.`
+  if (list.length > 10) {
+    return `${list.slice(0, 10).join(', ')}, et al.`
   }
-  return authors.join(', ')
+  return list.join(', ')
+}
+
+export function isNoDatePlaceholder(value) {
+  if (value === null || value === undefined) return false
+  const text = String(value).trim().toLowerCase()
+  if (!text) return false
+  const compact = text.replace(/\s+/g, '')
+  return ['n.d.', 'n.d', 'nd'].includes(compact) || ['no date', 'undated'].includes(text)
+}
+
+export function displayReferenceValue(value) {
+  return isNoDatePlaceholder(value) ? '' : value
 }
 
 /**
@@ -67,16 +119,18 @@ export function formatReference(ref) {
     parts.push(formatAuthors(ref.authors))
   }
   
-  if (ref.year) {
-    parts.push(`(${ref.year})`)
+  const year = displayReferenceValue(ref.year)
+  if (year) {
+    parts.push(`(${year})`)
   }
   
   if (ref.title) {
     parts.push(`"${ref.title}"`)
   }
   
-  if (ref.venue) {
-    parts.push(ref.venue)
+  const venue = displayReferenceValue(ref.venue)
+  if (venue) {
+    parts.push(venue)
   }
   
   return parts.join(' ')
@@ -180,13 +234,383 @@ function parseErrorDetailsForMarkdown(details) {
  * @param {object} ref - Reference object with errors/warnings
  * @returns {object} Corrected reference data
  */
+/**
+ * Render a single error/warning/suggestion object as a human string.
+ *
+ * Backend ships issues as `{error_type, error_details, actual_value, ...}`
+ * objects. Naive `e.message || String(e)` falls through to `String(obj)`
+ * which produces "[object Object]". Walk the known fields in priority
+ * order; fall back to a safely stringified JSON last so we never render
+ * literal `[object Object]`.
+ */
+export function formatIssueLine(issue) {
+  if (!issue) return ''
+  if (typeof issue === 'string') return issue
+  if (typeof issue !== 'object') return String(issue)
+  if (issue.message) return String(issue.message)
+  if (issue.error_details) return String(issue.error_details)
+  if (issue.detail) return String(issue.detail)
+  if (issue.text) return String(issue.text)
+  if (issue.error_type) {
+    const t = String(issue.error_type)
+    if (issue.actual_value !== undefined && issue.cited !== undefined) {
+      return `${t}: cited '${issue.cited}', actual '${issue.actual_value}'`
+    }
+    if (issue.actual_value !== undefined) return `${t} → ${issue.actual_value}`
+    return t
+  }
+  try { return JSON.stringify(issue) } catch { return '(unrenderable issue)' }
+}
+
+/**
+ * True if a citation that lists ``citedCount`` authors in a style with
+ * the supplied et-al rules is conforming to that style — and therefore
+ * the author-list "mismatch" the verifier reported against a longer
+ * actual list is not a real correction the user needs to act on.
+ *
+ * Example: cited reference lists 1 author with "et al.", actual paper
+ * has 4 authors, style = MLA (max_authors=1, et_al_threshold=3). The
+ * cited form is exactly what MLA prescribes, so we suppress the
+ * "Author count mismatch" issue from the Corrections panel.
+ */
+export function isAuthorCountConsistentWithStyle(citedCount, actualCount, style) {
+  const defaults = CITATION_STYLE_DEFAULTS[style]
+  if (!defaults) return false
+  const threshold = defaults.et_al_threshold
+  const cap = defaults.max_authors
+  // Styles without an et-al rule (bibtex, plaintext) keep the full
+  // author list, so any count mismatch IS a real correction.
+  if (threshold == null || cap == null) return false
+  return Number(actualCount) >= threshold && Number(citedCount) <= cap
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Cosmetic-difference detection
+//
+// Verifiers raise a mismatch whenever the cited string doesn't byte-
+// match the canonical DB record, but the vast majority of "mismatches"
+// users see are just style differences: ISO 4 venue abbreviations,
+// page-range dashes, DOI URL prefixes, sentence-case vs title-case
+// titles, "Lastname F" vs "F. Lastname", year-in-parentheses, et al.
+// truncation. These helpers normalise per error type and answer "are
+// these two strings the same thing under that style's rules?" — when
+// yes, the issue is suppressed from the corrections panel.
+//
+// New error-types added here should follow the same shape:
+//   case '<type>': return normalize(cited) === normalize(actual)
+// keeping the comparison conservative (false positives are worse than
+// false negatives — we'd rather surface a real correction than hide
+// it).
+// ────────────────────────────────────────────────────────────────────
+
+const _COSMETIC_STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with',
+  'by', 'and', 'or', 'but', 'as', 'from',
+])
+
+const _foldText = (s) =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')   // strip combining diacritics
+    .toLowerCase()
+
+const _normalizeTitle = (s) =>
+  _foldText(s)
+    .replace(/\\[a-z]+\s*\{([^}]*)\}/gi, '$1')   // strip simple LaTeX commands
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const _normalizeYear = (s) => {
+  const m = String(s ?? '').match(/\b(?:19|20)\d{2}\b/)
+  return m ? m[0] : null
+}
+
+const _normalizePages = (s) => {
+  const nums = String(s ?? '').match(/\d+/g) || []
+  if (nums.length === 0) return ''
+  return nums.slice(0, 2).map(n => parseInt(n, 10)).join('-')
+}
+
+const _normalizeDoi = (s) =>
+  _foldText(s)
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//, '')
+    .replace(/^doi:\s*/, '')
+    .trim()
+
+const _venueTokens = (s) =>
+  _foldText(s)
+    .replace(/\([^)]*\)/g, '')        // drop catalog parentheticals
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !_COSMETIC_STOPWORDS.has(w))
+
+const _venuesEquivalent = (cited, actual) => {
+  const c = _venueTokens(cited)
+  const a = _venueTokens(actual)
+  if (c.length === 0 || a.length === 0) return false
+  if (c.join(' ') === a.join(' ')) return true
+  // ISO 4 acceptance: every cited token must be a 3+-char prefix of
+  // some actual token (or vice versa for the reverse abbreviation).
+  // "Clin Anat" → "Clinical Anatomy"; "J Bone Joint Surg" → "Journal
+  // of Bone and Joint Surgery".
+  return c.every(cw =>
+    a.some(aw =>
+      cw.length >= 3 && aw.length >= 3 &&
+      (aw.startsWith(cw) || cw.startsWith(aw))
+    )
+  )
+}
+
+// True when a token looks like initials rather than a surname /
+// given name. We use the ORIGINAL case (not the folded lowercase)
+// because uppercase is the strongest signal that a 2-letter token
+// like "PM" is initials, while a mixed-case token like "Wu" is a
+// surname. A token is "initial-like" when:
+//   - every hyphen segment is a single letter ("p-m"), OR
+//   - it's at most 4 letters and entirely uppercase ("PM", "ABC"),
+//     OR length 1 (any case).
+const _looksLikeInitials = (token) => {
+  if (!token) return false
+  if (token.length === 1) return /[A-Za-zÀ-ÿ]/.test(token)
+  if (token.includes('-')) {
+    return token.split('-').every(seg => seg.length === 1 && /[A-Za-zÀ-ÿ]/.test(seg))
+  }
+  return token.length <= 4 && token === token.toUpperCase() && /^[A-ZÀ-Ý]+$/.test(token)
+}
+
+const _surnameCandidates = (raw) => {
+  // Returns the candidate surname strings for a name, in lowercase.
+  // Most names give a single answer; ambiguous 2-token names with no
+  // initials (e.g. "Wu Yifeng" — could be Chinese surname-first or
+  // Western given-first) give two candidates and we let the matcher
+  // resolve which is right by intersecting with the other name's
+  // candidates.
+  const cleaned = String(raw || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\./g, '')
+  const parts = cleaned.split(/[\s,]+/).filter(Boolean)
+  if (parts.length === 0) return []
+  const nonInitials = parts.filter(p => !_looksLikeInitials(p))
+  if (nonInitials.length === 0) return [parts[0].toLowerCase()]
+  if (nonInitials.length === 1) return [nonInitials[0].toLowerCase()]
+  // 2+ non-initial tokens: ambiguous. Report both first and last as
+  // possible surnames so "Wu Yifeng" matches "Wu Y" via "wu" AND
+  // "Yifeng Wu" matches the same via "wu".
+  const first = nonInitials[0].toLowerCase()
+  const last = nonInitials[nonInitials.length - 1].toLowerCase()
+  if (first === last) return [first]
+  return [last, first]
+}
+
+const _authorSurname = (s) => {
+  // Single-surname accessor for legacy callers. Returns the
+  // "preferred" candidate (the last non-initial token, Western
+  // convention — Dutch tussenvoegsel still works because "berg" is
+  // the last non-initial in "van der berg").
+  const c = _surnameCandidates(s)
+  return c[0] || ''
+}
+
+// Per-author signature SET: emit one signature per plausible surname
+// interpretation. "Wu Yifeng" (Chinese surname-first OR Western
+// given-first) emits both "wu|y" and "yifeng|w" so a match against
+// either "Wu Y" or "Yifeng Wu" succeeds.
+const _authorSignatureSet = (raw) => {
+  const surnames = _surnameCandidates(raw)
+  if (surnames.length === 0) return []
+  const parts = _foldText(raw)
+    .replace(/\./g, '')
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  const sigs = []
+  for (const surname of surnames) {
+    const oneChar = parts.find(p => p.length === 1 && p !== surname)
+    let initial = oneChar || ''
+    if (!initial) {
+      const leading = parts.find(p => p !== surname)
+      if (leading) initial = leading[0]
+    }
+    sigs.push(initial ? `${surname}|${initial}` : surname)
+  }
+  return sigs
+}
+
+const _authorListSignatureSets = (s) => {
+  if (s == null) return []
+  const text = Array.isArray(s) ? s.join('; ') : String(s)
+  return text
+    .split(/[;,]\s*|\s+and\s+/i)
+    .map(_authorSignatureSet)
+    .filter(sigs => sigs.length > 0)
+}
+
+// True iff at least one signature in `sigs` matches at least one
+// signature in any entry of `listOfSigSets`. Bare-surname tolerance:
+// "smith" matches "smith|j" too — a citation lacking initials still
+// resolves against a fully-named DB record.
+const _signatureSetMatchesAny = (sigs, listOfSigSets) => {
+  for (const other of listOfSigSets) {
+    for (const o of other) {
+      if (sigs.includes(o)) return true
+      const [otherSur] = o.split('|')
+      const matchingSig = sigs.find(s => s.split('|')[0] === otherSur)
+      if (matchingSig && (!matchingSig.includes('|') || !o.includes('|'))) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+const _authorsEquivalent = (cited, actual) => {
+  const c = _authorListSignatureSets(cited)
+  const a = _authorListSignatureSets(actual)
+  if (c.length === 0 || a.length === 0) return false
+  const shorter = c.length <= a.length ? c : a
+  const longer = c.length <= a.length ? a : c
+  return shorter.every(sigs => _signatureSetMatchesAny(sigs, longer))
+}
+
+/**
+ * True when the "cited" and "actual" values differ ONLY in formatting,
+ * not in content — i.e. the user's reference is correct under their
+ * citation style and the DB record just uses canonical form. Dispatched
+ * by error_type so each field uses an appropriate normaliser.
+ *
+ * Errors of a type we don't recognise return false (better to surface
+ * a real correction than to silently hide one we can't classify).
+ */
+export function isCosmeticDifference(errorType, cited, actual) {
+  if (cited == null || actual == null) return false
+  const t = String(errorType || '').toLowerCase()
+  switch (t) {
+    case 'title':
+      return _normalizeTitle(cited) === _normalizeTitle(actual)
+    case 'year': {
+      const c = _normalizeYear(cited)
+      const a = _normalizeYear(actual)
+      return c != null && a != null && c === a
+    }
+    case 'venue':
+    case 'journal':
+    case 'booktitle':
+      return _venuesEquivalent(cited, actual)
+    case 'doi':
+      return _normalizeDoi(cited) === _normalizeDoi(actual)
+    case 'page':
+    case 'pages':
+    case 'page_range':
+      return _normalizePages(cited) === _normalizePages(actual)
+    case 'author':
+    case 'authors':
+      return _authorsEquivalent(cited, actual)
+    default:
+      return false
+  }
+}
+
+const _extractCitedActual = (issue, ref) => {
+  let cited = issue?.cited
+  let actual = issue?.actual_value ?? issue?.actual
+  if (cited == null || actual == null) {
+    const details = issue?.error_details || issue?.warning_details || issue?.message
+    const parsed = parseErrorDetailsForMarkdown(details)
+    if (parsed) {
+      if (cited == null) cited = parsed.cited
+      if (actual == null) actual = parsed.actual
+    }
+  }
+  // Last-ditch fallback: use the ref's own field as the cited value.
+  if (cited == null && ref) {
+    const t = String(issue?.error_type || '').toLowerCase()
+    if (t === 'title') cited = ref.title
+    else if (t === 'year') cited = ref.year
+    else if (t === 'venue' || t === 'journal' || t === 'booktitle') cited = ref.venue
+    else if (t === 'doi') cited = ref.doi
+    else if (t === 'author' || t === 'authors') {
+      cited = Array.isArray(ref.authors) ? ref.authors.join(', ') : ref.authors
+    }
+    else if (t === 'page' || t === 'pages' || t === 'page_range') cited = ref.pages
+  }
+  return { cited, actual }
+}
+
+const _isStyleConformingAuthorCount = (issue, ref, style) => {
+  if (!style) return false
+  const details = String(issue?.error_details || issue?.message || '')
+  const m = details.match(/(\d+)\s*cited\s*vs\.?\s*(\d+)/i)
+  if (m) {
+    return isAuthorCountConsistentWithStyle(parseInt(m[1], 10), parseInt(m[2], 10), style)
+  }
+  const citedCount = Array.isArray(ref?.authors) ? ref.authors.length : 0
+  const actual = issue?.actual_value
+  let actualCount = 0
+  if (Array.isArray(actual)) actualCount = actual.length
+  else if (typeof actual === 'string') {
+    actualCount = actual
+      .split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
+      .map(s => s.trim())
+      .filter(Boolean).length
+  } else if (typeof actual === 'number') actualCount = actual
+  return actualCount > 0 && isAuthorCountConsistentWithStyle(citedCount, actualCount, style)
+}
+
+/**
+ * Filter out issues that are artefacts of the citation style or are
+ * purely cosmetic — same content, different presentation. Suppression
+ * applies to every error_type we have a normaliser for; unknown types
+ * pass through untouched so we don't accidentally hide a real
+ * correction the user needs to act on.
+ */
+export function filterIssuesForStyle(issues, ref, style) {
+  if (!Array.isArray(issues) || issues.length === 0) return issues || []
+  return issues.filter(issue => {
+    const errorType = String(issue?.error_type || issue?.warning_type || '').toLowerCase()
+    // Style-specific author-count rule (MLA's et-al cap, etc.) still
+    // wins ahead of the generic cosmetic check because it needs the
+    // style argument; the generic check is style-agnostic.
+    if (errorType === 'author' || errorType === 'authors' || errorType === 'author_count') {
+      if (_isStyleConformingAuthorCount(issue, ref, style)) return false
+    }
+    // Style-aware venue abbreviation: when the active style permits
+    // NLM-style abbreviated journal titles (Vancouver/AMA/IEEE/etc.)
+    // and the cited venue is a known abbreviation of the database
+    // venue, the mismatch is a false positive under that style.
+    if (errorType === 'venue') {
+      const { cited, actual } = _extractCitedActual(issue, ref)
+      const suppressed = shouldSuppressVenueWarning({
+        cited_value: cited || ref?.venue,
+        actual_value: actual || issue?.ref_venue_correct,
+        warning_details: issue?.warning_details || issue?.error_details,
+      }, style)
+      if (suppressed) return false
+    }
+    const { cited, actual } = _extractCitedActual(issue, ref)
+    if (cited != null && actual != null && isCosmeticDifference(errorType, cited, actual)) {
+      return false
+    }
+    return true
+  })
+}
+
+
 function getCorrectedReferenceData(ref) {
+  // Verifier may attach typed URLs (doi, arxiv, journal) in
+  // authoritative_urls. Surface them so the URL picker can prefer DOI
+  // and arxiv over Semantic Scholar paper pages.
+  const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
+  const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
+  const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
   const corrected = {
     title: ref.title,
     authors: ref.authors,
-    year: ref.year,
-    venue: ref.venue,
-    url: ref.authoritative_urls?.[0]?.url || ref.cited_url
+    year: displayReferenceValue(ref.year),
+    venue: displayReferenceValue(ref.venue),
+    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
+    citedUrl: ref.cited_url || null,
+    url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
   }
   
   // Check errors and warnings for 'actual' values
@@ -215,10 +639,10 @@ function getCorrectedReferenceData(ref) {
           }
           break
         case 'year':
-          corrected.year = actualValue
+          corrected.year = displayReferenceValue(actualValue)
           break
         case 'venue':
-          corrected.venue = actualValue
+          corrected.venue = displayReferenceValue(actualValue)
           break
       }
     }
@@ -238,6 +662,8 @@ function getCorrectedReferenceData(ref) {
     }
   }
   
+  corrected.year = displayReferenceValue(corrected.year)
+  corrected.venue = displayReferenceValue(corrected.venue)
   return corrected
 }
 
@@ -309,13 +735,15 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
       }
       
       // Venue
-      if (ref.venue) {
-        lines.push(`**Venue:** ${ref.venue}`)
+      const venue = displayReferenceValue(ref.venue)
+      if (venue) {
+        lines.push(`**Venue:** ${venue}`)
       }
       
       // Year
-      if (ref.year) {
-        lines.push(`**Year:** ${ref.year}`)
+      const year = displayReferenceValue(ref.year)
+      if (year) {
+        lines.push(`**Year:** ${year}`)
       }
       
       // Cited URL
@@ -501,8 +929,10 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
       if (ref.authors?.length > 0) {
         lines.push(`    Authors: ${formatAuthors(ref.authors)}`)
       }
-      if (ref.year) lines.push(`    Year: ${ref.year}`)
-      if (ref.venue) lines.push(`    Venue: ${ref.venue}`)
+      const year = displayReferenceValue(ref.year)
+      const venue = displayReferenceValue(ref.venue)
+      if (year) lines.push(`    Year: ${year}`)
+      if (venue) lines.push(`    Venue: ${venue}`)
       
       if (ref.errors?.length > 0) {
         ref.errors.filter(e => e.error_type !== 'unverified').forEach(e => {
@@ -546,8 +976,9 @@ function generateBibtexKey(ref, index) {
     key = parts[parts.length > 1 ? parts.length - 1 : 0] || ''
     key = key.replace(/[^a-zA-Z]/g, '').toLowerCase()
   }
-  if (ref.year) {
-    key += ref.year
+  const year = displayReferenceValue(ref.year)
+  if (year) {
+    key += year
   }
   // Add first word of title for uniqueness
   if (ref.title) {
@@ -669,9 +1100,75 @@ export function exportResultsAsBibtex({ references }) {
   if (!references || references.length === 0) {
     return '% No references found'
   }
-  
+
   const entries = references.map((ref, index) => exportReferenceAsBibtex(ref, index))
   return entries.join('\n\n')
+}
+
+/**
+ * Flatten a reference into a single JSON record suitable for line-delimited
+ * JSON or row-based CSV consumption. Matches the structured fields the CLI
+ * --report-format json/jsonl produces so downstream consumers see the same
+ * shape regardless of which path produced the report.
+ */
+function _flattenReferenceForReport(ref, index, paperTitle, paperSource) {
+  const errors = (ref.errors || []).map(formatIssueLine)
+  const warnings = (ref.warnings || []).map(formatIssueLine)
+  return {
+    index,
+    paper_title: paperTitle || '',
+    paper_source: paperSource || '',
+    cited_title: ref.title || '',
+    cited_authors: ref.authors || '',
+    cited_year: displayReferenceValue(ref.year) || '',
+    cited_venue: displayReferenceValue(ref.venue) || '',
+    cited_doi: ref.doi || '',
+    cited_arxiv_id: ref.arxiv_id || '',
+    cited_url: ref.cited_url || '',
+    matched_db: ref.matched_db || '',
+    verified_url: ref.verified_url || '',
+    status: ref.status || '',
+    error_count: errors.length,
+    warning_count: warnings.length,
+    errors,
+    warnings,
+    hallucination_verdict: ref.hallucination_assessment?.verdict || '',
+    hallucination_explanation: ref.hallucination_assessment?.explanation || '',
+    hallucination_link: ref.hallucination_assessment?.link || '',
+  }
+}
+
+export function exportResultsAsJsonl({ paperTitle, paperSource, references }) {
+  if (!references || references.length === 0) return ''
+  return references
+    .map((ref, i) => JSON.stringify(_flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)))
+    .join('\n')
+}
+
+function _csvField(value) {
+  if (value === null || value === undefined) return ''
+  let s = Array.isArray(value) ? value.join(' | ') : String(value)
+  if (/[,"\n]/.test(s)) {
+    s = '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+export function exportResultsAsCsv({ paperTitle, paperSource, references }) {
+  const columns = [
+    'index', 'paper_title', 'paper_source',
+    'cited_title', 'cited_authors', 'cited_year', 'cited_venue', 'cited_doi',
+    'cited_arxiv_id', 'cited_url', 'matched_db', 'verified_url', 'status',
+    'error_count', 'warning_count', 'errors', 'warnings',
+    'hallucination_verdict', 'hallucination_explanation', 'hallucination_link',
+  ]
+  const header = columns.join(',')
+  if (!references || references.length === 0) return header
+  const rows = references.map((ref, i) => {
+    const flat = _flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)
+    return columns.map(c => _csvField(flat[c])).join(',')
+  })
+  return [header, ...rows].join('\n')
 }
 
 /**
@@ -712,13 +1209,325 @@ export function exportReferenceAsPlainText(ref) {
     citation += '.'
   }
   
-  // Add arXiv URL if suggested, otherwise use authoritative URL
-  const url = corrected.arxivUrl || corrected.url
+  // Append a publishable URL: DOI > ArXiv > original cited URL. Skips
+  // the Semantic Scholar / OpenAlex lookup URLs that show up in the
+  // verifier's authoritative_urls field — those aren't valid citations.
+  const url = _preferredCitationUrl(corrected)
   if (url) {
     citation += ` ${url}`
   }
-  
+
   return citation
+}
+
+/**
+ * Pick the URL that actually belongs in a published citation.
+ *
+ * Verifier-internal URLs (Semantic Scholar paper pages, OpenAlex API
+ * endpoints) match RefChecker's lookup record but they're not what an
+ * author would put in a bibliography. Prefer, in order:
+ *   1. DOI URL              — canonical, used by every modern style
+ *   2. ArXiv URL            — when the work is a preprint
+ *   3. Original cited URL   — if the author already had a non-S2/non-OA URL
+ *   4. Verifier URL         — fallback only
+ *
+ * Returns `null` when no useful URL exists, so style formatters can skip
+ * the URL field entirely instead of emitting a junk Semantic Scholar link.
+ */
+function _preferredCitationUrl(corrected) {
+  const looksInternal = (u) => {
+    if (!u) return true
+    const s = String(u).toLowerCase()
+    return s.includes('semanticscholar.org/paper') ||
+           s.includes('api.openalex.org') ||
+           s.includes('openalex.org/works')
+  }
+  if (corrected.doi) {
+    const doi = String(corrected.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim()
+    if (doi) return `https://doi.org/${doi}`
+  }
+  if (corrected.arxivUrl) return corrected.arxivUrl
+  if (corrected.arxivId) return `https://arxiv.org/abs/${String(corrected.arxivId).replace(/^arxiv:/i, '').trim()}`
+  if (corrected.citedUrl && !looksInternal(corrected.citedUrl)) return corrected.citedUrl
+  if (corrected.url && !looksInternal(corrected.url)) return corrected.url
+  return null
+}
+
+/* -------------------------------------------------------------------------
+ * Citation-style formatters.
+ *
+ * Approximate, not pedantic. Goal: produce a string the user can paste into
+ * their bibliography and tidy up by hand. Each style operates on the
+ * corrected metadata (post-verification) so the output already incorporates
+ * RefChecker's fixes.
+ * -----------------------------------------------------------------------*/
+
+function _splitAuthorName(rawName) {
+  if (!rawName) return { first: '', last: '', initials: '' }
+  const name = String(rawName).trim().replace(/\s+/g, ' ')
+  // "Lastname, Firstname Middle" form
+  if (name.includes(',')) {
+    const [last, rest] = name.split(',', 2).map(s => s.trim())
+    const givenParts = (rest || '').split(/\s+/).filter(Boolean)
+    const initials = givenParts.map(p => p[0] ? p[0].toUpperCase() + '.' : '').join(' ')
+    return { first: rest || '', last, initials }
+  }
+  // "Firstname Middle Lastname" form
+  const parts = name.split(/\s+/)
+  if (parts.length === 1) return { first: '', last: parts[0], initials: '' }
+  const last = parts.pop()
+  const first = parts.join(' ')
+  const initials = parts.map(p => (p[0] || '').toUpperCase() + '.').join(' ')
+  return { first, last, initials }
+}
+
+function _authorsArray(authors) {
+  if (!authors) return []
+  if (Array.isArray(authors)) return authors.filter(Boolean)
+  // Some refs ship authors as a single comma-separated string.
+  return String(authors).split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map(s => s.trim()).filter(Boolean)
+}
+
+function _formatAuthorsAPA(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last}, ${initials}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return `${list[0]}, & ${list[1]}`
+  if (list.length <= 20) return list.slice(0, -1).join(', ') + ', & ' + list.slice(-1)
+  return list.slice(0, 19).join(', ') + ', ... ' + list[list.length - 1]
+}
+
+function _formatAuthorsMLA(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length === 2) return `${first}, and ${list[1]}`
+  return `${first}, et al`
+}
+
+function _formatAuthorsIEEE(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${initials} ${last}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsVancouver(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last} ${initials.replace(/\./g, '').replace(/\s+/g, '')}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsChicago(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length <= 10) return `${first}, ` + list.slice(1).join(', ')
+  return `${first}, et al.`
+}
+
+/**
+ * Citation styles supported by the Corrections tab.
+ */
+export const CITATION_STYLES = [
+  { id: 'bibtex', label: 'BibTeX' },
+  { id: 'plaintext', label: 'Plain text (ACM)' },
+  { id: 'apa', label: 'APA 7th' },
+  { id: 'mla', label: 'MLA 9th' },
+  { id: 'chicago', label: 'Chicago author-date' },
+  { id: 'ieee', label: 'IEEE' },
+  { id: 'vancouver', label: 'Vancouver' },
+  { id: 'bibitem', label: 'LaTeX \\bibitem' },
+]
+
+// Default options-per-style. Overridable per call via the `options` arg.
+// `max_authors`: keep at most N authors, then add the et-al suffix.
+// `et_al_threshold`: list size at which we even consider abbreviating.
+// `include_url`: append the preferred URL when present.
+export const CITATION_STYLE_DEFAULTS = {
+  bibtex: { include_url: true, max_authors: null, et_al_threshold: null },
+  plaintext: { include_url: true, max_authors: null, et_al_threshold: null },
+  apa: { include_url: true, max_authors: 20, et_al_threshold: 21 },
+  mla: { include_url: true, max_authors: 1, et_al_threshold: 3 },
+  chicago: { include_url: true, max_authors: 1, et_al_threshold: 4 },
+  ieee: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+  vancouver: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+  bibitem: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+}
+
+const _CUSTOM_STYLES_KEY = 'refchecker:custom-citation-styles'
+
+export function listCustomCitationStyles() {
+  try {
+    const raw = localStorage.getItem(_CUSTOM_STYLES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
+}
+
+export function saveCustomCitationStyle(style) {
+  if (!style || !style.id || !style.template) return
+  const all = listCustomCitationStyles().filter(s => s.id !== style.id)
+  all.push(style)
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+}
+
+export function deleteCustomCitationStyle(id) {
+  const all = listCustomCitationStyles().filter(s => s.id !== id)
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+}
+
+// Truncate an author list to N entries with "et al." suffix when there
+// are more than `threshold` (so we don't abbreviate 2 authors to "X et al.")
+function _applyAuthorCap(formatted, authors, maxAuthors, etAlThreshold) {
+  if (!Array.isArray(authors) || authors.length === 0) return formatted
+  if (!maxAuthors || maxAuthors <= 0) return formatted
+  if (etAlThreshold && authors.length < etAlThreshold) return formatted
+  if (authors.length <= maxAuthors) return formatted
+  // The formatter already produced something — replace the trailing tail
+  // with the truncated form. We rebuild from scratch using the same
+  // separator the source used (comma) since that's the lowest common
+  // denominator across APA/IEEE/Vancouver/etc.
+  const head = authors.slice(0, maxAuthors).join(', ')
+  return `${head}, et al.`
+}
+
+// Render a user-defined template against a corrected ref. Supported
+// placeholders: {authors}, {title}, {year}, {venue}, {doi}, {arxiv_id},
+// {url}, {index}. Unknown placeholders are left intact.
+function _renderCustomTemplate(template, corrected, index) {
+  const url = _preferredCitationUrl(corrected) || ''
+  const authors = Array.isArray(corrected.authors) ? corrected.authors.join(', ') : (corrected.authors || '')
+  const map = {
+    authors,
+    title: corrected.title || '',
+    year: corrected.year || '',
+    venue: corrected.venue || '',
+    doi: corrected.doi || '',
+    arxiv_id: corrected.arxiv_id || '',
+    url,
+    index: String((index || 0) + 1),
+  }
+  return template.replace(/\{(\w+)\}/g, (m, k) => (k in map ? map[k] : m))
+}
+
+export function exportReferenceAsStyle(ref, style, index = 0, options = null) {
+  const corrected = getCorrectedReferenceData(ref)
+  // Custom styles use the `custom:<id>` namespace.
+  if (style && style.startsWith('custom:')) {
+    const id = style.slice('custom:'.length)
+    const def = listCustomCitationStyles().find(s => s.id === id)
+    if (def) {
+      return _renderCustomTemplate(def.template, corrected, index)
+    }
+    return exportReferenceAsPlainText(ref)
+  }
+
+  // Merge per-call options on top of the per-style defaults.
+  const opts = { ...(CITATION_STYLE_DEFAULTS[style] || {}), ...(options || {}) }
+  const rawUrl = _preferredCitationUrl(corrected)
+  const url = opts.include_url === false ? '' : rawUrl
+  const venue = corrected.venue || ''
+  const title = corrected.title || ''
+  const year = corrected.year || ''
+  const cap = (formatted) => _applyAuthorCap(formatted, corrected.authors, opts.max_authors, opts.et_al_threshold)
+
+  switch (style) {
+    case 'bibtex':
+      return exportReferenceAsBibtex(ref, index)
+    case 'plaintext':
+      return exportReferenceAsPlainText(ref)
+    case 'apa': {
+      // Author, F. M. (Year). Title. Venue. URL
+      const authors = cap(_formatAuthorsAPA(corrected.authors))
+      const parts = []
+      if (authors) parts.push(`${authors}${authors.endsWith('.') ? '' : '.'}`)
+      if (year) parts.push(`(${year}).`)
+      if (title) parts.push(`${title}${title.endsWith('.') ? '' : '.'}`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'mla': {
+      // Author. "Title." Venue, Year, URL.
+      const authors = cap(_formatAuthorsMLA(corrected.authors))
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`"${title}."`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'chicago': {
+      // Last, First, and Co Author. Year. "Title." Venue. URL.
+      const authors = cap(_formatAuthorsChicago(corrected.authors))
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (year) parts.push(`${year}.`)
+      if (title) parts.push(`"${title}."`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'ieee': {
+      // F. M. Last, "Title," Venue, Year. [Online]. Available: URL
+      const authors = cap(_formatAuthorsIEEE(corrected.authors))
+      const parts = []
+      if (authors) parts.push(`${authors},`)
+      if (title) parts.push(`"${title},"`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(`[Online]. Available: ${url}`)
+      return parts.join(' ')
+    }
+    case 'vancouver': {
+      // Last FM, Co N. Title. Venue. Year. URL
+      const authors = cap(_formatAuthorsVancouver(corrected.authors))
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`${title}.`)
+      if (venue) parts.push(`${venue}.`)
+      if (year) parts.push(`${year}.`)
+      if (url) parts.push(`Available from: ${url}`)
+      return parts.join(' ')
+    }
+    case 'bibitem': {
+      // \bibitem{key} F. M. Last, "Title," Venue, Year.
+      const key = (ref.bibtex_key || `ref${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '')
+      const authors = cap(_formatAuthorsIEEE(corrected.authors))
+      const tail = [venue, year].filter(Boolean).join(', ')
+      const body = [authors && `${authors},`, title && `"${title},"`, tail && `${tail}.`, url].filter(Boolean).join(' ')
+      return `\\bibitem{${key}} ${body}`
+    }
+    default:
+      return exportReferenceAsPlainText(ref)
+  }
+}
+
+export function exportResultsAsStyle(references, style) {
+  if (!references || references.length === 0) return ''
+  if (style === 'bibtex') return exportResultsAsBibtex({ references })
+  return references.map((r, i) => exportReferenceAsStyle(r, style, i)).join('\n\n')
 }
 
 /**
@@ -759,4 +1568,182 @@ export function exportReferenceAsMarkdown(ref) {
   }
   
   return lines.join('\n')
+}
+
+// ── RIS / Zotero / Mendeley / EndNote / Rayyan import format ───────────
+// RIS is the de-facto interchange format for reference managers. Every
+// major tool (Zotero, EndNote, Mendeley, Rayyan, RefWorks, Papers, etc.)
+// can import it directly via "File → Import" / drag-drop.
+
+function _risTypeFor(ref) {
+  const venue = (ref.venue || '').toLowerCase()
+  if (ref.arxiv_id || venue.includes('arxiv')) return 'GEN'
+  if (venue.includes('proceedings') || venue.includes('workshop') || venue.includes('conference')) return 'CPAPER'
+  if (venue.includes('thesis') || venue.includes('dissertation')) return 'THES'
+  if (venue.includes('book')) return 'BOOK'
+  return 'JOUR'
+}
+
+function _risAuthorList(authors) {
+  if (!authors) return []
+  if (Array.isArray(authors)) return authors.filter(Boolean)
+  return String(authors)
+    .split(/\s+and\s+|;|,(?![\w\s]+\.\s*[A-Z])/i)
+    .map(a => a.trim())
+    .filter(Boolean)
+}
+
+export function exportReferenceAsRIS(ref, index = 0) {
+  const corrected = getCorrectedReferenceData(ref)
+  const type = _risTypeFor(corrected)
+  const lines = [`TY  - ${type}`]
+  if (corrected.title) lines.push(`TI  - ${corrected.title}`)
+  for (const a of _risAuthorList(corrected.authors)) {
+    lines.push(`AU  - ${a}`)
+  }
+  if (corrected.year) lines.push(`PY  - ${corrected.year}`)
+  if (corrected.venue) lines.push(type === 'JOUR' ? `JO  - ${corrected.venue}` : `T2  - ${corrected.venue}`)
+  if (corrected.doi) lines.push(`DO  - ${corrected.doi}`)
+  if (corrected.arxiv_id) lines.push(`AN  - arXiv:${corrected.arxiv_id}`)
+  const url = _preferredCitationUrl(corrected)
+  if (url) lines.push(`UR  - ${url}`)
+  // ID is what Rayyan/EndNote use for de-dup; index is a fine fallback
+  lines.push(`ID  - ref-${index + 1}`)
+  lines.push('ER  - ')
+  return lines.join('\n')
+}
+
+export function exportResultsAsRIS({ references }) {
+  if (!references || references.length === 0) return ''
+  return references.map((r, i) => exportReferenceAsRIS(r, i)).join('\n\n') + '\n'
+}
+
+// ── Sort modes for any "export the bibliography" path ─────────────────
+
+export const REFERENCE_SORT_MODES = [
+  { id: 'citation', label: 'Citation order (as cited in paper)' },
+  { id: 'alphabetical', label: 'Alphabetical (by first author)' },
+  { id: 'year-desc', label: 'Year (newest first)' },
+  { id: 'year-asc', label: 'Year (oldest first)' },
+]
+
+function _firstAuthorKey(ref) {
+  const corrected = getCorrectedReferenceData(ref)
+  const a = corrected.authors
+  let first = ''
+  if (Array.isArray(a)) first = a[0] || ''
+  else if (typeof a === 'string') first = a.split(/,|;|\s+and\s+/i)[0] || ''
+  // Pull the longest token (usually surname). Strip diacritics for sort.
+  const parts = first.split(/\s+/).filter(Boolean)
+  const surname = parts.length ? parts.reduce((acc, p) => (p.length > acc.length ? p : acc), '') : ''
+  return surname.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+export function sortReferencesForExport(references, mode = 'citation') {
+  const arr = (references || []).slice()
+  switch (mode) {
+    case 'alphabetical':
+      return arr.sort((a, b) => {
+        const ak = _firstAuthorKey(a)
+        const bk = _firstAuthorKey(b)
+        if (ak && bk && ak !== bk) return ak < bk ? -1 : 1
+        if (ak && !bk) return -1
+        if (!ak && bk) return 1
+        return (a.index || 0) - (b.index || 0)
+      })
+    case 'year-desc':
+      return arr.sort((a, b) => (Number(b.year || 0)) - (Number(a.year || 0)))
+    case 'year-asc':
+      return arr.sort((a, b) => (Number(a.year || 0)) - (Number(b.year || 0)))
+    case 'citation':
+    default:
+      return arr.sort((a, b) => (a.index || 0) - (b.index || 0))
+  }
+}
+
+// ── Original-vs-corrected diff exports ──────────────────────────────
+// Side-by-side view of "as cited" → "corrected" for every reference
+// that the verifier suggested a fix for. Useful when handing the
+// list to a co-author or to a journal-side editor.
+
+function _citedShellForDiff(ref) {
+  return {
+    title: ref.title,
+    authors: ref.authors,
+    year: ref.year,
+    venue: ref.venue,
+    doi: ref.doi,
+    arxiv_id: ref.arxiv_id,
+    cited_url: ref.cited_url,
+  }
+}
+
+function _correctedShellForDiff(ref) {
+  const c = ref.corrected_reference || {}
+  return {
+    title: c.title || ref.title,
+    authors: c.authors || ref.authors,
+    year: c.year || ref.year,
+    venue: c.venue || ref.venue,
+    doi: c.doi || ref.doi,
+    arxiv_id: c.arxiv_id || ref.arxiv_id,
+  }
+}
+
+function _refHasCorrection(ref) {
+  const c = ref.corrected_reference
+  if (!c || typeof c !== 'object') return false
+  return Object.keys(c).some(k => c[k] != null && c[k] !== '')
+}
+
+export function exportDiffAsMarkdown({ paperTitle, references, style = 'apa', options = null }) {
+  const lines = []
+  if (paperTitle) lines.push(`# Reference corrections for "${paperTitle}"\n`)
+  let n = 0
+  for (let i = 0; i < (references || []).length; i++) {
+    const r = references[i]
+    if (!_refHasCorrection(r)) continue
+    n += 1
+    const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
+    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+    lines.push(`## [${i + 1}]`)
+    lines.push(`**As cited:** ${cited}`)
+    lines.push('')
+    lines.push(`**Corrected:** ${corrected}`)
+    if ((r.errors || []).length) {
+      const issues = r.errors.map(e => e.error_details || e.error_type).filter(Boolean).join('; ')
+      if (issues) lines.push(`\n_Issues: ${issues}_`)
+    }
+    lines.push('')
+  }
+  if (n === 0) lines.push('_No corrections to export — every reference verified clean._')
+  return lines.join('\n')
+}
+
+export function exportDiffAsCsv({ references, style = 'apa', options = null }) {
+  const header = ['index', 'status', 'as_cited', 'corrected', 'issues'].join(',')
+  const rows = [header]
+  for (let i = 0; i < (references || []).length; i++) {
+    const r = references[i]
+    if (!_refHasCorrection(r)) continue
+    const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
+    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+    const issues = (r.errors || []).map(e => e.error_details || e.error_type).filter(Boolean).join(' | ')
+    rows.push([i + 1, r.status || '', _csvField(cited), _csvField(corrected), _csvField(issues)].join(','))
+  }
+  return rows.join('\n')
+}
+
+export function exportCorrectedListAsStyle(references, style, options = null) {
+  // The "corrected list" is the bibliography rewritten with every accepted
+  // verifier suggestion applied — used for the "I trust the fixes, give
+  // me the fixed bib" export.
+  return (references || [])
+    .map((r, i) => exportReferenceAsStyle(
+      _refHasCorrection(r) ? { ...r, ..._correctedShellForDiff(r) } : r,
+      style,
+      i,
+      options,
+    ))
+    .join('\n\n')
 }

@@ -35,6 +35,45 @@ from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAUL
 
 logger = logging.getLogger(__name__)
 
+
+def _record_web_search_usage(provider: str, model: str, response) -> None:
+    """Best-effort usage tracking for web-search LLM calls (kind=web_search).
+
+    Pushes tokens into BOTH the per-check FlowScope tracker AND the
+    process-wide tracker. Wrapped so a tracking failure never breaks
+    the actual web search call.
+    """
+    try:
+        if provider == 'anthropic':
+            from refchecker.llm.providers import _track_anthropic_usage
+            _track_anthropic_usage(response, model)
+        elif provider in ('google', 'gemini'):
+            from refchecker.llm.providers import _track_google_usage
+            _track_google_usage(response, model)
+        else:
+            from refchecker.llm.providers import _track_openai_usage
+            _track_openai_usage(response, model)
+    except Exception as e:
+        logger.debug('web_search per-check usage tracking skipped: %s', e)
+
+    try:
+        from backend import usage_tracker as _bg_ut
+        if provider == 'anthropic':
+            u = _bg_ut.extract_anthropic_usage(response)
+        elif provider in ('google', 'gemini'):
+            u = _bg_ut.extract_gemini_usage(response)
+        else:
+            u = _bg_ut.extract_openai_usage(response)
+        _bg_ut.record_usage(
+            'google' if provider == 'gemini' else provider,
+            model,
+            u['input_tokens'],
+            u['output_tokens'],
+            'web_search',
+        )
+    except Exception as e:
+        logger.debug('web_search global usage tracking skipped: %s', e)
+
 # ------------------------------------------------------------------
 # Academic domain list (shared by all providers)
 # ------------------------------------------------------------------
@@ -160,12 +199,14 @@ class OpenAISearchProvider(WebSearchProvider):
         return self._client is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
+        _model = DEFAULT_WEB_SEARCH_MODELS['openai']
         response = self._client.responses.create(
-            model=DEFAULT_WEB_SEARCH_MODELS['openai'],
+            model=_model,
             instructions=_WEB_SEARCH_SYSTEM_PROMPT,
             tools=[{'type': 'web_search_preview'}],
             input=query,
         )
+        _record_web_search_usage('openai', _model, response)
 
         # Extract the verdict text and any cited URLs
         verdict_text = ''
@@ -236,8 +277,9 @@ class AnthropicSearchProvider(WebSearchProvider):
         return self._client is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
+        _model = DEFAULT_WEB_SEARCH_MODELS['anthropic']
         resp = self._client.messages.create(
-            model=DEFAULT_WEB_SEARCH_MODELS['anthropic'],
+            model=_model,
             max_tokens=1024,
             system=_WEB_SEARCH_SYSTEM_PROMPT,
             tools=[{
@@ -247,6 +289,7 @@ class AnthropicSearchProvider(WebSearchProvider):
             }],
             messages=[{'role': 'user', 'content': query}],
         )
+        _record_web_search_usage('anthropic', _model, resp)
 
         verdict_text = ''
         results: List[Dict[str, str]] = []
@@ -322,8 +365,9 @@ class GeminiSearchProvider(WebSearchProvider):
         return self._client is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
+        _model = DEFAULT_WEB_SEARCH_MODELS['google']
         response = self._client.models.generate_content(
-            model=DEFAULT_WEB_SEARCH_MODELS['google'],
+            model=_model,
             contents=query,
             config={
                 'system_instruction': _WEB_SEARCH_SYSTEM_PROMPT,
@@ -331,6 +375,7 @@ class GeminiSearchProvider(WebSearchProvider):
                 'temperature': 0.0,
             },
         )
+        _record_web_search_usage('google', _model, response)
 
         results: List[Dict[str, str]] = []
         seen_urls: set = set()

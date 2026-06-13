@@ -8,6 +8,10 @@ import LoginPage from './components/Auth/LoginPage'
 import UserMenu from './components/Auth/UserMenu'
 import { logger } from './utils/logger'
 import { useAuthStore } from './stores/useAuthStore'
+import { isTauri, openExternal } from './utils/tauriBridge'
+import { useStyleStore } from './stores/useStyleStore'
+
+const UPSTREAM_GITHUB_URL = 'https://github.com/markrussinovich/refchecker'
 import { useHistoryStore } from './stores/useHistoryStore'
 
 function App() {
@@ -18,11 +22,18 @@ function App() {
 
   // Auth state
   const { user, authRequired, isLoading: authLoading, init: initAuth } = useAuthStore()
+  const loadStylePreferences = useStyleStore(s => s.loadPreferences)
 
   // Initialise auth once on mount
   useEffect(() => {
     initAuth()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (authLoading) return
+    if (authRequired && !user) return
+    loadStylePreferences({ seedFromLocal: !authRequired })
+  }, [authLoading, authRequired, user, loadStylePreferences])
 
   useEffect(() => {
     logger.debug('App', `Theme changed to: ${theme}`)
@@ -62,6 +73,29 @@ function App() {
   useEffect(() => {
     setSidebarOpen(false)
   }, [selectedCheckId])
+
+  // Global Cmd+Opt+I / Ctrl+Shift+I shortcut to open DevTools in
+  // signed/release Tauri builds. WebKit's default DevTools shortcut
+  // is blocked on signed macOS apps, leaving users unable to inspect
+  // the console — which broke our ability to diagnose drag-drop
+  // failures over the v0.7.32–v0.7.39 cycle. The custom Tauri command
+  // `open_devtools` (registered in main.rs, compiled in via the
+  // `devtools` cargo feature in v0.7.40) routes around the limitation.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__?.invoke) return
+    const onKey = (e) => {
+      const mac = (e.metaKey && e.altKey && (e.key === 'i' || e.key === 'I'))
+      const win = (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i'))
+      if (mac || win) {
+        e.preventDefault()
+        window.__TAURI_INTERNALS__.invoke('open_devtools').catch((err) => {
+          console.warn('open_devtools failed', err)
+        })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Only show auth loading spinner if we already know auth is required
   // (avoids blocking the entire UI while checking providers in single-user mode)
@@ -132,11 +166,17 @@ function App() {
           </div>
           <div className="flex items-center gap-2 lg:gap-4">
             <a
-              href="https://github.com/markrussinovich/refchecker"
+              href={UPSTREAM_GITHUB_URL}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => {
+                if (!isTauri()) return
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                e.preventDefault()
+                openExternal(UPSTREAM_GITHUB_URL)
+              }}
               className="header-github-link text-gray-400 hover:text-gray-200 transition-colors"
-              title="View on GitHub"
+              title="View RefChecker on GitHub"
             >
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                 <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />

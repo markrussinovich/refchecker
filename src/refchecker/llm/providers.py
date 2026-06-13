@@ -10,9 +10,117 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .base import LLMProvider
+from .google_retry import call_google_with_retry, extract_google_response_text
+# Per-check token tracker (FlowScope tagging) — drives the $ badge's
+# per-flow breakdown (extract / verify / hallucination / suggest /
+# graph / reverify). Distinct from backend/usage_tracker.py, which
+# tracks cumulative process-wide totals.
+from . import usage_tracker as _check_usage_tracker
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_EXTRACTION_MODELS
 
 logger = logging.getLogger(__name__)
+
+# Soft import — usage tracker only exists when running under the WebUI/desktop
+# backend. The CLI is unaffected; tracker calls become no-ops.
+try:
+    from backend import usage_tracker as _usage_tracker
+except Exception:  # pragma: no cover
+    _usage_tracker = None
+
+
+def _record_provider_usage(provider: str, model: str, response, kind: str):
+    if _usage_tracker is None:
+        return
+    try:
+        if provider == "openai":
+            u = _usage_tracker.extract_openai_usage(response)
+        elif provider == "anthropic":
+            u = _usage_tracker.extract_anthropic_usage(response)
+        elif provider in ("google", "gemini"):
+            u = _usage_tracker.extract_gemini_usage(response)
+        else:
+            return
+        _usage_tracker.record_usage(provider, model, u["input_tokens"], u["output_tokens"], kind)
+    except Exception as e:
+        logger.debug("usage tracking failed for %s: %s", provider, e)
+
+
+def _safe_int(v) -> int:
+    try:
+        n = int(v)
+        return n if n >= 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _track_openai_usage(response, model: str) -> None:
+    """Pull token counts off an OpenAI/Azure ChatCompletion response and
+    record them. Safe against missing / partial usage objects so the
+    badge never crashes the actual extraction call."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_t = _safe_int(getattr(usage, "prompt_tokens", 0))
+        out_t = _safe_int(getattr(usage, "completion_tokens", 0))
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=prompt_t,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover - never break the call path
+        logger.debug(f"usage_tracker (openai) skipped: {e}")
+
+
+def _track_anthropic_usage(response, model: str) -> None:
+    """Pull input/output token counts off an Anthropic Messages response.
+
+    Anthropic separates `input_tokens` from `cache_creation_input_tokens`
+    and `cache_read_input_tokens`. All three are billed, so the per-check
+    badge must add them — otherwise a prompt-cached request under-counts
+    by 10x or more relative to what the provider dashboard shows.
+    """
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        in_t = _safe_int(getattr(usage, "input_tokens", 0))
+        cache_w = _safe_int(getattr(usage, "cache_creation_input_tokens", 0))
+        cache_r = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
+        out_t = _safe_int(getattr(usage, "output_tokens", 0))
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=in_t + cache_w + cache_r,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"usage_tracker (anthropic) skipped: {e}")
+
+
+def _track_google_usage(response, model: str) -> None:
+    """Pull prompt/candidates token counts off a Google GenAI response."""
+    try:
+        meta = getattr(response, "usage_metadata", None)
+        if meta is None:
+            return
+        in_t = _safe_int(getattr(meta, "prompt_token_count", 0))
+        candidates = _safe_int(getattr(meta, "candidates_token_count", 0))
+        # Gemini 2.5+ thinking models report reasoning tokens separately
+        # under `thoughts_token_count`. Google bills them as output tokens
+        # so the badge has to add them — otherwise reasoning-heavy calls
+        # under-count by ~2-3x vs the provider dashboard.
+        thoughts = _safe_int(getattr(meta, "thoughts_token_count", 0))
+        out_t = candidates + thoughts
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=in_t,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"usage_tracker (google) skipped: {e}")
 
 
 def _openai_token_kwargs(model: str, max_tokens: int) -> dict:
@@ -42,7 +150,7 @@ class LLMProviderMixin:
     # Set by the checker when --cache is used; None means disabled.
     cache_dir: str = None
 
-    def _call_llm_cached(self, prompt: str) -> str:
+    def _call_llm_cached(self, prompt: str, cache_predicate=None) -> str:
         """Wrapper around _call_llm that checks/saves the LLM response cache."""
         logger.debug("Raw bibliography text passed to LLM (%d chars):\n%s",
                       len(prompt), prompt)
@@ -53,11 +161,16 @@ class LLMProviderMixin:
             if hit is not None:
                 logger.debug("Raw LLM extraction response (cached, %d chars):\n%s",
                              len(hit['text']), hit['text'])
-                return hit['text']
+                if cache_predicate is None or cache_predicate(hit['text']):
+                    return hit['text']
+                logger.info("Ignoring cached LLM extraction response that parses to zero references")
             result = self._call_llm(prompt)
             logger.debug("Raw LLM extraction response (%d chars):\n%s",
                          len(result), result)
-            cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
+            if cache_predicate is None or cache_predicate(result):
+                cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
+            else:
+                logger.info("Not caching LLM extraction response that parses to zero references")
             return result
         result = self._call_llm(prompt)
         logger.debug("Raw LLM extraction response (%d chars):\n%s",
@@ -129,6 +242,9 @@ class LLMProviderMixin:
             "   (e.g. 'ISO/PAS-8800...', 'IEEE Std...') or datasets are separate references with no authors.\n"
             "   Do NOT merge them with the next entry — output them as #Title#Venue#Year#URL\n"
             "9. Use the EXACT title from the bibliography text - never shorten, paraphrase, or summarize titles\n"
+            "   but repair obvious PDF line-wrap artifacts: remove hyphenation across line breaks and restore missing word spaces\n"
+            "   when the intended words are clear (e.g. 'dis-\\ncoverwhatexcitesneuronsmostusingdeeppredictivemodels' ->\n"
+            "   'discover what excites neurons most using deep predictive models')\n"
             "10. IGNORE non-reference text: theorems, proofs, algorithms, equations, discussion prose, "
             "section headers, figure/table captions. Only extract actual bibliographic entries\n"
             "11. If references suddenly change format (e.g. numbered refs followed by unnumbered prose), "
@@ -241,8 +357,18 @@ class LLMProviderMixin:
                 return
             candidate = ' '.join(part for part in current_parts if part).strip()
             if candidate:
-                potential_refs.append(candidate)
+                potential_refs.extend(split_fused_same_line_references(candidate))
             current_parts.clear()
+
+        def split_fused_same_line_references(ref_text: str) -> List[str]:
+            """Split one physical line that contains adjacent structured refs."""
+            author_start = r'(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9.&\'’\-]*(?:\s+(?:et\s+al\.?|[A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9.&\'’\-]*)){0,8})'
+            split_before_next_author = re.compile(
+                r'#((?:19|20)\d{2}[a-z]?)(#?)\s+'
+                rf'(?={author_start}\s*#)'
+            )
+            ref_text = split_before_next_author.sub(r'#\1#\n', ref_text)
+            return [part.strip() for part in ref_text.splitlines() if part.strip()]
 
         def looks_like_complete_reference(ref_text: str) -> bool:
             segments = [segment.strip() for segment in ref_text.split('#') if segment.strip()]
@@ -360,7 +486,7 @@ class LLMProviderMixin:
             ref = re.sub(r'^(\d+\.|\[\d+\]|\(\d+\))\s*', '', ref)
 
             # Filter out very short lines (likely not complete references)
-            if len(ref) > 30:  # Minimum length for academic references
+            if len(ref) > 30 or looks_like_complete_reference(ref):
                 references.append(ref)
 
         return references
@@ -414,9 +540,10 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
             if not _is_openai_reasoning_model(_model):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
-            
+            _record_provider_usage("openai", _model, response, "extraction")
+            _track_openai_usage(response, _model)
             return response.choices[0].message.content or ""
-            
+
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
             raise
@@ -446,8 +573,9 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Anthropic API call and return the response text"""
         try:
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['anthropic']
             response = self.client.messages.create(
-                model=self.model or DEFAULT_EXTRACTION_MODELS['anthropic'],
+                model=_model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 system=[{
@@ -459,7 +587,8 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                     {"role": "user", "content": prompt}
                 ]
             )
-            
+            _record_provider_usage("anthropic", _model, response, "extraction")
+            _track_anthropic_usage(response, _model)
             logger.debug(f"Anthropic response type: {type(response.content)}")
             logger.debug(f"Anthropic response content: {response.content}")
             
@@ -513,22 +642,27 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
-            response = self.client.models.generate_content(
-                model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
-                contents=prompt,
-                config={
-                    'system_instruction': self._get_system_prompt(),
-                    'max_output_tokens': self.max_tokens,
-                    'temperature': self.temperature,
-                },
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['google']
+            response = call_google_with_retry(
+                lambda: self.client.models.generate_content(
+                    model=_model,
+                    contents=prompt,
+                    config={
+                        'system_instruction': self._get_system_prompt(),
+                        'max_output_tokens': self.max_tokens,
+                        'temperature': self.temperature,
+                    },
+                ),
+                purpose='reference extraction',
             )
-            
+            _record_provider_usage("google", _model, response, "extraction")
+            _track_google_usage(response, _model)
             # Handle empty responses (content safety filter or other issues)
             if not response.candidates:
                 logger.warning("Google API returned empty candidates (possibly content filtered)")
                 return ""
             
-            return response.text or ""
+            return extract_google_response_text(response)
             
         except Exception as e:
             logger.error(f"Google API call failed: {e}")
@@ -584,9 +718,10 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
             if not _is_openai_reasoning_model(_model):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
-            
+            _record_provider_usage("openai", _model, response, "extraction")
+            _track_openai_usage(response, _model)
             return response.choices[0].message.content or ""
-            
+
         except Exception as e:
             logger.error(f"Azure API call failed: {e}")
             raise
@@ -1054,9 +1189,14 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
                 temperature=self.temperature,
                 stop=None  # Let the model use its default stop tokens
             )
-            
+
+            # vLLM exposes the same `usage` shape as OpenAI when running in
+            # OpenAI-compatible server mode, so the same helper works.
+            _record_provider_usage("openai", self.model_name, response, "extraction")
+            _track_openai_usage(response, self.model_name)
+
             content = response.choices[0].message.content
-            
+
             logger.debug(f"Received response from vLLM server:")
             logger.debug(f"  Length: {len(content)}")
             logger.debug(f"  First 200 chars: {content[:200]}...")

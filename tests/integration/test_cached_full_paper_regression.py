@@ -244,6 +244,7 @@ def _get_paper_results(paper_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
+@pytest.mark.slow
 class TestCachedFullPaperRegression:
     """Given identical cached inputs, all modes must produce the same
     per-reference verification assessment."""

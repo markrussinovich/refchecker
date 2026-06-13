@@ -70,6 +70,16 @@ body {
   min-height: 100vh;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer !important;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
 #root {
   min-height: 100vh;
 }
@@ -197,4 +207,21 @@ body {
     min-width: 0;
     max-width: 160px;
   }
+}
+
+/* External links: always underlined + readable color, with a clear
+   pointer cursor. Tauri's WebView swallows target=_blank — main.jsx
+   installs a global click handler that routes these through shell.open. */
+a[href^="http"],
+a[href^="https"],
+a[href^="mailto:"] {
+  color: var(--color-accent, #3b82f6);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+a[href^="http"]:hover,
+a[href^="https"]:hover,
+a[href^="mailto:"]:hover {
+  text-decoration-thickness: 2px;
 }

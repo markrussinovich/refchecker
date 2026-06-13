@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference } from './formatters'
+import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue } from './formatters'
 
 describe('formatters', () => {
   describe('formatDate', () => {
@@ -132,6 +132,18 @@ describe('formatters', () => {
       const ref = { title: 'Test Paper' }
       const result = formatReference(ref)
       expect(result).toContain('Test Paper')
+    })
+
+    it('should omit no-date placeholders', () => {
+      const ref = {
+        authors: ['John Smith'],
+        year: 'n.d.',
+        title: 'Undated Tool',
+        venue: 'N. D.'
+      }
+      const result = formatReference(ref)
+      expect(result).toBe('John Smith "Undated Tool"')
+      expect(displayReferenceValue('n.d.')).toBe('')
     })
   })
 })

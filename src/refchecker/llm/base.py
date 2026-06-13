@@ -203,7 +203,10 @@ class LLMProvider(ABC):
         else:
             # Process normally for short bibliographies
             prompt = self._create_extraction_prompt(bibliography_text)
-            response_text = self._call_llm_cached(prompt)
+            response_text = self._call_llm_cached(
+                prompt,
+                cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+            )
             refs = self._parse_llm_response(response_text)
             refs = self._repair_truncated_arxiv_dois(refs, bibliography_text)
             return self._restore_et_al(refs, bibliography_text)
@@ -364,28 +367,62 @@ class LLMProvider(ABC):
         start_time = time.time()
         all_references = []
         
+        # Capture the per-check FlowScope state from the OUTER thread so
+        # worker threads (which start with empty threading.local) attribute
+        # tokens to the same check_id and flow. Without this the $ badge
+        # silently under-counts every chunked extraction by 100%.
+        try:
+            from refchecker.llm import usage_tracker as _ut
+            _outer_check_id = _ut.get_current_check()
+            _outer_flow = _ut.get_current_flow()
+        except Exception:
+            _ut = None
+            _outer_check_id = None
+            _outer_flow = None
+
         def process_single_chunk(chunk_data):
             """Process a single chunk and return results"""
             chunk_index, chunk_text = chunk_data
+            # Re-bind the check_id and flow onto this worker thread.
+            # ThreadPoolExecutor reuses workers across submits so a stale
+            # binding from a previous task is fine — we always overwrite.
             try:
+                if _ut is not None:
+                    _ut.set_current_check(_outer_check_id)
+            except Exception:
+                pass
+            _scope_cm = None
+            try:
+                if _ut is not None and _outer_flow:
+                    _scope_cm = _ut.FlowScope(_outer_flow)
+                    _scope_cm.__enter__()
                 logger.debug(f"Processing chunk {chunk_index + 1}/{len(chunks)}")
                 prompt = self._create_extraction_prompt(chunk_text)
-                response_text = self._call_llm_cached(prompt)
+                response_text = self._call_llm_cached(
+                    prompt,
+                    cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+                )
                 chunk_references = self._parse_llm_response(response_text)
                 logger.debug(f"Chunk {chunk_index + 1} extracted {len(chunk_references)} references")
                 return chunk_index, chunk_references
             except Exception as e:
                 logger.error(f"Failed to process chunk {chunk_index + 1}: {e}")
                 return chunk_index, []
-        
+            finally:
+                if _scope_cm is not None:
+                    try:
+                        _scope_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+
         # Create indexed chunks for processing
         indexed_chunks = [(i, chunk) for i, chunk in enumerate(chunks)]
-        
+
         # Process chunks in parallel
         with ThreadPoolExecutor(max_workers=effective_workers, thread_name_prefix="LLMChunk") as executor:
             # Submit all chunks for processing
             future_to_chunk = {
-                executor.submit(process_single_chunk, chunk_data): chunk_data[0] 
+                executor.submit(process_single_chunk, chunk_data): chunk_data[0]
                 for chunk_data in indexed_chunks
             }
             
@@ -437,7 +474,10 @@ class LLMProvider(ABC):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
             try:
                 prompt = self._create_extraction_prompt(chunk)
-                response_text = self._call_llm_cached(prompt)
+                response_text = self._call_llm_cached(
+                    prompt,
+                    cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+                )
                 chunk_references = self._parse_llm_response(response_text)
                 all_references.extend(chunk_references)
                 logger.debug(f"Chunk {i+1} extracted {len(chunk_references)} references")

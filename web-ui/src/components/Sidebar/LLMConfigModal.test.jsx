@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +16,8 @@ vi.mock('../../stores/useConfigStore', () => ({
     addConfig: mocks.addConfig,
     updateConfig: mocks.updateConfig,
     configs: mocks.configs,
+    selectConfig: vi.fn(),
+    selectHallucinationConfig: vi.fn(),
   }),
 }))
 
@@ -31,6 +33,7 @@ vi.mock('../../stores/useKeyStore', () => {
 
 vi.mock('../../utils/api', () => ({
   validateLLMConfig: mocks.validateLLMConfig,
+  listLLMModels: vi.fn(),
 }))
 
 vi.mock('../../utils/logger', () => ({
@@ -46,6 +49,8 @@ describe('LLMConfigModal', () => {
     mocks.configs = []
     mocks.hasKey.mockReturnValue(false)
     mocks.getKey.mockReturnValue(null)
+    mocks.validateLLMConfig.mockResolvedValue({ data: { valid: true } })
+    mocks.addConfig.mockResolvedValue({ id: 9, provider: 'anthropic', model: 'claude-sonnet-4-6' })
   })
 
   it('shows single-user help text when not in multiuser mode', () => {
@@ -62,5 +67,45 @@ describe('LLMConfigModal', () => {
 
     expect(screen.getByText('Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.')).toBeTruthy()
     expect(screen.queryByText('Stored encrypted in the local RefChecker database and never shown again.')).toBeNull()
+  })
+
+  it('creates hallucination configs without selecting them for extraction', async () => {
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} selectionMode="hallucination" />)
+
+    fireEvent.change(screen.getByLabelText(/API Key/i), {
+      target: { value: 'test-key' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add Configuration/i }))
+
+    await waitFor(() => {
+      expect(mocks.addConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'anthropic' }),
+        { selectFor: 'hallucination' },
+      )
+    })
+  })
+
+  it('allows server environment keys to satisfy validation in multiuser mode', async () => {
+    mocks.multiuser = true
+    mocks.configs = [{
+      id: 'env:anthropic',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      has_key: true,
+      key_source: 'environment',
+      env_key_available: true,
+    }]
+
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    expect(screen.getByText('Using the server environment key by default. Enter a key here to override it for this browser.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Test connection/i }))
+
+    await waitFor(() => {
+      expect(mocks.validateLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'anthropic',
+        api_key: undefined,
+      }))
+    })
   })
 })

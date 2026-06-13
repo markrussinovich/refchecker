@@ -11,8 +11,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Default max concurrent reference checks per session
-DEFAULT_MAX_CONCURRENT = 6
+# Default max concurrent reference checks per session.
+#
+# v0.7.47: lowered from 6 → 4 after a user's 800-paper bulk batch
+# exposed SQLite write contention — every parallel ref check was
+# upserting to verified_reference_identity and updating check_history
+# at the same time. The DB held up but /history and /llm-usage reads
+# stalled behind the writes. Going from 6 to 4 trades ~30 % per-paper
+# wall-time for materially smoother reads during a giant batch. The
+# user can still override via the `max_concurrent_checks` setting if
+# they prefer the older behaviour on lighter workloads.
+DEFAULT_MAX_CONCURRENT = 4
 
 class SessionConcurrencyLimiter:
     """

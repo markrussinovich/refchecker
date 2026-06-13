@@ -92,7 +92,7 @@ class OpenAlexReferenceChecker:
         params = {
             "search": query,
             "per_page": min(limit, 25),  # OpenAlex max per page is 200, but we limit for performance
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids"
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio"
         }
         
         # Add year filter if provided
@@ -152,7 +152,7 @@ class OpenAlexReferenceChecker:
         endpoint = f"{self.base_url}/works/doi:{clean_doi}"
         
         params = {
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids"
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio"
         }
         
         # Make the request with retries and backoff
@@ -401,11 +401,17 @@ class OpenAlexReferenceChecker:
         # Verify year
         work_year = work_data.get('publication_year')
         if year and work_year and year != work_year:
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': format_year_mismatch(year, work_year),
-                'ref_year_correct': work_year
-            })
+            try:
+                year_gap = abs(int(year) - int(work_year))
+            except (TypeError, ValueError):
+                year_gap = None
+            # Suppress trivial 1-year gaps (online-ahead-of-print, epub vs print)
+            if year_gap is None or year_gap > 1:
+                errors.append({
+                    'warning_type': 'year',
+                    'warning_details': format_year_mismatch(year, work_year),
+                    'ref_year_correct': work_year
+                })
         
         # Verify DOI
         work_doi = work_data.get('doi')

@@ -9,7 +9,9 @@ const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
 function getStoredSelection(key) {
   try {
     const value = localStorage.getItem(key)
-    return value ? Number(value) : null
+    if (!value) return null
+    const numericValue = Number(value)
+    return Number.isNaN(numericValue) ? value : numericValue
   } catch {
     return null
   }
@@ -102,29 +104,38 @@ export const useConfigStore = create((set, get) => ({
     set({ error: lastError?.message || 'Failed to connect to server', isLoading: false })
   },
 
-  addConfig: async (config) => {
+  addConfig: async (config, options = {}) => {
     set({ isLoading: true, error: null })
     try {
       logger.info('ConfigStore', 'Creating LLM config', { name: config.name, provider: config.provider })
       const response = await api.createLLMConfig(config)
       const newConfig = response.data
-      setStoredSelection(EXTRACTION_SELECTION_KEY, newConfig.id)
-      if (hallucinationCapableProviders.includes(newConfig.provider)) {
+      const selectFor = options.selectFor || 'extraction'
+      const canUseForHallucination = hallucinationCapableProviders.includes(newConfig.provider)
+      const selectExtraction = selectFor === 'extraction' || selectFor === 'both'
+      const selectHallucination = canUseForHallucination && (selectFor === 'hallucination' || selectFor === 'both')
+      const initializeHallucination = canUseForHallucination && selectExtraction && get().selectedHallucinationConfigId == null
+
+      if (selectExtraction) {
+        setStoredSelection(EXTRACTION_SELECTION_KEY, newConfig.id)
+      }
+      if (selectHallucination || initializeHallucination) {
         setStoredSelection(HALLUCINATION_SELECTION_KEY, newConfig.id)
       }
       
       set(state => ({
         configs: [...state.configs, newConfig],
-        selectedConfigId: newConfig.id, // Auto-select new config
-        selectedExtractionConfigId: newConfig.id,
-        selectedHallucinationConfigId: hallucinationCapableProviders.includes(newConfig.provider)
+        selectedConfigId: selectExtraction ? newConfig.id : state.selectedConfigId,
+        selectedExtractionConfigId: selectExtraction ? newConfig.id : state.selectedExtractionConfigId,
+        selectedHallucinationConfigId: (selectHallucination || (canUseForHallucination && selectExtraction && state.selectedHallucinationConfigId == null))
           ? newConfig.id
           : state.selectedHallucinationConfigId,
         isLoading: false
       }))
       
-      // Set as default
-      await api.setDefaultLLMConfig(newConfig.id)
+      if (selectExtraction) {
+        await api.setDefaultLLMConfig(newConfig.id)
+      }
       
       logger.info('ConfigStore', 'Config created', newConfig)
       return newConfig

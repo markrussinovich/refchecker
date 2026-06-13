@@ -55,6 +55,7 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
+                       display_reference_value,
                        compare_authors)
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
 from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_UPDATE_ORDER
@@ -1434,6 +1435,318 @@ class ArxivReferenceChecker:
                 logger.error(f"Error extracting text with pdftotext: {str(e3)}")
             
             return None
+
+    @staticmethod
+    def _strip_pdf_page_headers_from_bibliography(bibliography_text):
+        """Remove PDF page headers that interrupt bibliography entries."""
+        if not bibliography_text:
+            return bibliography_text
+
+        lines = bibliography_text.splitlines()
+        cleaned_lines = []
+        header_pattern = re.compile(
+            r'^(?:Published|Accepted|Under review|Workshop paper)\b.*\b(?:paper|review)\b.*',
+            re.IGNORECASE,
+        )
+
+        def has_bibliography_evidence(value):
+            return bool(re.search(
+                r'\b(?:19|20)\d{2}\b|https?://|\bdoi\b|\barxiv\b|\bpp\.|\bpages?\b|'
+                r'\b(?:proceedings|conference|journal|transactions|press|pmlr|ieee|acm|springer)\b',
+                value,
+                re.IGNORECASE,
+            ))
+
+        def looks_like_reference_start(value):
+            return bool(re.match(
+                r'(?:\[\d{1,4}\]\s+|[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)',
+                value,
+            ))
+
+        def looks_like_title_header(value):
+            stripped = value.strip()
+            if not stripped or len(stripped) > 140:
+                return False
+            if re.match(r'^\[\d{1,4}\]\s+', stripped):
+                return False
+            if has_bibliography_evidence(stripped) or looks_like_reference_start(stripped):
+                return False
+            if re.match(r'^[a-z]', stripped):
+                return False
+            return len(stripped.split()) >= 3
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            compact_stripped = re.sub(r'\s+', '', stripped).lower()
+            if header_pattern.match(stripped) or compact_stripped.startswith('publishedasaconferencepaper'):
+                if cleaned_lines and re.fullmatch(r'\d{1,4}', cleaned_lines[-1].strip()):
+                    cleaned_lines.pop()
+                i += 1
+                continue
+
+            if re.fullmatch(r'\d{1,4}', stripped):
+                block_start = len(cleaned_lines)
+                while block_start > 0 and cleaned_lines[block_start - 1].strip():
+                    block_start -= 1
+                preceding_block = [candidate.strip() for candidate in cleaned_lines[block_start:] if candidate.strip()]
+                if 0 < len(preceding_block) <= 3 and not any(
+                    has_bibliography_evidence(candidate) or looks_like_reference_start(candidate)
+                    for candidate in preceding_block
+                ):
+                    del cleaned_lines[block_start:]
+
+                i += 1
+                while i < len(lines) and not lines[i].strip():
+                    i += 1
+                skipped_header_lines = 0
+                while i < len(lines) and skipped_header_lines < 2:
+                    next_line = lines[i].strip()
+                    if not next_line:
+                        i += 1
+                        continue
+                    if looks_like_title_header(next_line):
+                        skipped_header_lines += 1
+                        i += 1
+                        continue
+                    break
+                if skipped_header_lines and i < len(lines):
+                    next_line = lines[i].strip()
+                    previous_line = cleaned_lines[-1].strip() if cleaned_lines else ''
+                    if (
+                        re.fullmatch(r'[a-z]{4,24}', next_line)
+                        and re.search(r'\b(?:19|20)\d{2}\b|\bpp\.', previous_line, re.IGNORECASE)
+                    ):
+                        i += 1
+                continue
+
+            cleaned_lines.append(line)
+            i += 1
+
+        return '\n'.join(cleaned_lines)
+
+    @staticmethod
+    def _looks_like_pdf_page_header_boundary(heading_line, previous_lines):
+        """Return true when an appendix-looking heading is really a PDF page header."""
+        heading_line = (heading_line or '').strip()
+        if not heading_line or len(heading_line) > 140:
+            return False
+        if not previous_lines or not re.fullmatch(r'\d{1,4}', previous_lines[-1].strip()):
+            return False
+        if re.search(r'\b(?:19|20)\d{2}\b|https?://|\bdoi\b|\barxiv\b', heading_line, re.IGNORECASE):
+            return False
+        if re.match(r'(?:[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)', heading_line):
+            return False
+        return len(heading_line.split()) >= 3
+
+    @staticmethod
+    def _looks_like_trailing_bibliography_artifact(trailing_line, previous_line):
+        """Return true for one-line PDF artifacts after the final reference."""
+        trailing_line = (trailing_line or '').strip()
+        previous_line = (previous_line or '').strip()
+        if not trailing_line:
+            return True
+        if re.fullmatch(r'(?i)part\s+[ivx]+', trailing_line):
+            return True
+        if (
+            re.fullmatch(r'[a-z]{4,24}', trailing_line)
+            and re.search(r'\b(?:19|20)\d{2}\b|\bpp\.', previous_line, re.IGNORECASE)
+        ):
+            return True
+        if (
+            re.fullmatch(r'[A-Z][a-z]+(?:[A-Z][A-Za-z0-9]*)+', trailing_line)
+            and (
+                re.search(r'\b(?:19|20)\d{2}\.?\s*$', previous_line)
+                or re.fullmatch(r'\d{1,4}', previous_line)
+            )
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _find_style_aware_bibliography_end(section_text):
+        """Find a safe end after the final reference when PDF text loses the next heading."""
+        if not section_text:
+            return None
+
+        def has_hard_reference_evidence(value):
+            return bool(re.search(
+                r'https?://|\bdoi\b|\barxiv\b|\bCoRR\b|\bISSN\b|\bISBN\b|'
+                r'\b(?:19|20)\d{2}\b|\bpages?\s+\d|:\d+[-–]\d+',
+                value,
+                re.IGNORECASE,
+            ))
+
+        def previous_line_can_end_reference(previous_nonempty_lines):
+            if not previous_nonempty_lines:
+                return False
+            previous_window = ' '.join(previous_nonempty_lines[-3:])
+            return has_hard_reference_evidence(previous_window) and bool(
+                re.search(r'[.!?)]\s*$', previous_nonempty_lines[-1])
+            )
+
+        def looks_like_explicit_tail_boundary(value):
+            stripped = value.strip()
+            if not stripped:
+                return True
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return True
+            if re.search(
+                r'(?i)\b(?:Paper\s+Checklist|Do\s+not\s+remove\s+the\s+checklist|'
+                r'checklist\s+should\s+follow\s+the\s+references)\b',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^(?:Question:|Answer:|Justification:|Guidelines:|Claims\b|Limitations\b)',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^\d{1,2}\.\s+(?:Claims|Limitations|Theory\s+assumptions|'
+                r'Experimental\s+result|Open\s+access|Code\s+of\s+ethics|Broader\s+impacts|'
+                r'Safeguards|Licenses|New\s+assets|Crowdsourcing|Institutional\s+review|'
+                r'Declaration\s+of\s+LLM\s+usage)\b',
+                stripped,
+            ):
+                return True
+            if re.match(r'^[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}$', stripped):
+                return True
+            if re.match(r'^[A-H]\s+[A-Z][A-Za-z]+(?:[.,]\s+|\s+and\s+)', stripped):
+                return False
+            if re.match(r'^[A-H]\s+[A-Z][A-Za-z][^\n]{3,140}$', stripped):
+                return True
+            return False
+
+        def looks_like_reference_continuation(value):
+            stripped = value.strip()
+            if not stripped:
+                return False
+            if re.match(
+                r'(?i)^(?:https?://|doi\b|url\b|arxiv\b|pages?\b|pp\.|vol\.|volume\b|'
+                r'in\s+(?:proceedings|advances|international|conference)|journal\b|'
+                r'proceedings\b|transactions\b|conference\b|available\b|retrieved\b)',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^(?:[a-z0-9.-]+\.(?:org|com|net|edu|io|gov)(?:/|$)|'
+                r'(?:org|com|net|edu|io|gov|abs|html|pdf)/|10\.\d{4,9}/)',
+                stripped,
+            ):
+                return True
+            return has_hard_reference_evidence(stripped)
+
+        def looks_like_author_year_tail_boundary(value, following_text=''):
+            stripped = value.strip()
+            if not stripped:
+                return False
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return False
+            if looks_like_explicit_tail_boundary(stripped):
+                return True
+            if re.match(r'^[a-z]', stripped) and not looks_like_reference_continuation(stripped):
+                return not has_hard_reference_evidence(following_text)
+            return bool(re.match(
+                r'^(?:To|By|The|This|These|Those|Our|We|It|For\s+example|Case\s+\d+|Conclusion:)\b',
+                stripped,
+            )) and not looks_like_reference_continuation(stripped) and not has_hard_reference_evidence(following_text)
+
+        def looks_like_internal_pdf_header(value, raw_previous_nonempty_lines):
+            stripped = value.strip()
+            if not stripped:
+                return True
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return True
+            if looks_like_explicit_tail_boundary(stripped):
+                return False
+            if 'Published as a conference paper' in stripped or 'Published as a workshop paper' in stripped:
+                return True
+            if re.sub(r'\s+', '', stripped).lower().startswith('publishedasaconferencepaper'):
+                return True
+            return ArxivReferenceChecker._looks_like_pdf_page_header_boundary(
+                stripped,
+                raw_previous_nonempty_lines,
+            )
+
+        def scan_from_reference_start(start_offset, boundary_predicate):
+            segment = section_text[start_offset:]
+            lines = segment.splitlines(keepends=True)
+            consumed = 0
+            seen_hard_reference_evidence = False
+            previous_nonempty_lines = []
+
+            for line_index, line in enumerate(lines):
+                stripped = line.strip()
+                line_start = start_offset + consumed
+                consumed += len(line)
+
+                if (
+                    line_index > 0
+                    and seen_hard_reference_evidence
+                    and previous_line_can_end_reference(previous_nonempty_lines)
+                    and boundary_predicate(stripped)
+                ):
+                    return line_start
+
+                if has_hard_reference_evidence(stripped):
+                    seen_hard_reference_evidence = True
+                if stripped:
+                    previous_nonempty_lines.append(stripped)
+
+            return None
+
+        bracket_reference_matches = list(re.finditer(r'(?m)^\s*\[(\d{1,3})\]\s+', section_text))
+        if len(bracket_reference_matches) >= 5:
+            reference_numbers = [int(match.group(1)) for match in bracket_reference_matches]
+            max_reference_number = max(reference_numbers)
+            if max_reference_number >= 5 and 1 in reference_numbers:
+                last_reference_match = next(
+                    match for match in reversed(bracket_reference_matches)
+                    if int(match.group(1)) == max_reference_number
+                )
+                bracket_end = scan_from_reference_start(
+                    last_reference_match.start(),
+                    looks_like_explicit_tail_boundary,
+                )
+                if bracket_end is not None:
+                    return bracket_end
+
+        if len(bracket_reference_matches) >= 5:
+            return None
+
+        lines = section_text.splitlines(keepends=True)
+        consumed = 0
+        previous_nonempty_lines = []
+        raw_previous_nonempty_lines = []
+        completed_reference_lines = 0
+
+        for line_index, line in enumerate(lines):
+            stripped = line.strip()
+            line_start = consumed
+            consumed += len(line)
+
+            if looks_like_internal_pdf_header(stripped, raw_previous_nonempty_lines):
+                if stripped:
+                    raw_previous_nonempty_lines.append(stripped)
+                continue
+
+            if (
+                line_index > 0
+                and completed_reference_lines >= 5
+                and previous_line_can_end_reference(previous_nonempty_lines)
+                and looks_like_author_year_tail_boundary(stripped, ''.join(lines[line_index:line_index + 12]))
+            ):
+                return line_start
+
+            if stripped:
+                raw_previous_nonempty_lines.append(stripped)
+                previous_nonempty_lines.append(stripped)
+                if previous_line_can_end_reference(previous_nonempty_lines):
+                    completed_reference_lines += 1
+
+        return None
     
     def find_bibliography_section(self, text):
         """
@@ -1458,6 +1771,10 @@ class ArxivReferenceChecker:
             # Matches "RE F E R E N C E S" or "R E F E R E N C E S"
             r'R\s*E\s*F\s*E\s*R\s*E\s*N\s*C\s*E\s*S\s*\n',
             # Standard reference patterns
+            r'(?i)^\s*(?:\d+\s*)?references\s*\d+\s*$',  # pypdf line-number artifact: "References287"
+            r'\n[^\n]{0,240}\s{10,}References\b',  # Right-column heading with left-column body text
+            r'(?im)^\s*references\b',  # Two-column PDFs can put first reference on the same line
+            r'(?i:\breferences)\s+(?=(?:[A-Z][A-Za-z\'\.-]+(?:\s+[A-Z]\.|\s+[A-Z][A-Za-z\'\.-]+)?|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+))',  # Inline heading before author-year refs
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
             r'(?i)works cited\s*\n',
@@ -1486,52 +1803,90 @@ class ArxivReferenceChecker:
         
         # ── DEFINITIVE end markers: these always end the reference section ──
         # Defined here so both the main path and fallback path can use them.
+        # All keyword-based patterns use the (?i) inline flag so casing in the
+        # source PDF (APPENDIX vs Appendix vs appendix) does not matter.
         definitive_patterns = [
-            r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
-            r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
-            r'\n\s*(?:CONTENTS|Contents)\s*\n',  # Table of contents for appendix (any case)
+            r'(?i)\n\s*Appendix\b[^\n]*\n',  # "Appendix", "APPENDIX", "Appendix A", "APPENDIX A: ..."
+            r'(?i)\n\s*Appendices\b[^\n]*\n',  # "Appendices", "APPENDICES", "Appendices A-B"
+            r'(?i)\n\s*Appendix\s+[A-Z0-9]+(?:\.\d+)?\s*[:.]\s*[^\n]*\n',  # "APPENDIX A: ..."
+            r'(?i)\n\s*Appendix\s*for\b[^\n]*\n',
+            r'(?i)\n\s*The\s+Appendix\s+is\s+structured\b[^\n]*\n',
+            r'(?i)\n\s*Appendix\s*Contents',  # "APPENDIXCONTENTS" (no space)
+            r'(?i)\n\s*Outline\s+of\s+the\s+Appendix\b[^\n]*\n',
+            r'(?i)\n\s*Contents\s*\n',  # Table of contents for appendix (any case)
             # PDF word-break: "APPENDIX" split into "A PPENDIX" or similar
-            r'\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
+            r'(?i)\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
             # Fully spaced-out APPENDIX: "AP P E N D I X" (each letter separated)
-            r'\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
-            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
+            r'(?i)\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
+            r'(?i)\n\s*Supplementary\s+(?:Materials?|Information)\s*\n',
             # Collapsed PDF heading: "SUPPLEMENTARYMATERIAL: ..."
-            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s*(?:MATERIAL|Material|INFORMATION|Information)\b[^\n]*\n',
+            r'(?i)\n\s*Supplementary\s*(?:Materials?|Information)\b[^\n]*\n',
             # Letter-spaced PDF headings: "S UPPLEMENTARY M ATERIAL : ..."
-            r'\n\s*S\s+U\s*P\s*P\s*L\s*E\s*M\s*E\s*N\s*T\s*A\s*R\s*Y\s+M\s*A\s*T\s*E\s*R\s*I\s*A\s*L\b[^\n]*\n',
-            r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
+            r'(?i)\n\s*S\s+U\s*P\s*P\s*L\s*E\s*M\s*E\s*N\s*T\s*A\s*R\s*Y\s+M\s*A\s*T\s*E\s*R\s*I\s*A\s*L\b[^\n]*\n',
+            r'(?i)\n\s*Supplemental\s+Material\s*\n',
             # PDF extraction can collapse this heading: "TECHNICALAPPENDICES ANDSUPPLEMENTARYMATERIAL"
-            r'\n\s*(?:TECHNICAL\s*)?APPENDICES\s*(?:AND\s*)?SUPPLEMENTARY\s*MATERIAL\s*\n',
-            r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
-            r'\n\s*(?:AUTHOR|Author)\s*(?:CONTRIBUTIONS?|Contributions?)\s*\n',
-            r'\n\s*(?:ETHICS|Ethics)\s*(?:STATEMENT|Statement)\s*\n',
-            r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
-            r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
-            r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
-            r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
-            r'\n\s*(?:REVIEWER|Reviewer)\s+(?:SCORES?|Scores?)\s*:\s*\n',
+            r'(?i)\n\s*(?:Technical\s*)?Appendices\s*(?:And\s*)?Supplementary\s*Material\s*\n',
+            r'(?i)\n\s*Acknowledgments?\s*\n',
+            r'(?i)\n\s*Author\s*Contributions?\s*\n',
+            r'(?i)\n\s*Ethics\s*Statement\s*\n',
+            r'(?i)\n\s*(?:Data|Code)\s+Availability\s*\n',
+            r'(?i)\n\s*Competing\s+Interests\s*\n',
+            r'(?i)\n\s*Funding\s+Information\s*\n',
+            r'(?i)\n\s*Supporting\s+Information\s*\n',
+            r'(?i)\n\s*Reviewer\s+Scores?\s*:\s*\n',
+            r'(?i)\n\s*(?:NeurIPS\s+)?Paper\s+Checklist\s*\n',
+            r'(?i)\n[^\n]{0,180}\bDo\s+not\s+remove\s+the\s+checklist\b[^\n]*\n',
+            r'(?i)\n[^\n]{0,180}\bchecklist\s+should\s+follow\s+the\s+references\b[^\n]*\n',
             # Common post-bibliography headings (handle PDF concatenation with \s*)
-            r'\n\s*(?:LIMITATIONS?|Limitations?)\s*\n',
-            r'\n\s*(?:BROADER\s*)?(?:IMPACT|Impact)\s*(?:STATEMENT|Statement)?\s*\n',
-            r'\n\s*(?:REPRODUCIBILITY|Reproducibility)\s*(?:STATEMENT|Statement)?\s*\n',
-            r'\n\s*(?:RELATED|Related)\s*(?:WORKS?|Works?)\s*\n',
-            r'\n\s*(?:SOCIETAL|Societal)\s*(?:IMPACT|Impact)\s*\n',
-            r'\n\s*(?:LLM|CONTRIBUTION)\s*(?:CONTRIBUTION|STATEMENT)\s*(?:STATEMENT)?\s*\n',
+            r'(?i)\n\s*Limitations?\s*\n',
+            r'(?i)\n\s*(?:Broader\s*)?Impact\s*Statement?\s*\n',
+            r'(?i)\n\s*Reproducibility\s*Statement?\s*\n',
+            r'(?i)\n\s*Related\s*Works?\s*\n',
+            r'(?i)\n\s*Societal\s*Impact\s*\n',
+            r'(?i)\n\s*(?:LLM|Contribution)\s*(?:Contribution|Statement)\s*Statement?\s*\n',
+            # Numbered post-ref headings with PDF word breaks: "8 R EPRODUCIBILITY".
+            r'(?i)\n[ \t]*\d+[ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z]*(?:[ \t]+[A-Z][ \t]*[A-Za-z]+|[ \t]+[A-Z]{2,}|[ \t]+[a-z]+)*[ \t]*\n',
             # Numbered post-ref sections (with period)
-            r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
+            r'(?i)\n[ \t]*\d+\.[ \t]+(?:Appendix|Conclusion|Supplementary|Additional)\b[A-Za-z \t]*\n',
             # Numbered post-ref sections (without period): "7 APPENDIX A", "9 APPENDIX C:"
-            r'\n\s*\d+\s+(?:APPENDIX|Appendix)\b',
+            r'(?i)\n\s*\d+\s+Appendix\b',
             # Numbered post-ref sections with PDF word-break: "7 A PPENDIX"
-            r'\n\s*\d+\s+A\s*PPENDIX\b',
+            r'(?i)\n\s*\d+\s+A\s*PPENDIX\b',
             # Numbered post-ref sections: "11 AUXILIARY RESULTS", "10 ADDITIONAL EXPERIMENTS"
-            r'\n\s*\d+\s+(?:ADDITIONAL|AUXILIARY|SUPPLEMENTARY)\b[A-Za-z\s]*\n',
+            r'(?i)\n\s*\d+\s+(?:Additional|Auxiliary|Supplementary)\b[A-Za-z\s]*\n',
             # Algorithm / Theorem / Lemma headers (appendix math content)
-            r'\nAlgorithm\s+\d+[:\s]',
-            r'\n(?:Theorem|Lemma|Proposition|Corollary)\s+\d+[.:\s]',
+            r'(?i)\nAlgorithm\s+\d+[:\s]',
+            r'(?i)\n(?:Theorem|Lemma|Proposition|Corollary)\s+\d+[.:\s]',
             # LaTeX end markers
             r'\\end\{thebibliography\}',
             r'\\end\{document\}',
         ]
+
+        dotted_appendix_heading_keywords = (
+            r'(?:A\s+Brief|Additional|Supplementary|Supplemental|Extended|Comprehensive|Appendix|Extra|Further|Full|'
+            r'Related|Background|Notation|Summary|Preliminaries|Proofs?|Details?|Detailed|'
+            r'Derivations?|Algorithms?|Review|Methodological|Privacy|Choice|Parameterized|Expanded|Prompts?|'
+            r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
+            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Program|Formal|Definitions?|'
+            r'Existing|Gaussian|Class\s+Separation|Continuity|Interpretation|Variational|Table|Individual|Coloring|Broader|Impacts?|Other|Examples?|Step[\s\-]?size|Optimization|Effect|'
+            r'Spurious|'
+            r'Baselines|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|'
+            r'Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|'
+            r'Evaluation|Estimation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|'
+            r'Notation|Proof|The\s+Proof|The\s+Algorithm|The\s+Effect|Algorithm|Acknowledgment|Introduction|Literature|Non[\s\-]+Transitivity|'
+            r'Assumptions?|Data|AUC[\s\-]?ROC|Decomposition|Entropic|Prior|Justification|Defense|'
+            r'Surrogate|Adaptive|Brief|More|The\s+Central\s+Role|General\s+Topology|'
+            r'Cognitive\s+Framework|Frequently\s+Used\s+Notation|The\s+Unfolding\s+Procedure|'
+            r'Missing\s+Details|New\s+Tasks?|Differential\s+Privacy|Frequency\s+Estimation|'
+            r'Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization)\b[^\n]*'
+        )
+        dotted_appendix_heading_pattern = (
+            r'(?i)\n\s*[A-Z]\.\s+' + dotted_appendix_heading_keywords
+        )
+        header_prefixed_dotted_appendix_heading_pattern = (
+            r'(?i)\n\s*\d{1,4}\s+[^\n]{0,180}?\s+[A-Z]\.\s+'
+            + dotted_appendix_heading_keywords
+        )
         
         # Collect all potential matches from all patterns
         # Use re.MULTILINE so ^ and $ match line boundaries, not just string start/end
@@ -1540,6 +1895,7 @@ class ArxivReferenceChecker:
             matches = list(re.finditer(pattern, text, re.MULTILINE))
             for match in matches:
                 all_matches.append((pattern, match))
+        all_matches.sort(key=lambda item: item[1].start())
         
         if all_matches:
             # Find the match that has [1] following it (indicating start of references)
@@ -1573,10 +1929,12 @@ class ArxivReferenceChecker:
                     (p, m) for p, m in all_matches if p in standalone_patterns
                 ]
                 if standalone_matches:
-                    # Iterate from LAST to FIRST standalone match.
+                    # Prefer the first validated standalone match. Some appendix
+                    # prompts/examples contain their own later "References"
+                    # sections, so "last match wins" can under-extract.
                     # Validate that the text following each candidate looks like
                     # actual bibliography entries (not chart labels or table data).
-                    for sp, sm in reversed(standalone_matches):
+                    for sp, sm in standalone_matches:
                         following = text[sm.end():sm.end() + 500]
                         # Reference indicators: years, URLs/DOIs, academic terms
                         ref_indicators = (
@@ -1595,9 +1953,9 @@ class ArxivReferenceChecker:
                 # entries (e.g. "Author1, Author2, and Author3. Title...")
                 if not best_match:
                     author_year_pattern = re.compile(
-                        r'\s*(?:[A-Z][a-z]+|[A-Z]\.)\s*[\s,].*(?:19|20)\d{2}', re.DOTALL
+                        r'\s*(?:[A-Z][A-Za-z\'\.-]+|[A-Z]\.)\s*[\s,].*(?:19|20)\d{2}', re.DOTALL
                     )
-                    for pattern, match in reversed(all_matches):
+                    for pattern, match in all_matches:
                         test_start = match.end()
                         test_text = text[test_start:test_start + 300]
                         if author_year_pattern.match(test_text):
@@ -1625,42 +1983,71 @@ class ArxivReferenceChecker:
             # ── Appendix section headers that look like "A Extended Work", "A1 Proofs" ──
             # These need special validation: only accept if NOT inside a reference entry
             appendix_section_patterns = [
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                dotted_appendix_heading_pattern,
+                header_prefixed_dotted_appendix_heading_pattern,
+                r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Extended|Expanded|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward|Review|Methodological|Privacy|Choice|Parameterized|Program|Prompts?|Differential\s+Privacy|Frequency\s+Estimation|Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization|New\s+Tasks?)\b[A-Za-z\s\-\d]*\n',
+                r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Proofs?|The\s+Proof|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                 # Numbered appendix sections with ALL-CAPS concatenated words from PDF extraction
                 # artifacts, e.g. "A1 RELATEDWORKS", "A4 ABLATIONSTUDY", "A5.2 SCORINGCRITERIA".
                 # The digit after the letter and the ALL-CAPS requirement distinguish these
                 # from author names like "A. Baranwal".
                 r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
+                # Numbered appendix sections with PDF word breaks, e.g.
+                # "A12 E XPERIMENT SETTINGS".
+                r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z]\s+[A-Z]{2,}[A-Za-z0-9,.:;\-]*(?:\s+(?:[A-Z]\s+)?[A-Za-z0-9,.:;\-]+)*\s*\n',
+                # Collapsed single-letter appendix headings, e.g.
+                # "BPREVENTOVERFITTING" or "CHANDLINGNOISYANDLOW-QUALITYDATA".
+                r'\n\s*[A-H][A-Z]{5,}(?:[A-Z0-9\-]*)\s*\n',
                 # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
                 # Also handles PDF word-break artifacts where a letter gets separated from its
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
                 # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
                 # in section titles, e.g. "A Theoretical Arguments for Section 3"
-                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                r'(?i)\n\s*[A-H]\s+(?:Background|Spurious\s+Correlation)\b[^\n]*:\s*[^\n]*\n',
+                r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                 # PDF word-break artifacts with parenthetical continuation markers,
                 # e.g. "A E XPERIMENTAL S ETTINGS (C ONT ' D )".
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?[A-Z]{2,}(?:\s+(?:[A-Z]\s+)?[A-Z]{2,})*(?:\s*\([A-Z0-9\s\'’\-]+\))?\s*\n',
+                # PDF word-break artifacts where the first heading word is split,
+                # e.g. "A E XAMPLES OF ... (2)." or "A W HY MIL?".
+                r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().?,:;\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().?,:;\-]+)*[ \t]*\n',
                 # All-caps concatenated appendix headings with optional parenthetical acronym,
                 # e.g. "A QUANTUMRANDOMACCESSMEMORY(QRAM)" from PDF text extraction.
                 r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
                 # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
                 r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
+                # Multi-level appendix subsections without a trailing dot, e.g.
+                # "A.0.1 Feature Decomposition".
+                r'\n\s*[A-Z](?:\.\d+){2,}\s+[A-Z0-9][^\n]{3,140}\n',
+                # Deeper numbered appendix subsections from PDF extraction,
+                # e.g. "A.2.1. M ODULE 2.1: A XIOMS OF UTILITY IN".
+                r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
+                # Generic dotted appendix headings, e.g. "B. S6 Parameterization"
+                # and "E. ATT-friendly adaptive MCMC schemes". Keep this to
+                # acronym/code-like headings so author-initial reference lines
+                # such as "A. An accelerated..." are not treated as appendices.
+                r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
                 # Standalone appendix letter on its own line followed by a subsection:
                 # \nA\nA.1 ... or \nA\nA Extended ...
                 r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
+                # Standalone appendix letter on one line followed by a title line,
+                # e.g. "A\nReward function details" from pypdf text extraction.
+                r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
                 # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                 # e.g. "A R E L AT E D WO R K S", "B E X P E R I M E N TA L ..."
                 r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
             ]
             
             # ── HEURISTIC end markers: used only if no definitive marker found ──
+            # All keyword-based patterns use (?i); the "[A-Z]{3,}" ALL-CAPS
+            # heading pattern stays case-sensitive because casing IS the signal.
             heuristic_patterns = [
-                r'\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',
-                r'\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
-                r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
-                r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE)\b',
-                r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY)\s*\]',
+                r'(?i)\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[A-Z]?\d+[:\.]?)\s*[^\n]*\n',
+                r'\n\s*[A-Za-z][A-Za-z\- ]+\s+(?:[!%]|[–-])(?:\s+(?:[!%]|[–-])){1,}\s*\n',
+                r'(?i)\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
+                r'(?i)\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
+                r'(?i)\n\s*\[\s*(?:Appendix|Conclusions?|Acknowledgments?|Supplementary)\s*\]',
+                # ALL-CAPS heading style — case-sensitive on purpose.
                 r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',
             ]
             
@@ -1691,6 +2078,22 @@ class ArxivReferenceChecker:
                     # as appendix body text often mentions authors and years.
                     after_match = text[start_pos + m.end():start_pos + m.end() + 200]
                     first_line = after_match.split('\n')[0] if after_match else ''
+                    heading_line = m.group(0).strip().split('\n')[0] if m.group(0) else ''
+                    before_match = text[start_pos:start_pos + m.start()]
+                    previous_lines = [line.strip() for line in before_match.splitlines() if line.strip()]
+                    previous_line = previous_lines[-1] if previous_lines else ''
+                    wraps_author_initial = bool(
+                        re.match(r'[A-Z]\.\s+', heading_line)
+                        and re.search(r'(?:,|\band)\s*$', previous_line)
+                    )
+                    heading_looks_like_author = bool(re.match(
+                        r'^[A-Z]\.\s+(?:[A-Z]\.\s+)*[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                        heading_line,
+                    ))
+                    if wraps_author_initial or heading_looks_like_author:
+                        continue
+                    if self._looks_like_pdf_page_header_boundary(heading_line, previous_lines):
+                        continue
                     looks_like_ref = bool(re.match(
                         r'\s*(?:'
                         r'[A-Z][a-z]+,\s+[A-Z]\.'   # "Smith, J."
@@ -1714,14 +2117,25 @@ class ArxivReferenceChecker:
                 logger.debug(f"Using definitive end marker at {end_pos}")
 
             # Also check heuristic patterns — use earliest of definitive and heuristic
+            heuristic_end = None
             for pattern in heuristic_patterns:
-                m = re.search(pattern, text[start_pos:])
-                if m:
+                for m in re.finditer(pattern, text[start_pos:]):
                     candidate = start_pos + m.start()
                     if candidate > start_pos + 100 and candidate < end_pos:
-                        end_pos = candidate
-                        logger.debug(f"Using heuristic end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
+                        if heuristic_end is None or candidate < heuristic_end:
+                            heuristic_end = candidate
+                            logger.debug(f"Heuristic end candidate at {candidate}: {repr(m.group(0).strip()[:60])}")
                         break
+            if heuristic_end is not None:
+                end_pos = heuristic_end
+                logger.debug(f"Using heuristic end marker at {end_pos}")
+
+            style_aware_end = self._find_style_aware_bibliography_end(text[start_pos:end_pos])
+            if style_aware_end is not None:
+                candidate = start_pos + style_aware_end
+                if candidate > start_pos + 100 and candidate < end_pos:
+                    end_pos = candidate
+                    logger.debug(f"Bibliography truncated by style-aware tail guard at {end_pos}")
             
             # Trim trailing whitespace / page numbers / conference headers at the boundary
             while end_pos > start_pos + 100:
@@ -1729,15 +2143,19 @@ class ArxivReferenceChecker:
                 if line_start == -1:
                     break
                 trailing_line = text[line_start:end_pos].strip()
+                previous_start = text.rfind('\n', start_pos, line_start - 1)
+                previous_line = text[previous_start:line_start].strip() if previous_start != -1 else ''
                 if (not trailing_line or
                     re.fullmatch(r'\d{1,4}', trailing_line) or
                     'Published as a conference paper' in trailing_line or
-                    'Published as a workshop paper' in trailing_line):
+                    'Published as a workshop paper' in trailing_line or
+                    re.sub(r'\s+', '', trailing_line).lower().startswith('publishedasaconferencepaper') or
+                    self._looks_like_trailing_bibliography_artifact(trailing_line, previous_line)):
                     end_pos = line_start
                 else:
                     break
             
-            bibliography_text = text[start_pos:end_pos]
+            bibliography_text = self._strip_pdf_page_headers_from_bibliography(text[start_pos:end_pos])
             logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
             
             # Check if we have a reasonable amount of text
@@ -1752,22 +2170,49 @@ class ArxivReferenceChecker:
             
             # Last resort: look for patterns that might indicate references
             reference_indicators = [
-                r'\[\d+\]',  # [1], [2], etc.
-                r'\d+\.\s+[A-Z]',  # 1. Author
+                r'(?m)^\s*\[\d+\]',  # [1], [2], etc. at start of reference lines
+                r'(?m)^\s*\d+\.\s+(?:[A-Z][a-z]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][a-z]+|[A-Z][a-z]+\s+[A-Z]\.)',  # 1. Author
                 r'[A-Z][a-z]+,\s+[A-Z]\.',  # Smith, J.
             ]
             
             for indicator in reference_indicators:
                 matches = list(re.finditer(indicator, text))
-                if len(matches) > 5:  # If we find multiple matches, it might be a reference section
+                min_matches = 3 if '[A-Z][a-z]' in indicator else 6
+                if len(matches) >= min_matches:  # If we find multiple matches, it might be a reference section
                     # Prefer matches in the last 50% of the document to avoid
                     # matching body text (numbered lists, etc.)
                     half_pos = len(text) // 2
                     late_matches = [m for m in matches if m.start() >= half_pos]
-                    if late_matches:
-                        first_match = late_matches[0]
+                    candidate_matches = late_matches or matches
+                    def fallback_has_bib_evidence(candidate_match):
+                        window = text[candidate_match.start():candidate_match.start() + 3000]
+                        year_count = len(re.findall(r'\b(?:19|20)\d{2}\b', window))
+                        return year_count >= 2 or bool(re.search(
+                            r'https?://|doi[:\s]|arXiv',
+                            window,
+                            re.IGNORECASE,
+                        ))
+
+                    if indicator == r'(?m)^\s*\[\d+\]':
+                        # Bracketed numbers also appear in tables and tree rules
+                        # (e.g. "X[15]" or "[24719, 7841]"). Only use this
+                        # fallback when nearby markers look like a numbered
+                        # bibliography sequence.
+                        sequence_match = None
+                        for candidate_match in candidate_matches:
+                            window = text[candidate_match.start():candidate_match.start() + 3000]
+                            nums = [int(n) for n in re.findall(r'\[(\d{1,3})\]', window)]
+                            small_nums = {n for n in nums if 1 <= n <= 10}
+                            if len(small_nums) >= 3 and (1 in small_nums or 2 in small_nums) and fallback_has_bib_evidence(candidate_match):
+                                sequence_match = candidate_match
+                                break
+                        if sequence_match is None:
+                            continue
+                        first_match = sequence_match
                     else:
-                        first_match = matches[0]
+                        first_match = next((m for m in candidate_matches if fallback_has_bib_evidence(m)), None)
+                        if first_match is None:
+                            continue
                     # Look for the beginning of the line
                     line_start = text.rfind('\n', 0, first_match.start())
                     if line_start == -1:
@@ -1787,11 +2232,21 @@ class ArxivReferenceChecker:
                                 logger.debug(f"Fallback end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
                     # Also check appendix section patterns (same validation as main path)
                     fallback_appendix_patterns = [
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                        dotted_appendix_heading_pattern,
+                        header_prefixed_dotted_appendix_heading_pattern,
+                        r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Extended|Expanded|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward|Review|Methodological|Privacy|Choice|Parameterized|Program|Prompts?|Differential\s+Privacy|Frequency\s+Estimation|Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization|New\s+Tasks?|Other|Examples?|Step[\s\-]?size|Optimization)\b[A-Za-z\s\-\d]*\n',
+                        r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Proofs?|The\s+Proof|The\s+Algorithm|The\s+Effect|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Interpretation|Variational|Table|Individual|Coloring|Broader|Impacts?|Effect)\b[A-Za-z\s\-\d]*\n',
                         # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
                         r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
-                        r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                        r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z]\s+[A-Z]{2,}[A-Za-z0-9,.:;\-]*(?:\s+(?:[A-Z]\s+)?[A-Za-z0-9,.:;\-]+)*\s*\n',
+                        r'\n\s*[A-H][A-Z]{5,}(?:[A-Z0-9\-]*)\s*\n',
+                        r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
+                        r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
+                        r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
+                        r'(?i)\n\s*[A-H]\s+(?:Background|Spurious\s+Correlation)\b[^\n]*:\s*[^\n]*\n',
+                        r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                        r'\n\s*[A-Z](?:\.\d+){2,}\s+[A-Z0-9][^\n]{3,140}\n',
+                        r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().?,:;\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().?,:;\-]+)*[ \t]*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
                     ]
@@ -1802,6 +2257,22 @@ class ArxivReferenceChecker:
                                 continue
                             after_match = text[line_start + m2.end():line_start + m2.end() + 200]
                             first_line = after_match.split('\n')[0] if after_match else ''
+                            heading_line = m2.group(0).strip().split('\n')[0] if m2.group(0) else ''
+                            before_match = text[line_start:line_start + m2.start()]
+                            previous_lines = [line.strip() for line in before_match.splitlines() if line.strip()]
+                            previous_line = previous_lines[-1] if previous_lines else ''
+                            wraps_author_initial = bool(
+                                re.match(r'[A-Z]\.\s+', heading_line)
+                                and re.search(r'(?:,|\band)\s*$', previous_line)
+                            )
+                            heading_looks_like_author = bool(re.match(
+                                r'^[A-Z]\.\s+(?:[A-Z]\.\s+)*[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                                heading_line,
+                            ))
+                            if wraps_author_initial or heading_looks_like_author:
+                                continue
+                            if self._looks_like_pdf_page_header_boundary(heading_line, previous_lines):
+                                continue
                             looks_like_ref = bool(re.match(
                                 r'\s*(?:'
                                 r'[A-Z][a-z]+,\s+[A-Z]\.'
@@ -1818,8 +2289,32 @@ class ArxivReferenceChecker:
                                 end_pos = candidate
                                 logger.debug(f"Fallback appendix end at {end_pos}: {repr(m2.group(0).strip()[:60])}")
                             break
+
+                    style_aware_end = self._find_style_aware_bibliography_end(text[line_start:end_pos])
+                    if style_aware_end is not None:
+                        candidate = line_start + style_aware_end
+                        if candidate > line_start + 100 and candidate < end_pos:
+                            end_pos = candidate
+                            logger.debug(f"Fallback truncated by style-aware tail guard at {end_pos}")
+
+                    while end_pos > line_start + 100:
+                        trailing_start = text.rfind('\n', line_start, end_pos - 1)
+                        if trailing_start == -1:
+                            break
+                        trailing_line = text[trailing_start:end_pos].strip()
+                        previous_start = text.rfind('\n', line_start, trailing_start - 1)
+                        previous_line = text[previous_start:trailing_start].strip() if previous_start != -1 else ''
+                        if (not trailing_line or
+                            re.fullmatch(r'\d{1,4}', trailing_line) or
+                            'Published as a conference paper' in trailing_line or
+                            'Published as a workshop paper' in trailing_line or
+                            re.sub(r'\s+', '', trailing_line).lower().startswith('publishedasaconferencepaper') or
+                            self._looks_like_trailing_bibliography_artifact(trailing_line, previous_line)):
+                            end_pos = trailing_start
+                        else:
+                            break
                     
-                    bibliography_text = text[line_start:end_pos]
+                    bibliography_text = self._strip_pdf_page_headers_from_bibliography(text[line_start:end_pos])
                     logger.info(f"Found potential bibliography section using indicator: {indicator}")
                     break
         
@@ -2080,6 +2575,24 @@ class ArxivReferenceChecker:
             if authors and title:
                 return authors, title
         
+        # Handle book-style references where PDF extraction drops the space
+        # after the author comma, e.g.
+        # "R. K. Merton,The sociology of science: ... University Press, 1973."
+        book_publisher_year_match = re.search(
+            r'^((?:[A-Z]\.\s*){1,5}[A-Z][A-Za-z\'-]+(?:\s+[A-Z][A-Za-z\'-]+)*),'
+            r'\s*([A-Z][^.]{8,}?)\.\s+[^,]{3,},\s+(19|20)\d{2}\.?\s*$',
+            cleaned_ref,
+        )
+        if book_publisher_year_match:
+            authors_text = book_publisher_year_match.group(1).strip()
+            title = book_publisher_year_match.group(2).strip()
+
+            authors = self.extract_authors_list(authors_text)
+            title = clean_title(title)
+
+            if authors and title:
+                return authors, title
+
         # Try to find the pattern for references with years at the end
         # Pattern: "Authors. Title, YEAR." - but NOT "Authors. Title. Journal, Volume:Pages, YEAR." 
         # and NOT "Authors. Title. In Conference, pages X-Y, YEAR."
@@ -2128,7 +2641,7 @@ class ArxivReferenceChecker:
             
             if authors and title:
                 return authors, title
-        
+
         # Second try: Look for patterns with common academic reference formats
         # Pattern 1: Authors ending with initials and common last names before title
         author_name_patterns = [
@@ -2593,8 +3106,14 @@ class ArxivReferenceChecker:
         if title and paper_data.get('title'):
             normalized_title = self.non_arxiv_checker.normalize_paper_title(title) if hasattr(self.non_arxiv_checker, 'normalize_paper_title') else title.lower().replace(' ', '').replace('.', '').replace(',', '')
             db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
-            
-            if normalized_title != db_title:
+
+            # v0.7.68: subtitle tolerance — "X: subtitle" vs "X" is the
+            # same paper, not a Title mismatch. We landed here via DOI/ID
+            # match so the records are confirmed-same.
+            from refchecker.utils.text_utils import titles_align_with_subtitle_tolerance
+            _subtitle_ok = titles_align_with_subtitle_tolerance(title, paper_data.get('title'))
+
+            if normalized_title != db_title and not _subtitle_ok:
                 from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(title)
@@ -4012,7 +4531,7 @@ class ArxivReferenceChecker:
         try:
             # Use correct information if available, otherwise fall back to cited information
             authors = error.get('ref_authors_correct') or error.get('ref_authors_cited', '')
-            year = error.get('ref_year_correct') or error.get('ref_year_cited', '')
+            year = display_reference_value(error.get('ref_year_correct') or error.get('ref_year_cited', ''))
             title = error.get('ref_title', '')
             url = error.get('ref_url_correct') or error.get('ref_url_cited', '')
             
@@ -4243,6 +4762,60 @@ class ArxivReferenceChecker:
         # Default to False for safety
         return False
 
+    def _split_numbered_reference_entries(self, bibliography_text):
+        """Split a bracket-numbered bibliography into raw reference entries."""
+        if not bibliography_text:
+            return []
+
+        matches = list(re.finditer(r'(?m)^\s*\[(\d{1,4})\]\s+', bibliography_text))
+        if len(matches) < 3:
+            return []
+
+        numbers = [int(match.group(1)) for match in matches]
+        if min(numbers) > 2:
+            return []
+
+        entries = []
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(bibliography_text)
+            entry = bibliography_text[match.start():end].strip()
+            if self._is_likely_reference(entry):
+                entries.append(entry)
+
+        return entries if len(entries) >= 3 else []
+
+    def _extract_numbered_references_with_llm_chunks(self, numbered_entries):
+        """Retry LLM extraction in small numbered-reference groups."""
+        if not numbered_entries or not self.llm_extractor:
+            return []
+
+        extracted = []
+        chunk = []
+        chunk_chars = 0
+
+        def flush_chunk():
+            nonlocal chunk, chunk_chars
+            if not chunk:
+                return
+            chunk_text = '\n'.join(chunk)
+            try:
+                chunk_refs = self.llm_extractor.extract_references(chunk_text)
+                if chunk_refs:
+                    extracted.extend(chunk_refs)
+            except Exception as exc:
+                logger.warning(f"Chunked LLM reference extraction failed: {exc}")
+            chunk = []
+            chunk_chars = 0
+
+        for entry in numbered_entries:
+            if chunk and (len(chunk) >= 8 or chunk_chars + len(entry) > 3000):
+                flush_chunk()
+            chunk.append(entry)
+            chunk_chars += len(entry)
+
+        flush_chunk()
+        return extracted
+
     def parse_references(self, bibliography_text, progress_callback=None):
         """
         Parse references from bibliography text
@@ -4255,17 +4828,57 @@ class ArxivReferenceChecker:
         bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
         logger.debug(f"Bibliography sample: {bib_sample}")
 
+        from refchecker.utils.bibtex_parser import detect_bibtex_format
+        if detect_bibtex_format(bibliography_text):
+            logger.info("Detected BibTeX format, using deterministic BibTeX parser")
+            return self._parse_bibtex_references(bibliography_text)
+
+        numbered_entries = self._split_numbered_reference_entries(bibliography_text)
+        expected_numbered_count = len(numbered_entries)
+
         if self.llm_extractor:
             try:
                 logger.info("Using LLM-based reference extraction")
                 references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
                 if references:
                     logger.debug(f"Parsed {len(references)} references")
-                    return self._process_llm_extracted_references(references)
+                    processed_references = self._process_llm_extracted_references(references)
+                    if expected_numbered_count and len(processed_references) < expected_numbered_count:
+                        logger.warning(
+                            "LLM extracted fewer references than numbered bibliography entries "
+                            f"({len(processed_references)} of {expected_numbered_count}); retrying in smaller chunks"
+                        )
+                        chunked_references = self._extract_numbered_references_with_llm_chunks(numbered_entries)
+                        if chunked_references:
+                            chunked_processed = self._process_llm_extracted_references(chunked_references)
+                            if len(chunked_processed) >= expected_numbered_count:
+                                return chunked_processed
+                            if len(chunked_processed) > len(processed_references):
+                                processed_references = chunked_processed
+
+                        fatal_error_before_fallback = self.fatal_error
+                        deterministic_references = self._parse_references_regex('\n'.join(numbered_entries))
+                        if len(deterministic_references) > len(processed_references):
+                            logger.warning(
+                                "Using deterministic numbered-reference fallback "
+                                f"({len(deterministic_references)} references) after LLM under-extraction"
+                            )
+                            return deterministic_references
+                        self.fatal_error = fatal_error_before_fallback
+                    return processed_references
                 else:
                     logger.warning("LLM reference extraction returned no results")
             except Exception as e:
                 logger.warning(f"LLM reference extraction failed: {e}")
+
+        if expected_numbered_count:
+            deterministic_references = self._parse_references_regex('\n'.join(numbered_entries))
+            if deterministic_references:
+                logger.warning(
+                    "Using deterministic numbered-reference extraction "
+                    f"({len(deterministic_references)} references)"
+                )
+                return deterministic_references
         
         if not self.llm_extractor:
             logger.warning("No LLM extractor configured for reference extraction")
@@ -4485,15 +5098,6 @@ class ArxivReferenceChecker:
                 return []
             else:
                 return biblatex_refs
-        
-        # No recognized format — cannot parse without LLM
-        logger.error("Cannot parse PDF bibliography without an LLM. "
-                     "Use --llm-provider to enable LLM-based extraction.")
-        if not self.debug_mode:
-            print("\n  ❌  Cannot parse this bibliography format without an LLM.")
-            print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
-        self.fatal_error = True
-        return []
         
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
@@ -5025,8 +5629,14 @@ class ArxivReferenceChecker:
         # Strip trailing # and normalize
         clean_ref = ref_str.strip().rstrip('#').strip()
         
-        # Split by # to get segments
-        segments = [seg.strip().lower() for seg in clean_ref.split('#') if seg.strip()]
+        # Split by # to get segments. Preserve an empty leading author field
+        # from LLM output like "#Title#Venue#Year#URL" so anonymous URL
+        # references dedupe by title instead of all collapsing to venue "n.d.".
+        segments = [seg.strip().lower() for seg in clean_ref.split('#')]
+        while segments and not segments[-1]:
+            segments.pop()
+        if not (segments and segments[0] == ''):
+            segments = [seg for seg in segments if seg]
         
         return {
             'author': segments[0] if len(segments) > 0 else '',
@@ -5197,6 +5807,85 @@ class ArxivReferenceChecker:
         
         return overlap >= 2 and overlap_ratio >= 0.5
     
+    def _merge_split_initial_authors(self, raw_authors):
+        """Merge consecutive (initial, surname) tokens that the LLM split apart.
+
+        Some LLM extractors emit "E*Jang*S*Gu*B*Poole" for the source
+        "Jang, E., Gu, S., and Poole, B.", which after splitting on '*'
+        gives ``['E', 'Jang', 'S', 'Gu', 'B', 'Poole']``.  Treating each as
+        a separate author produces single-letter "authors" that fail name
+        matching against the canonical metadata.
+
+        This helper walks the token list and recombines each
+        (initial_token, surname_token) pair into ``"Initial Surname"``.
+        Tokens that already look like full author entries (e.g.
+        ``"J. S. Hartford"`` or ``"Jang, E."``) are left untouched.
+        """
+        if not raw_authors or len(raw_authors) < 2:
+            return raw_authors
+
+        # An "initial token" is 1-3 chars of capital letters, optional
+        # periods, single hyphen (for compound initials like "H.-Y"),
+        # and no lowercase letters.  Examples: "E", "A. M", "P. A",
+        # "H.-Y", "W.-N".
+        initial_re = re.compile(r'^[A-Z](?:\.?[\s-]?[A-Z])*\.?$')
+
+        def is_initial_token(tok):
+            if not tok:
+                return False
+            tok = tok.strip()
+            if len(tok) > 5:
+                return False
+            return bool(initial_re.match(tok))
+
+        def is_surname_token(tok):
+            if not tok:
+                return False
+            tok = tok.strip()
+            # Surname: starts with capital, has at least one lowercase
+            # letter, allows internal hyphens/spaces/apostrophes.
+            # Reject anything containing a comma (already a full entry).
+            if ',' in tok:
+                return False
+            if len(tok) < 2:
+                return False
+            if not tok[0].isupper():
+                # Accept lowercase-prefix surnames typed lowercase
+                # ("marc lelarge"-style is left as-is below by surname check)
+                return False
+            return any(c.islower() for c in tok)
+
+        # Count how many tokens look like bare initials.  Only attempt the
+        # merge when at least two tokens are bare initials AND no token is
+        # already a "Surname, Initial" entry (those are well-formed).
+        bare_initials = sum(1 for t in raw_authors if is_initial_token(t))
+        if bare_initials < 2:
+            return raw_authors
+        if any(',' in t for t in raw_authors):
+            return raw_authors
+
+        merged = []
+        i = 0
+        while i < len(raw_authors):
+            tok = raw_authors[i].strip()
+            nxt = raw_authors[i + 1].strip() if i + 1 < len(raw_authors) else ''
+            if is_initial_token(tok) and is_surname_token(nxt):
+                # Normalise the initials: ensure each capital letter is
+                # followed by a period, single spaces between initials.
+                # "A M" -> "A. M.", "H.-Y" -> "H.-Y.", "E" -> "E."
+                norm = tok
+                # Add trailing period if missing on the last letter
+                if not norm.endswith('.') and norm[-1].isalpha():
+                    norm = norm + '.'
+                # Add periods after standalone letters separated by spaces
+                norm = re.sub(r'\b([A-Z])(?=\s+[A-Z])', r'\1.', norm)
+                merged.append(f"{norm} {nxt}")
+                i += 2
+            else:
+                merged.append(tok)
+                i += 1
+        return merged
+
     def _clean_llm_author_text(self, author_text):
         """
         Clean author text and parse authors properly
@@ -5208,7 +5897,14 @@ class ArxivReferenceChecker:
         if '*' in author_text:
             # Split on asterisks to get individual author entries
             raw_authors = [author.strip() for author in author_text.split('*') if author.strip()]
-            
+
+            # Repair split-initial artifacts: LLMs sometimes emit
+            # "E*Jang*S*Gu*B*Poole" when the source was "Jang, E., Gu, S., Poole, B."
+            # so an initial token like "E" lands as its own author and the surname
+            # "Jang" as the next.  Merge consecutive (initial, surname) pairs back
+            # into proper "Initial Surname" entries before further parsing.
+            raw_authors = self._merge_split_initial_authors(raw_authors)
+
             parsed_authors = []
             for author in raw_authors:
                 # Clean up the author entry and strip LaTeX commands
@@ -5284,6 +5980,10 @@ class ArxivReferenceChecker:
             return None
             
         author_text = author_text.strip()
+
+        # Repair OCR/PDF tokenization artifacts where a surname is split after
+        # its first character (e.g., "Y ang" -> "Yang", "Y e" -> "Ye").
+        author_text = re.sub(r'\b([A-Z])\s+([a-z]{1,})\b', r'\1\2', author_text)
         
         # Check if this looks like BibTeX format "Surname, Given"
         if ',' in author_text and author_text.count(',') == 1:
@@ -5770,9 +6470,8 @@ class ArxivReferenceChecker:
             if arxiv_id_match:
                 arxiv_id = arxiv_id_match.group(1)
                 try:
-                    import arxiv
-                    search = arxiv.Search(id_list=[arxiv_id])
-                    paper = next(iter(search.results()), None)
+                    from refchecker.utils.arxiv_utils import get_arxiv_paper_by_id
+                    paper = get_arxiv_paper_by_id(arxiv_id)
                     if paper and paper.published:
                         correct_year = paper.published.year
                         logger.debug(f"Corrected year from ArXiv API: {year} -> {correct_year} for {arxiv_id}")
@@ -6383,14 +7082,16 @@ class ArxivReferenceChecker:
             self._process_reference_result(paper, result.reference, result.errors, result.url,
                                          paper_errors, unverified_count, debug_mode, print_output=False,
                                          verified_data=result.verified_data,
-                                         precomputed_hallucination=result.hallucination_assessment)
+                                         precomputed_hallucination=result.hallucination_assessment,
+                                         precomputed_hallucination_applied=result.hallucination_verdict_applied)
         
         # Run parallel verification
         processor.verify_references_parallel(paper, bibliography, result_callback)
     
     def _process_reference_result(self, paper, reference, errors, reference_url, 
                                 paper_errors, unverified_count, debug_mode, print_output=True,
-                                verified_data=None, precomputed_hallucination=None):
+                                verified_data=None, precomputed_hallucination=None,
+                                precomputed_hallucination_applied=False):
         """
         Process the result of reference verification (shared by both sequential and parallel)
         
@@ -6404,6 +7105,7 @@ class ArxivReferenceChecker:
             debug_mode: Whether debug mode is enabled
             print_output: Whether to print output (False for parallel mode to avoid duplication)
             precomputed_hallucination: Pre-computed hallucination assessment from parallel printer (skip LLM re-call)
+            precomputed_hallucination_applied: Whether that assessment has already been applied to errors/status
         """
         # If errors found, add to dataset and optionally print details
         if errors:
@@ -6420,17 +7122,20 @@ class ArxivReferenceChecker:
                     assessment,
                     reference=reference,
                     standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                    llm_client=self.report_builder.llm_verifier,
+                    web_searcher=self.report_builder.web_searcher,
                 )
                 return applied.get('hallucination_assessment', assessment), applied
             
             if has_unverified_error:
+                if precomputed_hallucination_applied:
+                    self.total_unverified_refs += 1
+                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
                 # Check if the URL was confirmed to contain the paper
-                url_references_paper = any(
+                elif any(
                     'url references paper' in (e.get('error_details') or '').lower()
                     for e in errors
-                )
-                
-                if url_references_paper:
+                ):
                     # URL contains the paper — ask the LLM to validate
                     # whether this is a real reference before recording an error.
                     url_assessment = precomputed_hallucination
@@ -6447,7 +7152,7 @@ class ArxivReferenceChecker:
                             print(f"       ✅ Verified via URL: {cited_url}")
                             explanation = url_assessment.get('explanation', '')
                             if explanation:
-                                print(f"         LLM confirmed: {explanation}")
+                                print(f"         {explanation}")
                         return  # Don't add to errors — reference is verified
                     elif url_assessment and applied_hallucination.get('status') == 'hallucination':
                         # LLM says likely hallucinated despite URL containing title
@@ -6483,7 +7188,7 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
                         if llm_assessment:
                             precomputed_hallucination = llm_assessment
-            
+
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
             error_entry_index = len(self.errors) - 1 if error_entry_record is not None else None
@@ -6504,18 +7209,26 @@ class ArxivReferenceChecker:
             # If the parallel printer already ran the assessment, just store it
             # on the error record instead of re-calling the LLM.
             if precomputed_hallucination:
-                _has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
-                applied = apply_hallucination_verdict(
-                    {'status': 'unverified' if _has_unverified else 'error', 'errors': errors},
-                    precomputed_hallucination,
-                    reference=reference,
-                    standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
-                )
-                precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
-                if error_entry_record is not None:
-                    error_entry_record['hallucination_assessment'] = precomputed_hallucination
-                elif self.errors:
-                    self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
+                if precomputed_hallucination_applied:
+                    if error_entry_record is not None:
+                        error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                    elif self.errors:
+                        self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
+                else:
+                    _has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
+                    applied = apply_hallucination_verdict(
+                        {'status': 'unverified' if _has_unverified else 'error', 'errors': errors},
+                        precomputed_hallucination,
+                        reference=reference,
+                        standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                        llm_client=self.report_builder.llm_verifier,
+                        web_searcher=self.report_builder.web_searcher,
+                    )
+                    precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
+                    if error_entry_record is not None:
+                        error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                    elif self.errors:
+                        self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
             else:
                 self._run_and_display_hallucination_assessment(
                     reference,
@@ -6707,11 +7420,11 @@ class ArxivReferenceChecker:
         """
         from refchecker.utils.text_utils import strip_latex_commands, format_authors_for_display
 
-        raw_title = reference.get('title', 'Untitled')
+        raw_title = reference.get('display_title') or reference.get('title', 'Untitled')
         title = strip_latex_commands(raw_title)
         authors = format_authors_for_display(reference.get('authors', []))
-        year = reference.get('year', '')
-        venue = reference.get('venue', '') or reference.get('journal', '')
+        year = display_reference_value(reference.get('year', ''))
+        venue = display_reference_value(reference.get('venue', '') or reference.get('journal', ''))
         url = reference.get('url', '')
         doi = reference.get('doi', '')
 
@@ -6764,21 +7477,20 @@ class ArxivReferenceChecker:
     def _display_non_unverified_errors(self, errors, debug_mode, print_output):
         """Display all non-unverified errors and warnings"""
         if not debug_mode and print_output:
-            for error in errors:
-                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified' and error.get('info_type') != 'unverified':
-                    error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
-                    error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
-                    
-                    from refchecker.utils.error_utils import print_labeled_multiline
+            from refchecker.utils.error_utils import print_labeled_multiline, sort_issues_for_cli_display
 
-                    if error_type == 'arxiv_id':
-                        print(f"      ❌ {error_details}")
-                    elif 'error_type' in error:
-                        print_labeled_multiline("❌ Error", error_details)
-                    elif 'warning_type' in error:
-                        print_labeled_multiline("⚠️  Warning", error_details)
-                    else:
-                        print_labeled_multiline("ℹ️  Information", error_details)
+            for error in sort_issues_for_cli_display(errors):
+                error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
+                error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
+
+                if error_type == 'arxiv_id':
+                    print(f"      ❌ {error_details}")
+                elif 'warning_type' in error:
+                    print_labeled_multiline("⚠️  Warning", error_details)
+                elif 'error_type' in error:
+                    print_labeled_multiline("❌ Error", error_details)
+                else:
+                    print_labeled_multiline("ℹ️  Information", error_details)
 
     def _run_and_display_hallucination_assessment(
         self,
@@ -6832,6 +7544,8 @@ class ArxivReferenceChecker:
             assessment,
             reference=reference,
             standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+            llm_client=self.report_builder.llm_verifier,
+            web_searcher=self.report_builder.web_searcher,
         )
         assessment = applied.get('hallucination_assessment', assessment)
 

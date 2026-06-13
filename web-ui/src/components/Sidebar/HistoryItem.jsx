@@ -1,8 +1,10 @@
-import { useState, memo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { formatDate } from '../../utils/formatters'
+import { useStyleStore } from '../../stores/useStyleStore'
+import { formatDate, filterIssuesForStyle } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
 
 /**
@@ -44,11 +46,46 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
 
   const isPlaceholder = item.id === -1
   const isInProgress = item.status === 'in_progress'
-  
-  // Calculate progress percentage
-  const totalRefs = item.total_refs || 0
-  const processedRefs = item.processed_refs || 0
-  const progressPercent = totalRefs > 0 ? Math.min((processedRefs / totalRefs) * 100, 100) : 0
+  const isComplete = ['completed', 'cancelled', 'error'].includes(item.status)
+
+  const isCurrentCheck = useCheckStore(state => state.currentCheckId === item.id)
+  const liveReferences = useCheckStore(state => (isCurrentCheck ? state.references : null))
+  const liveStats = useCheckStore(state => (isCurrentCheck ? state.stats : null))
+  const liveStatus = useCheckStore(state => (isCurrentCheck ? state.status : null))
+  // Subscribe to the active citation style so the per-history-item
+  // counters re-evaluate when the user flips the style dropdown — the
+  // sidebar otherwise lagged behind the main view's style-aware counts.
+  const activeStyle = useStyleStore(s => s.format)
+  const summaryCounts = useMemo(() => {
+    const rawRefs = Array.isArray(liveReferences) && liveReferences.length > 0
+      ? liveReferences
+      : (Array.isArray(item.results) ? item.results : [])
+    // Apply the same style filter the main Summary chips and Corrections
+    // tab use, so the sidebar badge never reads "⚠1" while the main
+    // view shows 0 warnings (which happens when the only warning is a
+    // style-suppressed AJNR-type venue mismatch under Vancouver).
+    const refs = (rawRefs || []).map(r => {
+      if (!r) return r
+      const filteredErrors = filterIssuesForStyle(r.errors, r, activeStyle)
+      const filteredWarnings = filterIssuesForStyle(r.warnings, r, activeStyle)
+      if (filteredErrors === r.errors && filteredWarnings === r.warnings) return r
+      return { ...r, errors: filteredErrors, warnings: filteredWarnings }
+    })
+    const stats = isCurrentCheck && liveStats ? liveStats : item
+    const summaryIsComplete = isCurrentCheck
+      ? ['completed', 'cancelled', 'error'].includes(liveStatus)
+      : isComplete
+    return buildReferenceSummary({ stats, references: refs, isComplete: summaryIsComplete })
+  }, [isCurrentCheck, liveStats, liveStatus, liveReferences, item, isComplete, activeStyle])
+
+  const totalRefs = summaryCounts.totalRefs
+  const processedRefs = summaryCounts.processedRefs
+  const progressPercent = summaryCounts.progressPercent
+  const refsWithErrors = summaryCounts.references.errors
+  const refsWithWarningsOnly = summaryCounts.references.warnings
+  const refsWithSuggestionsOnly = summaryCounts.references.suggestions
+  const unverifiedCount = summaryCounts.references.unverified
+  const hallucinationCount = summaryCounts.references.hallucinated
 
   const handleClick = () => {
     if (!isEditing && !isSelected) {
@@ -152,20 +189,20 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
     // Build combined status from all issue types
     const parts = []
     let color = 'var(--color-success)'
-    if (item.hallucination_count > 0) {
-      parts.push(`${item.hallucination_count} hallucinated`)
+    if (hallucinationCount > 0) {
+      parts.push(`${hallucinationCount} hallucinated`)
       color = 'var(--color-hallucination)'
     }
-    if (item.errors_count > 0) {
-      parts.push(`${item.errors_count} errors`)
+    if (refsWithErrors > 0) {
+      parts.push(`${refsWithErrors} refs with errors`)
       if (color === 'var(--color-success)') color = 'var(--color-error)'
     }
-    if (item.warnings_count > 0) {
-      parts.push(`${item.warnings_count} warnings`)
+    if (refsWithWarningsOnly > 0) {
+      parts.push(`${refsWithWarningsOnly} refs with warnings`)
       if (color === 'var(--color-success)') color = 'var(--color-warning)'
     }
-    if (item.unverified_count > 0) {
-      parts.push(`${item.unverified_count} unverified`)
+    if (unverifiedCount > 0) {
+      parts.push(`${unverifiedCount} unverified`)
       if (color === 'var(--color-success)') color = 'var(--color-text-muted)'
     }
     if (parts.length === 0) {
@@ -263,53 +300,53 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                             ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
                             : `${totalRefs} refs`)))}
             </span>
-            {/* Show error/warning/suggestion counts with compact icons (including during in-progress) */}
-            {!isPlaceholder && (
+            {/* Show error/warning/suggestion counts with compact icons (only after refs start processing) */}
+            {!isPlaceholder && (processedRefs > 0 || isComplete) && (
               <>
-                {(item.refs_with_errors || 0) > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-error)' }} title={`${item.refs_with_errors} ref${item.refs_with_errors === 1 ? '' : 's'} with errors`}>
+                {refsWithErrors > 0 && (
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-error)' }} title={`${refsWithErrors} ref${refsWithErrors === 1 ? '' : 's'} with errors`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                     </svg>
-                    <span className="ml-0.5">{item.refs_with_errors}</span>
+                    <span className="ml-0.5">{refsWithErrors}</span>
                   </span>
                 )}
-                {(item.refs_with_warnings_only || 0) > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-warning)' }} title={`${item.refs_with_warnings_only} ref${item.refs_with_warnings_only === 1 ? '' : 's'} with warnings`}>
+                {refsWithWarningsOnly > 0 && (
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-warning)' }} title={`${refsWithWarningsOnly} ref${refsWithWarningsOnly === 1 ? '' : 's'} with warnings`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
-                    <span className="ml-0.5">{item.refs_with_warnings_only}</span>
+                    <span className="ml-0.5">{refsWithWarningsOnly}</span>
                   </span>
                 )}
-                {(item.suggestions_count || 0) > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-suggestion)' }} title={`${item.suggestions_count} suggestion${item.suggestions_count === 1 ? '' : 's'}`}>
+                {refsWithSuggestionsOnly > 0 && (
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-suggestion)' }} title={`${refsWithSuggestionsOnly} ref${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
                     </svg>
-                    <span className="ml-0.5">{item.suggestions_count}</span>
+                    <span className="ml-0.5">{refsWithSuggestionsOnly}</span>
                   </span>
                 )}
-                {(item.unverified_count || 0) > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} title={`${item.unverified_count} unverified ref${item.unverified_count === 1 ? '' : 's'}`}>
+                {unverifiedCount > 0 && (
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} title={`${unverifiedCount} unverified ref${unverifiedCount === 1 ? '' : 's'}`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                     </svg>
-                    <span className="ml-0.5">{item.unverified_count}</span>
+                    <span className="ml-0.5">{unverifiedCount}</span>
                   </span>
                 )}
-                {(item.hallucination_count || 0) > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-hallucination)' }} title={`${item.hallucination_count} likely hallucinated ref${item.hallucination_count === 1 ? '' : 's'}`}>
+                {hallucinationCount > 0 && (
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-hallucination)' }} title={`${hallucinationCount} likely hallucinated ref${hallucinationCount === 1 ? '' : 's'}`}>
                     <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="12" cy="12" r="10" />
                       <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
                       <circle cx="12" cy="17.5" r="1.2" fill="#fff" />
                     </svg>
-                    <span className="ml-0.5">{item.hallucination_count}</span>
+                    <span className="ml-0.5">{hallucinationCount}</span>
                   </span>
                 )}
                 {/* Green check only when completed with no issues at all */}
-                {!isInProgress && (item.refs_with_errors || 0) === 0 && (item.refs_with_warnings_only || 0) === 0 && (item.suggestions_count || 0) === 0 && (item.unverified_count || 0) === 0 && (item.hallucination_count || 0) === 0 && item.status === 'completed' && (
+                {!isInProgress && refsWithErrors === 0 && refsWithWarningsOnly === 0 && refsWithSuggestionsOnly === 0 && unverifiedCount === 0 && hallucinationCount === 0 && item.status === 'completed' && (
                   <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-success)' }} title="All references verified">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>

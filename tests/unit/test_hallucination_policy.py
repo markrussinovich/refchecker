@@ -9,8 +9,10 @@ from refchecker.core.hallucination_policy import (
     build_hallucination_error_entry,
     check_author_hallucination,
     detect_name_order_warning,
+    assess_hallucination,
     apply_hallucination_verdict,
     run_hallucination_check,
+    should_defer_likely_to_llm,
     should_check_hallucination,
     _compute_author_overlap,
     _reverify_with_llm_metadata,
@@ -33,6 +35,34 @@ def test_unverified_reference_should_be_checked():
         'ref_authors_cited': 'Author One, Author Two',
     }
     assert should_check_hallucination(entry) is True
+
+
+def test_shared_likely_deferral_policy_for_verified_or_zero_overlap():
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0}, '') is True
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0.8}, 'https://example.test/paper') is True
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0.8}, '') is False
+    assert should_defer_likely_to_llm({'verdict': 'UNLIKELY', 'author_overlap': 0}, 'https://example.test/paper') is False
+
+
+def test_cache_only_llm_unavailable_is_not_an_assessment():
+    class CacheOnlyVerifier:
+        def assess(self, _error_entry, web_searcher=None):
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': 'LLM not available.',
+                'web_search': None,
+            }
+
+    result = assess_hallucination(
+        {
+            'error_type': 'unverified',
+            'error_details': 'Reference could not be verified',
+            'ref_title': 'A missing title',
+        },
+        CacheOnlyVerifier(),
+    )
+
+    assert result is None
 
 
 def test_parse_verdict_preserves_found_venue():
@@ -98,6 +128,64 @@ def test_apply_hallucination_verdict_rechecks_found_venue():
     assert updated['status'] == 'verified'
     assert updated['warnings'][0]['error_type'] == 'venue'
     assert updated['warnings'][0]['ref_venue_correct'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
+
+
+def test_apply_hallucination_verdict_handles_last_first_found_authors():
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Marlowe: Stanford’s gpu-based computational instrument',
+        'authors': [
+            'Craig Kapfer',
+            'Kurt Stine',
+            'Balasubramanian Narasimhan',
+            'Christopher Mentzel',
+            'Emmanuel Candes',
+        ],
+        'year': 2025,
+        'venue': 'n.d.',
+        'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899',
+    }
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The cited work is hosted on Zenodo.',
+        'link': 'https://zenodo.org/doi/10.5281/zenodo.14751899',
+        'found_title': 'Marlowe: Stanford’s GPU-based Computational Instrument',
+        'found_authors': 'Kapfer, Craig, Stine, Kurt, Narasimhan, Balasubramanian, Mentzel, Christopher, Candès, Emmanuel',
+        'found_venue': 'Zenodo',
+        'found_year': '2025',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment, reference)
+
+    assert updated['status'] == 'verified'
+    assert updated['errors'] == []
+    assert updated['authoritative_urls'] == [
+        {'type': 'standard_refcheck', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+    ]
+
+
+def test_apply_hallucination_verdict_deduplicates_same_llm_url():
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+        'authoritative_urls': [
+            {'type': 'verified_url', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+        ],
+    }
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The cited work is hosted on Zenodo.',
+        'link': 'https://zenodo.org/doi/10.5281/zenodo.14751899/',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment)
+
+    assert updated['authoritative_urls'] == [
+        {'type': 'verified_url', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+    ]
 
 
 def test_apply_likely_verdict_uses_llm_match_without_fresh_lookup():
@@ -232,6 +320,86 @@ def test_year_only_issue_should_not_be_checked():
     assert should_check_hallucination(entry) is False
 
 
+def test_unlikely_reverify_errors_trigger_second_hallucination_pass():
+    """When initial UNLIKELY assessment's reverify produces title+author errors,
+    the result should be fed back through hallucination_check so the LLM can
+    decide whether the citation is in fact fabricated."""
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Sharing icu patient data responsibly under the sccm/esicm joint initiative: Amsterdamumcdb',
+        'authors': [
+            'Peter J. Thoral', 'Jan M. Peppink', 'Rutger H. Driessen',
+            'Eric J. G. Sijbrands', 'Erwin J. O. Kompanje',
+        ],
+        'year': 2021,
+        'venue': 'Critical Care',
+    }
+    initial_assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found a different paper with similar topic.',
+        'link': 'https://example.org/wrong-paper',
+        'found_title': 'Some Completely Different Paper Title About Other Topic',
+        'found_authors': 'Different Author A, Different Author B',
+        'found_year': '2021',
+    }
+    second_assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'On second pass, the cited authors do not match.',
+        'link': None,
+    }
+    llm_client = MagicMock()
+    # Make run_hallucination_check return our second_assessment by mocking
+    # at the LLM-client level: pre_screen will route 'title'+'author' multiple
+    # error to needs_llm; the assess_hallucination call uses llm_client.assess.
+    llm_client.assess = MagicMock(return_value=second_assessment)
+    llm_client.cache_dir = None
+    llm_client.model = 'mock-model'
+
+    updated = apply_hallucination_verdict(
+        result,
+        initial_assessment,
+        reference=reference,
+        llm_client=llm_client,
+    )
+
+    # The second-pass assessment should have been applied
+    assert updated['hallucination_assessment']['verdict'] == 'LIKELY'
+    assert updated['status'] == 'hallucination'
+
+
+def test_unlikely_reverify_no_rerun_when_no_llm_client():
+    """Without an llm_client, the legacy behavior (status='error') is preserved."""
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Sharing icu patient data responsibly under the sccm/esicm joint initiative: Amsterdamumcdb',
+        'authors': ['Peter J. Thoral'],
+        'year': 2021,
+    }
+    initial_assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found a different paper.',
+        'link': 'https://example.org/wrong-paper',
+        'found_title': 'Some Completely Different Paper Title About Other Topic',
+        'found_authors': 'Different Author A, Different Author B',
+        'found_year': '2021',
+    }
+
+    updated = apply_hallucination_verdict(
+        result,
+        initial_assessment,
+        reference=reference,
+    )
+
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['status'] == 'error'
+
+
 def test_warning_only_consolidated_issue_should_not_be_checked():
     entry = {
         'error_type': 'multiple',
@@ -252,6 +420,187 @@ def test_warning_only_consolidated_issue_should_not_be_checked():
     }
 
     assert should_check_hallucination(entry) is False
+
+
+def test_warning_only_built_entry_should_not_call_llm():
+    raw_errors = [
+        {
+            'warning_type': 'title (v1 vs v2 update)',
+            'warning_details': 'Title mismatch (v1 vs v2 update)',
+        },
+        {
+            'warning_type': 'author (v1 vs v2 update)',
+            'warning_details': 'Author count mismatch: 3 cited vs 4 correct (v1 vs v2 update)',
+        },
+    ]
+    reference = {
+        'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'year': 2025,
+        'url': 'http://arxiv.org/abs/2506.08477',
+    }
+    entry = build_hallucination_error_entry(
+        raw_errors,
+        reference,
+        verified_url='https://arxiv.org/abs/2506.08477v1',
+    )
+
+    assert entry is not None
+    assert should_check_hallucination(entry) is False
+
+    llm_client = MagicMock()
+    llm_client.available = True
+
+    assert run_hallucination_check(entry, llm_client=llm_client) is None
+    llm_client.assess.assert_not_called()
+
+
+def test_non_paper_dataset_source_should_not_call_llm():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author mismatch against paper database result',
+        'ref_title': 'Image Segmentation',
+        'ref_authors_cited': 'Carla Brodley',
+        'ref_venue_cited': 'UCI Machine Learning Repository',
+        'original_reference': {
+            'title': 'Image Segmentation',
+            'authors': ['Carla Brodley'],
+            'venue': 'UCI Machine Learning Repository',
+            'raw_text': 'Carla Brodley#Image Segmentation#UCI Machine Learning Repository#1990#',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNLIKELY'
+    llm_client.assess.assert_not_called()
+
+
+def test_non_paper_zenodo_software_source_should_not_call_llm():
+    entry = {
+        'error_type': 'title',
+        'error_details': 'Title mismatch against paper database result',
+        'ref_title': 'The language model evaluation harness',
+        'ref_authors_cited': 'Leo Gao, Jonathan Tow, Baber Abbasi',
+        'ref_venue_cited': 'Zenodo',
+        'ref_url_cited': 'https://zenodo.org/records/12608602',
+        'original_reference': {
+            'title': 'The language model evaluation harness',
+            'authors': ['Leo Gao', 'Jonathan Tow', 'Baber Abbasi'],
+            'venue': 'Zenodo',
+            'url': 'https://zenodo.org/records/12608602',
+            'raw_text': 'Leo Gao*Jonathan Tow*Baber Abbasi#The language model evaluation harness#Zenodo#2024#https://zenodo.org/records/12608602',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNLIKELY'
+    llm_client.assess.assert_not_called()
+
+
+def test_isbn_title_parser_artifact_should_not_call_llm():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Title mismatch\nAuthor mismatch',
+        'ref_title': 'ISBN 9781450378451',
+        'ref_authors_cited': 'Association for Computing Machinery',
+        'ref_url_cited': 'https://doi.org/10.1145/1401132.1401152',
+        'original_reference': {
+            'title': 'ISBN 9781450378451',
+            'authors': ['Association for Computing Machinery'],
+            'url': 'https://doi.org/10.1145/1401132.1401152',
+            'raw_text': 'Association for Computing Machinery#ISBN 9781450378451#n.d.#n.d.#https://doi.org/10.1145/1401132.1401152',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNCERTAIN'
+    llm_client.assess.assert_not_called()
+
+
+def test_title_equals_venue_parser_artifact_should_not_call_llm():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'The American Journal of Psychology',
+        'ref_authors_cited': 'Peter G. Polson',
+        'ref_venue_cited': 'The American Journal of Psychology',
+        'ref_url_cited': 'http://www.jstor.org/stable/1421672',
+        'original_reference': {
+            'title': 'The American Journal of Psychology',
+            'authors': ['Peter G. Polson'],
+            'venue': 'The American Journal of Psychology',
+            'url': 'http://www.jstor.org/stable/1421672',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNCERTAIN'
+    llm_client.assess.assert_not_called()
+
+
+def test_exact_identifier_title_update_with_author_overlap_should_not_call_llm():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Title mismatch:\n       cited: Detecting harmful memes with decoupled understanding and guided cot reasoning\n       actual: Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection',
+        'ref_title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'ref_authors_cited': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        '_ref_authors_cited_list': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'ref_authors_correct': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        'ref_url_cited': 'http://arxiv.org/abs/2506.08477',
+        'ref_verified_url': 'https://arxiv.org/abs/2506.08477v1',
+        'original_reference': {
+            'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+            'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+            'url': 'http://arxiv.org/abs/2506.08477',
+        },
+    }
+    llm_client = MagicMock()
+
+    assert should_check_hallucination(entry) is False
+    assert run_hallucination_check(entry, llm_client=llm_client) is None
+    llm_client.assess.assert_not_called()
+
+
+def test_apply_likely_title_only_identifier_update_corrects_to_unlikely():
+    result = {
+        'status': 'error',
+        'errors': [{'error_type': 'title', 'error_details': 'Title mismatch'}],
+    }
+    reference = {
+        'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'year': 2025,
+        'venue': 'arXiv',
+        'url': 'http://arxiv.org/abs/2506.08477',
+    }
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The cited title differs from the current arXiv title.',
+        'link': 'https://arxiv.org/abs/2506.08477',
+        'found_title': 'Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection',
+        'found_authors': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        'found_venue': 'arXiv',
+        'found_year': '2025',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment, reference=reference)
+
+    assert updated['status'] == 'error'
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['hallucination_assessment']['original_verdict'] == 'LIKELY'
+    assert updated['matched_database'] == 'LLM search'
 
 
 def test_arxiv_id_conflict_should_be_checked():
@@ -930,6 +1279,50 @@ def test_verified_ref_high_overlap_not_flagged():
     result = run_hallucination_check(entry, llm_client=None)
     assert result is None  # No hallucination for well-matching authors
 
+def test_verified_compact_initial_authors_skip_hallucination_check():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'First author mismatch',
+        'ref_title': 'High-contrast gaudy images improve the training of deep neural network models of visual cortex',
+        'ref_authors_cited': 'BR Cowley, JW Pillow',
+        '_ref_authors_cited_list': ['BR Cowley', 'JW Pillow'],
+        'ref_authors_correct': 'Benjamin R. Cowley, Jonathan W. Pillow',
+        'ref_verified_url': 'https://arxiv.org/abs/2006.11412',
+    }
+
+    assert _compute_author_overlap(
+        entry['ref_authors_cited'],
+        entry['ref_authors_correct'],
+        cited_list=entry['_ref_authors_cited_list'],
+    ) == 1.0
+    assert should_check_hallucination(entry) is False
+
+def test_verified_collapsed_author_tokens_skip_hallucination_check():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author 1 mismatch',
+        'ref_title': 'The sensorium competition on predicting large-scale mouse primary visual cortex activity',
+        'ref_authors_cited': (
+            'KonstantinFWilleke, PaulGFahey, MohammadBashiri, LauraPede, '
+            'MaxFBurg, ChristophBlessing, Santiago A Cadena, Zhiwei Ding, '
+            'Konstantin-Klemens Lurz, Kayla Ponder, et al'
+        ),
+        '_ref_authors_cited_list': [
+            'KonstantinFWilleke', 'PaulGFahey', 'MohammadBashiri', 'LauraPede',
+            'MaxFBurg', 'ChristophBlessing', 'Santiago A Cadena', 'Zhiwei Ding',
+            'Konstantin-Klemens Lurz', 'Kayla Ponder', 'et al',
+        ],
+        'ref_authors_correct': (
+            'Konstantin F. Willeke, Paul G. Fahey, Mohammad Bashiri, Laura Pede, '
+            'Max F. Burg, Christoph Blessing, Santiago A. Cadena, Zhiwei Ding, '
+            'Konstantin-Klemens Lurz, Kayla Ponder, Taliah Muhammad, '
+            'Saumil S. Patel, Alexander S. Ecker, Andreas S. Tolias, Fabian H. Sinz'
+        ),
+        'ref_verified_url': 'https://arxiv.org/abs/2206.08666',
+    }
+
+    assert should_check_hallucination(entry) is False
+
 
 def test_verified_ref_author_field_with_title_words_is_garbled_metadata():
     entry = {
@@ -1441,6 +1834,80 @@ def test_reverify_llm_metadata_parses_last_first_author_lists():
     assert issues == []
 
 
+def test_unlikely_author_guard_allows_compressed_lastname_initial_lists():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The paper exists with matching authors; the mismatch is citation formatting.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Model-ensemble trust-region policy optimization',
+            'ref_authors_cited': 'Kurutach, T. Clavera, I. Duan, Y. Tamar, A. Abbeel, P',
+            '_ref_authors_cited_list': ['Kurutach', 'T. Clavera', 'I. Duan', 'Y. Tamar', 'A. Abbeel', 'P'],
+            'ref_authors_correct': 'Thanard Kurutach, Ignasi Clavera, Yan Duan, Aviv Tamar, Pieter Abbeel',
+            'ref_verified_url': 'https://arxiv.org/abs/1802.10592',
+        },
+        ['https://arxiv.org/abs/1802.10592'],
+        {
+            'title': 'Model-Ensemble Trust-Region Policy Optimization',
+            'authors': 'Thanard Kurutach, Ignasi Clavera, Yan Duan, Aviv Tamar, Pieter Abbeel',
+            'year': '2018',
+        },
+        'https://arxiv.org/abs/1802.10592',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
+def test_unlikely_author_guard_allows_matching_authors_with_expanded_title():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The cited title is truncated, but the authors match the found source.',
+        {
+            'error_type': 'multiple',
+            'ref_title': 'Regularized rl',
+            'ref_authors_cited': 'D. Tiapkin, D. Belomestny, D. Calandriello, E. Moulines, A. Naumov, P. Perrault, M. Valko, P. Menard',
+            'ref_authors_correct': 'Nino Vieillard, Marcin Andrychowicz, Anton Raichuk, Olivier Pietquin, Matthieu Geist',
+            'ref_verified_url': 'https://openreview.net/forum?id=lF2aip4Scn',
+        },
+        ['https://openreview.net/forum?id=lF2aip4Scn'],
+        {
+            'title': 'Demonstration-Regularized RL',
+            'authors': 'Daniil Tiapkin, Denis Belomestny, Daniele Calandriello, Éric Moulines, Alexey Naumov, Pierre Perrault, Michal Valko, Pierre Ménard',
+            'year': '2024',
+        },
+        'https://openreview.net/forum?id=lF2aip4Scn',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
+def test_unlikely_author_guard_allows_matching_authors_with_book_subtitle():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The cited title and authors match the online draft.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Fairness and Machine Learning',
+            'ref_authors_cited': 'S. Barocas, M. Hardt, A. Narayanan',
+            'ref_authors_correct': 'Sarah Bird, Krishnaram Kenthapadi, Emre Kıcıman, Margaret Mitchell',
+            'ref_url_cited': 'http://www.fairmlbook.org',
+            'ref_verified_url': 'https://doi.org/10.1145/3289600.3291383',
+        },
+        ['https://fairmlbook.org/'],
+        {
+            'title': 'Fairness and Machine Learning: Limitations and Opportunities',
+            'authors': 'Solon Barocas, Moritz Hardt, Arvind Narayanan',
+            'year': '2019',
+        },
+        'https://fairmlbook.org/',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
 def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
     verifier = object.__new__(LLMHallucinationVerifier)
     verifier.model = 'gemini-test'
@@ -1450,8 +1917,8 @@ def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
     verifier.client = MagicMock()
     verifier.client.models.generate_content = generate_content
     sleeps = []
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.random.random', lambda: 0.25)
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleeps.append)
+    monkeypatch.setattr('refchecker.llm.google_retry.random.random', lambda: 0.25)
+    monkeypatch.setattr('refchecker.llm.google_retry.time.sleep', sleeps.append)
 
     result = verifier._google_generate_content_with_retry(
         contents='prompt',
@@ -1471,7 +1938,7 @@ def test_google_non_rate_limit_error_is_not_retried(monkeypatch):
     verifier.client = MagicMock()
     verifier.client.models.generate_content = generate_content
     sleep = MagicMock()
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleep)
+    monkeypatch.setattr('refchecker.llm.google_retry.time.sleep', sleep)
 
     try:
         verifier._google_generate_content_with_retry(

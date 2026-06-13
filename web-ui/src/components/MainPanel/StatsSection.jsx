@@ -1,21 +1,101 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { 
-  exportResultsAsMarkdown, 
-  exportResultsAsPlainText, 
+import { useStyleStore } from '../../stores/useStyleStore'
+import {
+  exportResultsAsMarkdown,
+  exportResultsAsPlainText,
   exportResultsAsBibtex,
-  downloadAsFile 
+  exportResultsAsJsonl,
+  exportResultsAsCsv,
+  exportResultsAsRIS,
+  exportDiffAsMarkdown,
+  exportDiffAsCsv,
+  exportCorrectedListAsStyle,
+  sortReferencesForExport,
+  REFERENCE_SORT_MODES,
+  filterIssuesForStyle,
+  downloadAsFile
 } from '../../utils/formatters'
-import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
+
+/**
+ * Per-stage extraction breakdown chip — Regex / LLM / Hallucination LLM.
+ *
+ * Reads `stats.regex_count` / `stats.llm_count` / `stats.hallucination_llm_count`
+ * (emitted by the backend in summary_update events) when present, and falls
+ * back to deriving the values from `references` for older check records
+ * that don't carry the new fields. Hides when we have nothing useful to
+ * show (zero refs, or a cache hit where the original stage is unknown).
+ */
+function PerStageChip({ stats, references }) {
+  const refs = Array.isArray(references) ? references : []
+  const total = refs.length
+
+  // Prefer backend-emitted counts when present (most accurate). When
+  // absent (e.g. older history records, cache hits) derive from the
+  // refs array on the client.
+  const regex = typeof stats?.regex_count === 'number'
+    ? stats.regex_count
+    : (stats?.extraction_method === 'bbl' || stats?.extraction_method === 'bib' || stats?.extraction_method === 'regex' ? total : 0)
+  const llm = typeof stats?.llm_count === 'number'
+    ? stats.llm_count
+    : (stats?.extraction_method === 'llm' ? total : 0)
+  const hallucLlm = typeof stats?.hallucination_llm_count === 'number'
+    ? stats.hallucination_llm_count
+    : refs.filter(r => r?.hallucination_assessment?.source).length
+
+  if (total === 0) return null
+  if (regex === 0 && llm === 0 && hallucLlm === 0) return null
+
+  return (
+    <span
+      className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-xs"
+      style={{
+        border: '1px solid var(--color-border)',
+        background: 'var(--color-bg-tertiary)',
+        color: 'var(--color-text-secondary)',
+      }}
+      title={
+        "Extraction: how many references the deterministic parser " +
+        "(BibTeX / .bbl / regex) handled vs the LLM extractor.\n\n" +
+        "Hallucination check: how many references the hallucination-" +
+        "verifier LLM actually ran on (only the ones flagged as " +
+        "possibly fabricated by the cheap pre-screen — verified refs " +
+        "skip this stage)."
+      }
+    >
+      <span style={{ color: 'var(--color-text-muted)' }}>Extracted:</span>
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>Regex </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{regex}</span>
+      </span>
+      <span style={{ opacity: 0.5 }}>·</span>
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>LLM </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{llm}</span>
+      </span>
+      <span style={{ opacity: 0.4, margin: '0 4px' }}>|</span>
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>Halluc checked </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{hallucLlm}</span>
+      </span>
+    </span>
+  )
+}
 
 /**
  * Stats section showing reference check summary with clickable filters
  * Compact design with refs summary and individual issue counts
  */
-export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource }) {
+export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource, healthBadge, usageChip }) {
   const statusFilter = useCheckStore(s => s.statusFilter)
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [sortMode, setSortMode] = useState('citation')
+  // 'original' = export references as RefChecker saw them (the "report" view)
+  // 'corrected' = apply every verifier suggestion before exporting
+  // 'diff' = side-by-side original-vs-corrected listing
+  const [exportMode, setExportMode] = useState('original')
   const exportMenuRef = useRef(null)
 
   // Close export menu when clicking outside
@@ -77,95 +157,82 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const activeFilterId = isFilterActive ? statusFilter[0] : null
   const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
-  // Compute inclusive badge counts from references using the same filter logic
-  // as ReferenceList.jsx, so clicking a badge always shows the matching count.
-  // Only used for badge breakdowns — processedRefs always comes from backend stats.
-  const inclusiveCounts = useMemo(() => {
-    if (!references || references.length === 0) return null
-    // totalProcessed: count of ALL refs that have completed verification,
-    // regardless of status (used for the "of N" progress denominator).
-    const totalProcessed = references.filter(r => {
-      const s = (r.status || '').toLowerCase()
-      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      return true
-    }).length
-    // Only count finalized refs (not pending/checking/hallucination-pending).
-    // ALL refs with hallucination_check_pending are excluded until their
-    // check completes and final status is known.
-    const processed = references.filter(r => {
-      const s = (r.status || '').toLowerCase()
-      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      if (r.hallucination_check_pending && !r.hallucination_assessment) return false
-      if (s === 'unverified' && !r.hallucination_assessment && !isComplete) return false
-      return true
+  // Style-aware summary counters. When the active citation style would
+  // suppress an issue (style-conforming author count, NLM venue
+  // abbreviation, cosmetic-only), the issue is filtered out of the
+  // counts so the chips and progress totals move on style change.
+  const styleFormat = useStyleStore(s => s.format)
+  const styleFilteredReferences = useMemo(() => {
+    if (!Array.isArray(references) || references.length === 0) return references || []
+    return references.map(r => {
+      if (!r) return r
+      const filteredErrors = filterIssuesForStyle(r.errors, r, styleFormat)
+      const filteredWarnings = filterIssuesForStyle(r.warnings, r, styleFormat)
+      if (filteredErrors === r.errors && filteredWarnings === r.warnings) return r
+      return { ...r, errors: filteredErrors, warnings: filteredWarnings }
     })
-    const finalized = processed
-    // Compute total individual issue counts from reference objects so they
-    // stay accurate even when the backend defers counting for refs pending
-    // hallucination checks.
+  }, [references, styleFormat])
+
+  // Suppress style-filtered issue totals from the persisted stats too —
+  // otherwise the backend's stats.errors_count/warnings_count would
+  // leak through buildReferenceSummary's fallback path even when the
+  // derived per-ref counts say zero. Recompute totals from the
+  // filtered refs.
+  const styleAwareStats = useMemo(() => {
+    if (!stats || !Array.isArray(styleFilteredReferences)) return stats
     let errorsCount = 0
     let warningsCount = 0
     let suggestionsCount = 0
-    for (const r of finalized) {
-      errorsCount += (r.errors?.filter(e => e.error_type !== 'unverified') || []).length
-      warningsCount += (r.warnings || []).length
-      suggestionsCount += (r.suggestions || []).length
+    let refsWithErrors = 0
+    let refsWithWarningsOnly = 0
+    let refsWithSuggestionsOnly = 0
+    for (const r of styleFilteredReferences) {
+      const e = (r?.errors || []).filter(i => (i?.error_type || '').toLowerCase() !== 'unverified').length
+      const w = (r?.warnings || []).length
+      const s = (r?.suggestions || []).length
+      errorsCount += e
+      warningsCount += w
+      suggestionsCount += s
+      if (e > 0) refsWithErrors += 1
+      else if (w > 0) refsWithWarningsOnly += 1
+      else if (s > 0) refsWithSuggestionsOnly += 1
     }
     return {
-      count: processed.length,
-      totalProcessed,
-      errorsCount,
-      warningsCount,
-      suggestionsCount,
-      withErrors: finalized.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
-      withWarnings: finalized.filter(r =>
-        r.warnings?.length > 0 &&
-        !r.errors?.some(e => e.error_type !== 'unverified')
-      ).length,
-      withUnverified: finalized.filter(r =>
-        getEffectiveReferenceStatus(r, isComplete) === 'unverified' ||
-        getEffectiveReferenceStatus(r, isComplete) === 'hallucination' ||
-        r.errors?.some(e => e.error_type === 'unverified')
-      ).length,
-      hallucinated: finalized.filter(r =>
-        getEffectiveReferenceStatus(r, isComplete) === 'hallucination'
-      ).length,
-      verified: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        return s === 'verified' || s === 'suggestion'
-      }).length,
+      ...stats,
+      errors_count: errorsCount,
+      warnings_count: warningsCount,
+      suggestions_count: suggestionsCount,
+      refs_with_errors: refsWithErrors,
+      refs_with_warnings_only: refsWithWarningsOnly,
+      refs_with_suggestions_only: refsWithSuggestionsOnly,
     }
-  }, [references, isComplete])
+  }, [stats, styleFilteredReferences])
 
-  // Use inclusive counts from references for badge breakdowns, backend stats for totals
-  const refsWithErrors = inclusiveCounts?.withErrors ?? stats.refs_with_errors ?? 0
-  const refsWithWarningsOnly = inclusiveCounts?.withWarnings ?? stats.refs_with_warnings_only ?? 0
-  const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
-  const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
-  const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  // processedRefs: Use the count of finalized references from inclusiveCounts
-  // when available, since the backend defers counting refs pending hallucination
-  // checks.  Fall back to backend stats only when references aren't loaded yet.
-  // During active checks, unverified refs show as "checking" and should not
-  // count toward processed; inclusiveCounts.count excludes them correctly.
-  // Once complete, use totalProcessed to include all refs.
-  const processedRefs = isComplete
-    ? (inclusiveCounts?.totalProcessed ?? stats.processed_refs ?? 0)
-    : (inclusiveCounts?.count ?? stats.processed_refs ?? 0)
+  const summaryCounts = useMemo(
+    () => buildReferenceSummary({ stats: styleAwareStats, references: styleFilteredReferences, isComplete }),
+    [styleAwareStats, styleFilteredReferences, isComplete]
+  )
 
-  // Issue type filters for the chips
-  // Compute from reference objects (inclusiveCounts) when available so that
-  // counts stay correct even while refs are deferred for hallucination checks.
+  const refsWithErrors = summaryCounts.references.errors
+  const refsWithWarningsOnly = summaryCounts.references.warnings
+  const refsWithSuggestionsOnly = summaryCounts.references.suggestions
+  const refsVerified = summaryCounts.references.verified
+  const refsUnverified = summaryCounts.references.unverified
+  const refsHallucinated = summaryCounts.references.hallucinated
+  const processedRefs = summaryCounts.processedRefs
+  const totalRefs = summaryCounts.totalRefs
+
   const issueFilters = [
-    { ...allFilters.error, value: inclusiveCounts?.errorsCount ?? stats.errors_count ?? 0 },
-    { ...allFilters.warning, value: inclusiveCounts?.warningsCount ?? stats.warnings_count ?? 0 },
-    { ...allFilters.suggestion, value: inclusiveCounts?.suggestionsCount ?? stats.suggestions_count ?? 0 },
+    { ...allFilters.error, value: summaryCounts.issues.errors },
+    { ...allFilters.warning, value: summaryCounts.issues.warnings },
+    { ...allFilters.suggestion, value: summaryCounts.issues.suggestions },
     { ...allFilters.unverified, value: refsUnverified },
     { ...allFilters.hallucination, value: refsHallucinated },
   ]
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')
+  const isSuggestionSelected = statusFilter.includes('suggestion')
   const isUnverifiedSelected = statusFilter.includes('unverified')
   const isHallucinationSelected = statusFilter.includes('hallucination')
 
@@ -175,17 +242,53 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // Export handlers
   const handleExport = (format) => {
     setShowExportMenu(false)
-    const exportData = { paperTitle, paperSource, stats, references }
-    
+    const sortedRefs = sortReferencesForExport(references, sortMode)
+    const exportData = { paperTitle, paperSource, stats, references: sortedRefs }
+
+    // 'diff' mode short-circuits format: there are only two file shapes
+    // (markdown and csv) that make sense for a side-by-side report.
+    if (exportMode === 'diff') {
+      if (format === 'csv') {
+        downloadAsFile(exportDiffAsCsv({ references: sortedRefs }), `${baseFilename}-diff.csv`, 'text/csv')
+      } else {
+        downloadAsFile(exportDiffAsMarkdown({ paperTitle, references: sortedRefs }), `${baseFilename}-diff.md`, 'text/markdown')
+      }
+      return
+    }
+
+    // 'corrected' mode rewrites each ref with the verifier's accepted
+    // suggestion before formatting in the chosen style.
+    const correctedRefs = exportMode === 'corrected'
+      ? sortedRefs.map(r => {
+          const c = r.corrected_reference
+          if (!c || typeof c !== 'object') return r
+          const next = { ...r }
+          for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+            if (c[k] != null && c[k] !== '') next[k] = c[k]
+          }
+          return next
+        })
+      : sortedRefs
+    const data = { paperTitle, paperSource, stats, references: correctedRefs }
+
     switch (format) {
       case 'markdown':
-        downloadAsFile(exportResultsAsMarkdown(exportData), `${baseFilename}.md`, 'text/markdown')
+        downloadAsFile(exportResultsAsMarkdown(data), `${baseFilename}.md`, 'text/markdown')
         break
       case 'text':
-        downloadAsFile(exportResultsAsPlainText(exportData), `${baseFilename}.txt`, 'text/plain')
+        downloadAsFile(exportResultsAsPlainText(data), `${baseFilename}.txt`, 'text/plain')
         break
       case 'bibtex':
-        downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
+        downloadAsFile(exportResultsAsBibtex(data), `${baseFilename}.bib`, 'application/x-bibtex')
+        break
+      case 'ris':
+        downloadAsFile(exportResultsAsRIS(data), `${baseFilename}.ris`, 'application/x-research-info-systems')
+        break
+      case 'jsonl':
+        downloadAsFile(exportResultsAsJsonl(data), `${baseFilename}.jsonl`, 'application/x-ndjson')
+        break
+      case 'csv':
+        downloadAsFile(exportResultsAsCsv(data), `${baseFilename}.csv`, 'text/csv')
         break
     }
   }
@@ -200,35 +303,47 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     >
       {/* Header row */}
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h3 
+        <div className="flex items-center gap-3 flex-wrap">
+          <h3
             className="font-semibold text-sm"
             style={{ color: 'var(--color-text-primary)' }}
           >
             Summary
           </h3>
-          {!isComplete && stats.processed_refs > 0 && stats.processed_refs < stats.total_refs && (
-            <span 
+          {!isComplete && processedRefs > 0 && processedRefs < totalRefs && (
+            <span
               className="text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {stats.processed_refs}/{stats.total_refs} checked
+              {processedRefs}/{totalRefs} checked
             </span>
           )}
+          {healthBadge}
+          {usageChip}
+          {/* Per-stage extraction breakdown — surfaces which stage of
+              the cascade produced the references and how many got the
+              hallucination LLM treatment. Hidden when we have no data
+              (cache hits / pre-#11 checks). */}
+          <PerStageChip stats={stats} references={references} />
         </div>
         {/* Right side controls */}
         <div className="flex items-center gap-2">
-          {/* Filter indicator */}
-          {isFilterActive && activeFilter && (
+          {/* Filter indicator — single 'Clear filters' chip whenever any
+              of the multi-select Summary chips is active. */}
+          {isFilterActive && (
             <button
-              onClick={() => handleFilterClick(activeFilterId)}
+              onClick={() => useCheckStore.getState().clearStatusFilter()}
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity hover:opacity-80"
-              style={{ 
-                backgroundColor: activeFilter.bgColor,
-                color: activeFilter.color,
+              style={{
+                backgroundColor: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-primary)',
+                border: '1px solid var(--color-border)',
               }}
+              title="Clear all active filters"
             >
-              <span>Showing {activeFilter.label.toLowerCase()}</span>
+              <span>
+                Filtered: {statusFilter.join(', ')}
+              </span>
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -261,14 +376,48 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               </svg>
             </button>
             {showExportMenu && (
-              <div 
+              <div
                 className="absolute right-0 top-full mt-1 py-1 rounded-lg border shadow-lg z-50"
                 style={{
                   backgroundColor: 'var(--color-bg-primary)',
                   borderColor: 'var(--color-border)',
-                  minWidth: '140px',
+                  minWidth: '220px',
                 }}
               >
+                <div className="px-3 py-1 border-b space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                      What to export
+                    </div>
+                    <select
+                      value={exportMode}
+                      onChange={(e) => setExportMode(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full px-2 py-1 rounded text-xs border"
+                      style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                    >
+                      <option value="original">Original bibliography (as cited)</option>
+                      <option value="corrected">Corrected bibliography (verifier-fixed)</option>
+                      <option value="diff">Side-by-side diff (cited vs corrected)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                      Sort
+                    </div>
+                    <select
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full px-2 py-1 rounded text-xs border"
+                      style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                    >
+                      {REFERENCE_SORT_MODES.map(m => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <button
                   onClick={() => handleExport('markdown')}
                   className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
@@ -289,6 +438,28 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   📚 BibTeX (.bib)
+                </button>
+                <button
+                  onClick={() => handleExport('ris')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                  title="Imports directly into Zotero, EndNote, Mendeley, Rayyan, Papers, RefWorks"
+                >
+                  🔖 RIS (.ris) — Zotero / EndNote / Rayyan
+                </button>
+                <button
+                  onClick={() => handleExport('jsonl')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  🧾 JSONL (.jsonl)
+                </button>
+                <button
+                  onClick={() => handleExport('csv')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📊 CSV (.csv)
                 </button>
               </div>
             )}
@@ -390,6 +561,36 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           <span className="text-sm font-bold" style={{ color: refsWithWarningsOnly > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>{refsWithWarningsOnly}</span>
         </button>
 
+        {/* Suggestions */}
+        {refsWithSuggestionsOnly > 0 && (
+          <button
+            onClick={() => handleFilterClick('suggestion')}
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
+              isSuggestionSelected ? 'ring-1 shadow-sm' : ''
+            }`}
+            style={{
+              backgroundColor: isSuggestionSelected ? 'var(--color-suggestion-bg)' : 'transparent',
+              ringColor: 'var(--color-suggestion)',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSuggestionSelected) {
+                e.currentTarget.style.backgroundColor = 'var(--color-suggestion-bg)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSuggestionSelected) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+            title={`${refsWithSuggestionsOnly} reference${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions only`}
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-suggestion)' }}>
+              <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
+            </svg>
+            <span className="text-sm font-bold" style={{ color: 'var(--color-suggestion)' }}>{refsWithSuggestionsOnly}</span>
+          </button>
+        )}
+
         {/* Unverified - only show if > 0 */}
         {refsUnverified > 0 && (
           <button
@@ -457,10 +658,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
       </div>
 
-      {/* Issue counts row - separate line */}
+      {/* Issue counts row - separate line. Label disambiguated from
+          the "References" row above: each chip here counts INDIVIDUAL
+          issue items (a single ref can contribute multiple), whereas
+          the References row counts REFS-WITH-STATUS. That distinction
+          was confusing users who saw "6 warnings" on References but
+          "8 Warnings" here for the same dataset (8 warning items
+          spread across 6 refs). */}
       {issueFilters.some(f => f.value > 0) && (
         <div className="flex items-center gap-2 flex-wrap mt-2">
-          <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Issues</span>
+          <span
+            className="text-xs font-medium"
+            style={{ color: 'var(--color-text-muted)' }}
+            title="Total individual issue items across all refs (a single ref can contribute more than one). The References row above counts refs-with-status instead."
+          >
+            Issue items
+          </span>
           {issueFilters.filter(f => f.value > 0).map(filter => {
             const isSelected = statusFilter.includes(filter.id)
             return (

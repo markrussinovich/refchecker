@@ -618,6 +618,32 @@ def test_error_ref_with_url_failure_counted_as_unverified():
     # Both refs also have real errors → refs_with_errors should be 2
 
 
+def test_live_ref_stats_do_not_count_transient_unverified_refs():
+    """Live WebUI stats should not show an unverified badge for refs that
+    still render as checking while hallucination verification is pending."""
+    from backend.refchecker_wrapper import ProgressRefChecker
+
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Could not verify'}],
+        'warnings': [],
+        'suggestions': [],
+        'hallucination_check_pending': True,
+    }
+
+    live_counts = ProgressRefChecker._compute_ref_stats(result, is_complete=False)
+    final_counts = ProgressRefChecker._compute_ref_stats(result, is_complete=True)
+
+    assert live_counts['unverified_count'] == 0
+    assert final_counts['unverified_count'] == 0
+
+    result['hallucination_check_pending'] = False
+    result['hallucination_assessment'] = {'verdict': 'UNLIKELY'}
+
+    settled_counts = ProgressRefChecker._compute_ref_stats(result, is_complete=False)
+    assert settled_counts['unverified_count'] == 1
+
+
 # ------------------------------------------------------------------
 # Parallel processor: inline hallucination display regression tests
 # ------------------------------------------------------------------
@@ -691,9 +717,12 @@ def test_parallel_result_has_hallucination_field():
         reference={}, verified_data=None,
     )
     assert result.hallucination_assessment is None
+    assert result.hallucination_verdict_applied is False
 
     result.hallucination_assessment = {'verdict': 'LIKELY', 'explanation': 'test'}
+    result.hallucination_verdict_applied = True
     assert result.hallucination_assessment['verdict'] == 'LIKELY'
+    assert result.hallucination_verdict_applied is True
 
 
 def test_precomputed_hallucination_stored_on_error_record():

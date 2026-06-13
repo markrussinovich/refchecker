@@ -20,7 +20,7 @@ export default function BatchGroup({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const { fetchHistory, deleteCheck, selectCheck } = useHistoryStore()
+  const { fetchHistory, deleteCheck, selectCheck, selectBatch } = useHistoryStore()
 
   const handleEditStart = (e) => {
     e.stopPropagation()
@@ -100,14 +100,29 @@ export default function BatchGroup({
 
   const handleConfirmDelete = async (e) => {
     e.stopPropagation()
+    // v0.7.47: Delete now cancels any in-progress children FIRST, then
+    // deletes the lot. User asked: "delete button should cancel and the
+    // delete all". This single confirmation does both — no more
+    // dangling running tasks after the user thought they killed the
+    // batch.
     try {
+      const inProgress = items.filter(i => i.status === 'in_progress').length
+      if (inProgress > 0) {
+        logger.info('BatchGroup', `Pre-cancelling ${inProgress} in-progress before delete`)
+        try { await api.cancelBatch(batchId) } catch (e) { logger.warning?.('BatchGroup', 'cancelBatch pre-delete failed', e) }
+        // Tiny grace period so the backend's cancel propagation lands
+        // before the delete fires. Without this we sometimes raced and
+        // deleted rows whose async tasks were still mid-write,
+        // producing FK constraint warnings in the server log.
+        await new Promise(r => setTimeout(r, 300))
+      }
       // Delete all items in the batch
       for (const item of items) {
         await deleteCheck(item.id)
       }
-      logger.info('BatchGroup', `Batch ${batchId} and all children deleted`)
+      logger.info('BatchGroup', `Batch ${batchId} cancelled and all children deleted`)
     } catch (error) {
-      logger.error('BatchGroup', 'Failed to delete batch', error)
+      logger.error('BatchGroup', 'Failed to cancel+delete batch', error)
     }
     setIsConfirmingDelete(false)
   }
@@ -118,10 +133,11 @@ export default function BatchGroup({
   }
 
   const handleHeaderClick = () => {
-    // If no child is selected, select first child
-    if (!hasSelectedItem && items.length > 0) {
-      selectCheck(items[0].id)
-    }
+    // v0.7.45: open the batch summary view instead of jumping to the
+    // first child. The aggregate counts, budget chip, and per-paper
+    // status list live there; users can Open into a specific child
+    // from the summary if they want.
+    selectBatch(batchId)
   }
 
   const handleToggleClick = (e) => {

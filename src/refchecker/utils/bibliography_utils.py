@@ -64,6 +64,7 @@ def parse_references(bibliography_text):
         ('BibTeX', _parse_bibtex_references),
         ('biblatex', _parse_biblatex_references),
         ('ACM/natbib', _parse_standard_acm_natbib_references),
+        ('Vancouver/NLM', _parse_vancouver_style_references),
         ('regex-based', _parse_references_regex)
     ]
     
@@ -193,6 +194,75 @@ def _parse_simple_natbib_format(ref_num, content, label):
         reference['note'] = 'arXiv preprint'
     
     return reference
+
+
+_VANCOUVER_HEAD = re.compile(
+    # First author of a Vancouver/NLM entry: Surname (1-3 letter initials),
+    # optionally followed by ", Surname BC" repeats. Captures the start of
+    # each candidate reference in an unnumbered medical-style bibliography.
+    r"(?:^|\n)\s*"
+    r"(?P<head>[A-Z][A-Za-zÀ-ſ'\-]+\s+[A-ZÀ-ÝŁŃÓŚŹŻČĎĚŇŘŠŤÚŮÝŽ]{1,4}(?:-[A-ZÀ-ÝŁŃÓŚŹŻČĎĚŇŘŠŤÚŮÝŽ])?"
+    r"(?:,\s+[A-Z][A-Za-zÀ-ſ'\-]+\s+[A-ZÀ-ÝŁŃÓŚŹŻČĎĚŇŘŠŤÚŮÝŽ]{1,4}(?:-[A-ZÀ-ÝŁŃÓŚŹŻČĎĚŇŘŠŤÚŮÝŽ])?){0,15}"
+    r")"
+    r"(?=[\.,;])"
+)
+_YEAR_IN_ENTRY = re.compile(r'(?<!\d)(19|20)\d{2}(?!\d)')
+
+
+def _parse_vancouver_style_references(bibliography_text):
+    """
+    Parse unnumbered Vancouver / NLM-style references that lack
+    bracketed labels — entries like
+
+        Wang Y, Cheng C, ... Eur Radiol. 2014;24(8):1777-1784.
+
+    are missed by the ACM/natbib and regex strategies because both
+    require a leading "[N]". We locate each "Surname AB," head and
+    take the text up to the next head as one entry.
+    """
+    if not bibliography_text or not bibliography_text.strip():
+        return []
+
+    text = bibliography_text.replace('\r\n', '\n')
+    starts = [m.start('head') for m in _VANCOUVER_HEAD.finditer(text)]
+    # Need at least 2 plausible heads — a single match could just be a
+    # body sentence inside a different bibliography style.
+    if len(starts) < 2:
+        return []
+
+    chunks = []
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        chunk = text[start:end].strip().rstrip(',')
+        chunks.append(chunk)
+
+    # Validate that this really looks like a Vancouver bibliography: at
+    # least 60% of chunks must contain a year, otherwise we're probably
+    # snagging body prose and the fallback strategies should take over.
+    with_year = sum(1 for c in chunks if _YEAR_IN_ENTRY.search(c))
+    if len(chunks) == 0 or with_year / len(chunks) < 0.6:
+        return []
+
+    from refchecker.utils.text_utils import extract_url_from_reference, extract_year_from_reference
+    # Filter junk first so the resulting labels are a contiguous 1..N
+    # rather than skipping numbers around any dropped <30-char chunks.
+    valid_chunks = [c for c in chunks if len(c) >= 30]
+    references = []
+    for idx, chunk in enumerate(valid_chunks, start=1):
+        reference = {
+            'raw_text': chunk,
+            'label': f"[{idx}]",
+            'type': 'article',
+        }
+        url = extract_url_from_reference(chunk)
+        if url:
+            reference['url'] = url
+        year = extract_year_from_reference(chunk)
+        if year:
+            reference['year'] = year
+        references.append(reference)
+    logger.debug(f"Vancouver/NLM parsing extracted {len(references)} references")
+    return references
 
 
 def _parse_references_regex(bibliography_text):

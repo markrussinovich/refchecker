@@ -11,6 +11,7 @@ from typing import Optional
 import asyncio
 
 from refchecker.utils.cache_utils import get_cached_artifact_path
+from refchecker.utils.arxiv_utils import download_arxiv_paper_pdf, get_arxiv_paper_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,114 @@ def get_pdf_storage_path(source_identifier: str, cache_dir: Optional[str] = None
     raise ValueError("cache_dir is required for PDF storage")
 
 
+def get_pdf_page_preview_cache_path(
+    source_identifier: str,
+    page_index: int,
+    cache_dir: Optional[str] = None,
+) -> str:
+    """Per-page preview cache path. Lets the "scrollable thumbnail" view
+    pull a single page at a time without re-rendering the whole PDF."""
+    cached_path = get_cached_artifact_path(
+        cache_dir, source_identifier, f"page_{int(page_index):04d}.png", create_dir=True,
+    )
+    if cached_path:
+        return cached_path
+    raise ValueError("cache_dir is required for page-preview storage")
+
+
+def get_pdf_page_count(pdf_path: str) -> int:
+    """Return the number of pages in a PDF, or 0 on any failure."""
+    try:
+        import fitz  # PyMuPDF
+        if not os.path.exists(pdf_path):
+            return 0
+        doc = fitz.open(pdf_path)
+        try:
+            return int(len(doc))
+        finally:
+            doc.close()
+    except Exception as e:
+        logger.debug(f"page-count probe failed for {pdf_path}: {e}")
+        return 0
+
+
+def generate_pdf_page_preview(
+    pdf_path: str,
+    page_index: int,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
+    """Render and cache a single page of a PDF at preview resolution.
+
+    Powers the multi-page scrollable preview overlay. Each page caches as
+    its own PNG so the frontend can request pages lazily.
+    """
+    try:
+        import fitz  # PyMuPDF
+        if not os.path.exists(pdf_path):
+            logger.error(f"PDF file not found: {pdf_path}")
+            return None
+        if page_index < 0:
+            return None
+        output_path = get_pdf_page_preview_cache_path(
+            source_identifier or pdf_path, page_index, cache_dir=cache_dir,
+        )
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+        doc = fitz.open(pdf_path)
+        try:
+            if page_index >= len(doc):
+                return None
+            page = doc[page_index]
+            zoom = PREVIEW_WIDTH / max(1, page.rect.width)
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            try:
+                from PIL import Image, ImageEnhance
+                import io
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                # Same contrast/sharpness pass `generate_pdf_preview` uses
+                # so a single page from the multi-page overlay matches the
+                # single-image preview visually (the smaller `thumbnail`
+                # function pushes contrast higher to compensate for its
+                # lower resolution; we don't need that here).
+                img = ImageEnhance.Contrast(img).enhance(1.2)
+                img = ImageEnhance.Sharpness(img).enhance(1.1)
+                img.save(output_path, "PNG")
+            except ImportError:
+                pix.save(output_path)
+            return output_path
+        finally:
+            doc.close()
+    except ImportError:
+        logger.error("PyMuPDF (fitz) is not installed. Install with: pip install pymupdf")
+        return None
+    except Exception as e:
+        logger.error(f"Error rendering page {page_index} of {pdf_path}: {e}")
+        return None
+
+
+async def generate_pdf_page_preview_async(
+    pdf_path: str,
+    page_index: int,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
+    return await asyncio.to_thread(
+        generate_pdf_page_preview, pdf_path, page_index, source_identifier, cache_dir,
+    )
+
+
+async def get_pdf_page_count_async(pdf_path: str) -> int:
+    return await asyncio.to_thread(get_pdf_page_count, pdf_path)
+
+
 def generate_pdf_thumbnail(
     pdf_path: str,
     output_path: Optional[str] = None,
     source_identifier: Optional[str] = None,
     cache_dir: Optional[str] = None,
+    force: bool = False,
 ) -> Optional[str]:
     """
     Generate a thumbnail from the first page of a PDF.
@@ -104,7 +208,7 @@ def generate_pdf_thumbnail(
             output_path = get_thumbnail_cache_path(source_identifier or pdf_path, cache_dir=cache_dir)
         
         # Check if thumbnail already exists
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and not force:
             logger.debug(f"Thumbnail already exists: {output_path}")
             return output_path
         
@@ -170,6 +274,7 @@ async def generate_pdf_thumbnail_async(
     output_path: Optional[str] = None,
     source_identifier: Optional[str] = None,
     cache_dir: Optional[str] = None,
+    force: bool = False,
 ) -> Optional[str]:
     """
     Async wrapper for PDF thumbnail generation.
@@ -187,7 +292,32 @@ async def generate_pdf_thumbnail_async(
         output_path,
         source_identifier,
         cache_dir,
+        force,
     )
+
+
+def is_probably_placeholder_thumbnail(path: str) -> bool:
+    """Return True for tiny text-placeholder thumbnails, not rendered PDFs."""
+    try:
+        if not path or not os.path.exists(path) or os.path.getsize(path) > 4096:
+            return False
+
+        from PIL import Image
+
+        with Image.open(path).convert("RGB") as image:
+            width, height = image.size
+            if width != THUMBNAIL_WIDTH or height != int(THUMBNAIL_WIDTH * 1.4):
+                return False
+
+            pixels = image.getdata()
+            non_white = sum(
+                1
+                for r, g, b in pixels
+                if not (r >= 240 and g >= 240 and b >= 240)
+            )
+            return non_white / max(width * height, 1) < 0.02
+    except Exception:
+        return False
 
 
 def generate_pdf_preview(
@@ -314,15 +444,20 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     if pdf_path.exists() and pdf_path.stat().st_size > 0:
         return True
 
-    import arxiv as arxiv_lib
     import time as _time
 
-    search = arxiv_lib.Search(id_list=[arxiv_id])
-    paper = next(search.results())
+    paper = get_arxiv_paper_by_id(arxiv_id)
+    if not paper:
+        logger.error(f"ArXiv paper not found for thumbnail: {arxiv_id}")
+        return False
 
+    # Result.download_pdf is deprecated in newer arxiv lib ("use result.pdf_url
+    # directly"). Drop down to urlretrieve so we don't depend on a moving target.
+    import urllib.request
+    pdf_url = getattr(paper, 'pdf_url', None) or f"https://arxiv.org/pdf/{arxiv_id}"
     for attempt in range(3):
         try:
-            paper.download_pdf(filename=str(pdf_path))
+            download_arxiv_paper_pdf(paper, str(pdf_path), arxiv_id)
             if pdf_path.exists() and pdf_path.stat().st_size > 0:
                 return True
         except Exception as e:

@@ -40,6 +40,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const configHasKey = (config) => {
     if (!config) return false
     if (config.provider === 'vllm') return true
+    if (config.key_source === 'environment' || config.env_key_available) return true
     if (hasKeyInBrowser(`llm:${config.id}`)) return true
     if (hasKeyInBrowser(config.provider)) return true
     if (multiuser) return false
@@ -56,10 +57,10 @@ export default function LLMSelector({ mode = 'extraction' }) {
 
   const selectedConfig = visibleConfigs.find(c => c.id === activeSelectedId && configHasKey(c))
 
-  // Format display name as provider-model
+  // Format display name as model (the configuration name field has been removed).
   const formatConfigName = (config) => {
     if (!config) return 'No LLM configured'
-    return config.name || `${config.provider}-${config.model || 'default'}`
+    return config.model || config.name || `${config.provider} (default)`
   }
 
   // Find a keyless config for the same provider to use as prefill when creating new configs
@@ -245,6 +246,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
                       style={{ color: 'var(--color-text-muted)' }}
                     >
                       {config.provider}{config.model ? ` / ${config.model}` : ''}
+                      {config.key_source === 'environment' ? ' / server env key' : ''}
                       {!selectable ? ' / key needed' : ''}
                       {config.provider === 'vllm' ? ' / extraction only' : ''}
                     </div>
@@ -290,7 +292,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
                           </svg>
                         </button>
                       </div>
-                    ) : (
+                    ) : config.is_environment ? null : (
                       <>
                         <button
                           onClick={(e) => {
@@ -378,6 +380,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
         }}
         editConfig={editConfig}
         prefillConfig={!editConfig ? findPrefillConfig() : null}
+        selectionMode={mode}
       />
     </div>
   )
