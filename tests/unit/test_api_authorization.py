@@ -390,8 +390,17 @@ def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db):
     assert status3["has_key"] is False
 
 
+def test_multiuser_semantic_scholar_key_resolves_from_environment(auth_db, monkeypatch):
+    api_main, _db = auth_db
+    monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "env-ss-key")
+
+    assert _run(api_main._resolve_semantic_scholar_api_key(None)) == "env-ss-key"
+    assert _run(api_main._resolve_semantic_scholar_api_key("browser-key")) == "browser-key"
+
+
 def test_single_user_semantic_scholar_key_is_stored_in_database(tmp_path, monkeypatch):
     monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.delenv("SEMANTIC_SCHOLAR_API_KEY", raising=False)
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization")
     api_main = importlib.import_module("backend.main")
     api_main = importlib.reload(api_main)
@@ -424,6 +433,22 @@ def test_single_user_semantic_scholar_key_is_stored_in_database(tmp_path, monkey
     delete_result = _run(api_main.delete_semantic_scholar_key(local_user))
     assert delete_result["has_key"] is False
     assert _run(temp_db.has_setting("semantic_scholar_api_key")) is False
+
+
+def test_single_user_semantic_scholar_environment_key_precedes_database(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "env-ss-key")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization_single_user_semantic_scholar_env")
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "local-ss-env.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+
+    _run(temp_db.set_setting("semantic_scholar_api_key", "db-ss-key"))
+
+    assert _run(api_main._resolve_semantic_scholar_api_key(None)) == "env-ss-key"
+    assert _run(api_main._resolve_semantic_scholar_api_key("browser-key")) == "browser-key"
 
 
 def _create_local_reference_db(path, *, with_snapshot=False):
