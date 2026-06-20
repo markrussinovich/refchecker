@@ -5572,9 +5572,12 @@ class SemanticScholarKeyValidate(BaseModel):
 
 
 async def _resolve_semantic_scholar_api_key(api_key: Optional[str]) -> Optional[str]:
-    """Use per-request browser keys first, then the single-user stored key."""
+    """Use per-request browser keys first, then env, then the single-user stored key."""
     if api_key:
         return api_key
+    env_api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY")
+    if env_api_key:
+        return env_api_key
     if is_multiuser_mode():
         return None
     return await db.get_setting("semantic_scholar_api_key")
