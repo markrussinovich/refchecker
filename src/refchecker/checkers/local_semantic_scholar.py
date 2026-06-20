@@ -695,7 +695,8 @@ class LocalNonArxivReferenceChecker:
         year_warning = validate_year(
             cited_year=year,
             paper_year=paper_year,
-            year_tolerance=year_tolerance
+            year_tolerance=year_tolerance,
+            context={'cited_doi': reference.get('doi') or reference.get('DOI')}
         )
         if year_warning:
             logger.debug(f"{self._log_prefix}: Year issue - {year_warning.get('warning_details', '')}")

@@ -1,7 +1,7 @@
 /**
  * Formatting utilities
  */
-import { shouldSuppressVenueWarning } from './venueAbbreviations'
+import { shouldSuppressVenueWarning, venuesCoreMatch } from './venueAbbreviations'
 
 /**
  * Format a date for display
@@ -64,6 +64,20 @@ function _authorToString(a) {
   return ''
 }
 
+// R09/R41: a bare "et al."/"and others" token is a TRUNCATION SENTINEL, not
+// a person. Extractors sometimes emit it as a standalone author entry, which
+// otherwise renders as a fake chip with a trailing comma. Strip it from the
+// display list so only real names render; the "et al." UI affordance is driven
+// separately (see `hasEtAlSentinel` + the AuthorsLine expand control).
+export function isEtAlSentinel(value) {
+  const t = String(value || '')
+    .normalize('NFKC')
+    .replace(/[.,;]+$/, '')
+    .trim()
+    .toLowerCase()
+  return t === 'et al' || t === 'et. al' || t === 'and others' || t === 'others'
+}
+
 export function normalizeAuthors(authors) {
   if (!authors) return []
   if (typeof authors === 'string') {
@@ -71,13 +85,36 @@ export function normalizeAuthors(authors) {
     if (authors.startsWith('[')) {
       try {
         const parsed = JSON.parse(authors)
-        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean)
+        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean).filter(s => !isEtAlSentinel(s))
       } catch { /* fall through to comma split */ }
     }
-    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean)
+    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean).filter(s => !isEtAlSentinel(s))
   }
   if (!Array.isArray(authors)) return []
-  return authors.map(_authorToString).filter(Boolean)
+  return authors.map(_authorToString).filter(Boolean).filter(s => !isEtAlSentinel(s))
+}
+
+// R09: true when the raw author payload ends with an "et al."/"and others"
+// truncation sentinel — signalling the list is incomplete and the UI should
+// offer to expand to the full enriched author list when one is available.
+export function hasEtAlSentinel(authors) {
+  if (!authors) return false
+  let raw
+  if (typeof authors === 'string') {
+    if (authors.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(authors)
+        raw = Array.isArray(parsed) ? parsed.map(_authorToString) : [authors]
+      } catch { raw = authors.split(/,\s*|\s+and\s+/i) }
+    } else {
+      raw = authors.split(/,\s*|\s+and\s+/i)
+    }
+  } else if (Array.isArray(authors)) {
+    raw = authors.map(_authorToString)
+  } else {
+    return false
+  }
+  return raw.map(s => String(s || '').trim()).filter(Boolean).some(isEtAlSentinel)
 }
 
 export function formatAuthors(authors, truncate = false) {
@@ -346,6 +383,9 @@ const _venueTokens = (s) =>
     .filter(w => w.length >= 2 && !_COSMETIC_STOPWORDS.has(w))
 
 const _venuesEquivalent = (cited, actual) => {
+  // Style-independent core match (':' subtitle, NLM word abbreviations,
+  // Part-A designators, '&' connectors, foreign-language abbreviations).
+  if (venuesCoreMatch(cited, actual)) return true
   const c = _venueTokens(cited)
   const a = _venueTokens(actual)
   if (c.length === 0 || a.length === 0) return false
@@ -602,25 +642,54 @@ function getCorrectedReferenceData(ref) {
   const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
   const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
   const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
+
+  // Check errors and warnings for 'actual' values
+  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
+
+  // A doi-type error/warning that names a DOI is the verifier's correction
+  // and MUST win over whatever (possibly wrong) DOI the citation carried.
+  // Seed corrected.doi from such an issue when present; only fall back to the
+  // cited ref.doi / authoritative DOI URL when no doi-type issue named a value.
+  const _doiIssueValue = (() => {
+    for (const i of allIssues) {
+      const t = (i?.error_type || i?.warning_type || '').toLowerCase()
+      if (t !== 'doi') continue
+      const v = parseErrorDetailsForMarkdown(i?.error_details || i?.warning_details)?.actual
+        || i?.actual_value || i?.ref_doi_correct
+      if (v) return _normalizeDoi(v)
+    }
+    return null
+  })()
+
   const corrected = {
     title: ref.title,
     authors: ref.authors,
     year: displayReferenceValue(ref.year),
     venue: displayReferenceValue(ref.venue),
-    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    doi: _doiIssueValue
+      || ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
     arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
     citedUrl: ref.cited_url || null,
     url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
   }
   
-  // Check errors and warnings for 'actual' values
-  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
-  
   for (const issue of allIssues) {
-    const errorType = (issue.error_type || '').toLowerCase()
-    const parsed = parseErrorDetailsForMarkdown(issue.error_details)
-    const actualValue = parsed?.actual || issue.actual_value
-    
+    const errorType = (issue.error_type || issue.warning_type || '').toLowerCase()
+    const parsed = parseErrorDetailsForMarkdown(issue.error_details || issue.warning_details)
+    // Prefer the parsed/explicit actual_value; fall back to the typed correction
+    // fields the backend carries for "missing" issues (year/venue/title/authors/doi),
+    // so the corrected bibtex includes exactly what the warning named.
+    const typedByType = {
+      title: issue.ref_title_correct,
+      author: issue.ref_authors_correct,
+      authors: issue.ref_authors_correct,
+      year: issue.ref_year_correct,
+      venue: issue.ref_venue_correct,
+      doi: issue.ref_doi_correct,
+      arxiv_id: issue.ref_arxiv_id_correct,
+    }
+    const actualValue = parsed?.actual || issue.actual_value || typedByType[errorType]
+
     if (actualValue) {
       switch (errorType) {
         case 'title':
@@ -643,6 +712,14 @@ function getCorrectedReferenceData(ref) {
           break
         case 'venue':
           corrected.venue = displayReferenceValue(actualValue)
+          break
+        case 'doi':
+          // Verifier-named DOI wins over the cited one (normalize off any
+          // https://doi.org/ prefix so bibtex emits the bare identifier).
+          corrected.doi = _normalizeDoi(actualValue)
+          break
+        case 'arxiv_id':
+          corrected.arxivId = String(actualValue).replace(/^arxiv:/i, '').trim()
           break
       }
     }
@@ -1061,10 +1138,15 @@ export function exportReferenceAsBibtex(ref, index = 0) {
       lines.push(`  eprint = {${arxivMatch[1]}},`)
       lines.push(`  archiveprefix = {arXiv},`)
     }
+  } else if (corrected.doi) {
+    // Prefer the corrected/verified DOI (a doi-type error/warning wins over the
+    // cited ref.doi via getCorrectedReferenceData). corrected.doi is already
+    // normalized to the bare identifier (no https://doi.org/ prefix).
+    lines.push(`  doi = {${corrected.doi}},`)
   } else {
     const doiUrl = ref.authoritative_urls?.find(u => u.type === 'doi')
     const arxivUrl = ref.authoritative_urls?.find(u => u.type === 'arxiv')
-    
+
     if (doiUrl) {
       // Extract DOI from URL
       const doiMatch = doiUrl.url.match(/doi\.org\/(.+)/)
@@ -1388,12 +1470,12 @@ export function saveCustomCitationStyle(style) {
   if (!style || !style.id || !style.template) return
   const all = listCustomCitationStyles().filter(s => s.id !== style.id)
   all.push(style)
-  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch { /* storage may be blocked; persistence is best-effort */ }
 }
 
 export function deleteCustomCitationStyle(id) {
   const all = listCustomCitationStyles().filter(s => s.id !== id)
-  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch { /* storage may be blocked; persistence is best-effort */ }
 }
 
 // Truncate an author list to N entries with "et al." suffix when there

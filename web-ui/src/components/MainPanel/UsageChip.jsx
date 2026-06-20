@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchUsageTotals, resetUsageTotals } from '../../utils/api'
+import { fetchUsageTotals } from '../../utils/api'
 
 /**
  * Minimal chip that surfaces per-provider LLM token + cost totals.
@@ -73,7 +73,6 @@ export default function UsageChip() {
   // approximate the LLM-only would have sent the whole bibliography
   // through the LLM at roughly the same per-ref rate as the cascade
   // tail did. This is a heuristic, not an exact figure.
-  let savingsHint = null
   if (totals.cost_usd && totals.cost_usd > 0) {
     // Assume cascade saved roughly 2-4× the current spend on extraction.
     const extractionCost = providers.reduce((acc, p) => {
@@ -91,9 +90,8 @@ export default function UsageChip() {
       const wouldveBeen = totals.cost_usd + extractionCost * 2
       const saved = wouldveBeen - totals.cost_usd
       if (saved > 0.001) {
-        savingsHint = `~${fmtUsd(saved)} saved vs LLM-only (cascade)`
         tooltipLines.push('')
-        tooltipLines.push(savingsHint)
+        tooltipLines.push(`~${fmtUsd(saved)} saved vs LLM-only (cascade)`)
       }
     }
   }

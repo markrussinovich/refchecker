@@ -59,6 +59,19 @@ export default function HistoryList() {
       [batchId]: !prev[batchId],
     }))
   }
+
+  // Master expand/collapse for every batch group in the history.
+  const batchGroups = useMemo(
+    () => groupedHistory.filter(g => g.type === 'batch'),
+    [groupedHistory]
+  )
+  const allBatchesCollapsed = batchGroups.length > 0 &&
+    batchGroups.every(g => collapsedBatches[g.batch_id])
+  const setAllBatches = (collapsed) => {
+    setCollapsedBatches(
+      collapsed ? Object.fromEntries(batchGroups.map(g => [g.batch_id, true])) : {}
+    )
+  }
   
   // Scroll to top when scrollTrigger changes (New Refcheck button clicked)
   useEffect(() => {
@@ -135,6 +148,29 @@ export default function HistoryList() {
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+      {batchGroups.length > 0 && (
+        <div
+          className="flex items-center justify-end px-2 py-1 sticky top-0 z-10"
+          style={{ background: 'var(--color-bg-secondary, var(--color-bg-primary))' }}
+        >
+          <button
+            type="button"
+            onClick={() => setAllBatches(!allBatchesCollapsed)}
+            className="text-xs flex items-center gap-1 px-2 py-0.5 rounded transition-colors hover:bg-[var(--color-bg-tertiary)]"
+            style={{ color: 'var(--color-text-muted)' }}
+            title={allBatchesCollapsed ? 'Expand all batches' : 'Collapse all batches'}
+          >
+            <svg
+              width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transform: allBatchesCollapsed ? 'none' : 'rotate(180deg)', transition: 'transform 160ms ease' }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+            <span>{allBatchesCollapsed ? 'Expand all' : 'Collapse all'}</span>
+          </button>
+        </div>
+      )}
       {groupedHistory.map((group) => {
         if (group.type === 'batch') {
           return (

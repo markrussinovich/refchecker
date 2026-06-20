@@ -133,7 +133,16 @@ def _make_cli_checker(llm_provider):
     return cli_checker
 
 
-_NUMERIC_MARKER_RE = None
+# All-forms numeric citation marker (brackets / parens / superscripts). Used by
+# the author-year detection pass to decide whether a paper's parenthetical
+# numerics are equation numbers vs citations. (The per-paper STYLE-AWARE regex
+# used for the actual context scan is built locally in _attach_citation_contexts
+# from _detect_citation_style.)
+_NUMERIC_MARKER_RE = re.compile(
+    r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
+    r"|\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
+    r"|[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
+)
 
 # Common abbreviations whose trailing "." is NOT a sentence terminator —
 # kept lowercase for case-insensitive comparison against the last token
@@ -211,16 +220,53 @@ def _diff_cited_vs_truth(reference, truth):
     errors = []
     warnings = []
 
+    # Diacritic/unicode folding so a field that matches the cached truth
+    # modulo accents/encoding (e.g. venue "Émergent" vs "Emergent", author
+    # "Béngio" vs "Bengio", or "Łukasz" vs "Lukasz") is NOT flagged as a
+    # mismatch. Without this, the raw lower()-only comparison below treated
+    # those as genuine differences and emitted a spurious venue/author
+    # "mismatch" warning on a reference whose fields actually agree — which is
+    # the false-positive that surfaced as the confusing "Unknown mismatch"
+    # badge. REAL DATA ONLY: this only suppresses warnings when the values are
+    # genuinely the same string after accent/case/whitespace folding; true
+    # differences still warn.
+    #
+    # NOTE: normalize_diacritics uses GERMAN-style transliteration (ü -> "ue",
+    # ö -> "oe", ß -> "ss"), so it does NOT collapse every PDF-split accent
+    # back to its base letter. A combining-diaeresis split like "Z̈ugner"
+    # folds to "zugner" while precomposed "Zügner" folds to "zuegner" — those
+    # still differ and will (correctly, conservatively) warn rather than be
+    # silently equated. The win here is the common Latin accent-strip cases
+    # above, not exhaustive German↔base reconciliation.
+    try:
+        from refchecker.utils.text_utils import normalize_diacritics as _fold_diacritics
+    except Exception:  # pragma: no cover - util import shouldn't fail
+        _fold_diacritics = None
+
     def _norm(s):
         if s is None:
             return ""
-        s = str(s).strip().lower()
-        return _re_dvt.sub(r"\s+", " ", s)
+        s = str(s).strip()
+        if _fold_diacritics is not None:
+            try:
+                # normalize_diacritics folds accents but is CASE-PRESERVING
+                # (e.g. "NeurIPS" -> "NeurIPS", and German ü -> "ue"), so we
+                # MUST lowercase after folding — otherwise a case-only difference
+                # ("NeurIPS" vs "neurips") would wrongly trip the mismatch guard,
+                # re-introducing the spurious "Unknown mismatch" this fold fixes.
+                s = _fold_diacritics(s).lower()
+            except Exception:
+                s = s.lower()
+        else:
+            s = s.lower()
+        return _re_dvt.sub(r"\s+", " ", s).strip()
 
     def _first_surname(s):
         s = (s or "").split(",")[0].split(";")[0].strip()
         parts = s.split()
-        return parts[-1].lower() if parts else ""
+        if not parts:
+            return ""
+        return _norm(parts[-1])
 
     # ── Title (v0.7.55 per ML round 2) ────────────────────────────────
     # A fuzzy hit landed us here; if the fuzzy 60–80 char prefix match
@@ -434,6 +480,149 @@ def _diff_cited_vs_truth(reference, truth):
     return errors, warnings
 
 
+def _detect_citation_style(text, num_refs=0):
+    """Identify the article's DOMINANT inline-citation marker form so the
+    context scanner matches ONLY that form.
+
+    Mixing forms is what let table / statistics numbers masquerade as citations:
+    a bracket-style paper is full of '(1–2)', '(3–4)', '(50–99)', 'n (%)' in its
+    tables and confidence intervals, and the generic '(N)' branch spliced those
+    table rows into the citation context. Brackets and superscripts are
+    UNAMBIGUOUS citation markers; bare parens are stat-ambiguous, so they are
+    only chosen when no bracket/superscript markers exist (true AMA style).
+
+    Returns 'bracket' | 'superscript' | 'paren' | None.
+    """
+    import re as _re
+    cap = num_refs if (num_refs and num_refs > 0) else 999
+
+    def _plausible(markers):
+        n = 0
+        for mtxt in markers:
+            digits = [int(d) for d in _re.findall(r"\d{1,3}", mtxt)]
+            if digits and all(1 <= d <= cap for d in digits):
+                n += 1
+        return n
+
+    brackets = _plausible(_re.findall(r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]", text))
+    supers = len(_re.findall(r"(?<=\w)[⁰-⁹¹²³]+", text))
+    parens = _plausible(_re.findall(r"(?<=\s)\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)", text))
+
+    # Priority order: prefer the unambiguous forms. Brackets/superscripts win
+    # even when parens-noise is higher (tables inflate the parens count).
+    if brackets >= 3:
+        return "bracket"
+    if supers >= 3:
+        return "superscript"
+    if parens >= 5:          # higher bar — parens are stat-ambiguous
+        return "paren"
+    if brackets >= 1:
+        return "bracket"
+    if supers >= 1:
+        return "superscript"
+    # Parens are the ONLY marker form present (true AMA/Vancouver-parens papers,
+    # e.g. citations written as "(1)", "(2)"). Include them even for a single
+    # plausible marker — the _plausible() filter already drops years/out-of-range
+    # numbers, the author-year pass + suppress_parenthetical_numeric_markers
+    # drops equation-number parens in author-year papers, and bracket papers
+    # never reach here (so their prose stats like "(3–4)" stay excluded).
+    if parens >= 1:
+        return "paren"
+    return None
+
+
+_TABLE_NOISE_RE = re.compile(r"(?i)\b(?:table|fig(?:ure)?|appendix|supplementary)\s*\d")
+
+
+def _is_table_noise(text):
+    """True when a candidate context sentence is really a table / figure row,
+    not prose — so we don't show table data ('Age, years, median [Q1, Q3] 75
+    [69, 82] (50–99) … Female 1,125 (64.9)') as a citation context.
+    """
+    if not text or len(text) < 40:
+        return False
+    digits = len(re.findall(r"\d", text))
+    # A 'Table N'/'Fig N' caption with many numbers is a table block.
+    if _TABLE_NOISE_RE.search(text) and digits > 12:
+        return True
+    letters = len(re.findall(r"[A-Za-z]", text))
+    if letters and digits / float(digits + letters) > 0.32:
+        return True
+    # Dense run of "n (%)" / "[lo, hi]" statistical cells.
+    stat_cells = len(re.findall(r"\d+\s*\(\s*\d", text)) + len(re.findall(r"\[\s*\d+\s*[,–-]", text))
+    if stat_cells >= 3:
+        return True
+    return False
+
+
+def _extract_clause_containing_marker(sentence, marker):
+    """For bracket-style citations, return the CLAUSE that actually contains the
+    marker rather than the whole (possibly sentence-tokeniser-merged) string —
+    so a context like 'X was done [15]. Table 2 Baseline …' yields just
+    'X was done [15]'. Falls back to the full sentence whenever it can't
+    confidently isolate a clause (so it never DROPS or over-trims a context).
+    """
+    if not sentence or not marker:
+        return sentence
+    idx = sentence.find(marker)
+    if idx < 0:
+        return sentence
+    # Clause start: just after the last sentence terminator before the marker.
+    start = 0
+    for m in re.finditer(r"(?<=[.!?])\s+", sentence[:idx]):
+        start = m.end()
+    # Clause end: the first terminator at/after the marker.
+    end = len(sentence)
+    tail = re.search(r"[.!?](?:\s|$)", sentence[idx + len(marker):])
+    if tail:
+        end = idx + len(marker) + tail.end()
+    clause = sentence[start:end].strip()
+    # Conservative guard: keep the full sentence if the clause is suspiciously
+    # short or somehow lost the marker.
+    if len(clause) < 30 or marker not in clause:
+        return sentence
+    return clause
+
+
+def _title_phrase_contexts(ref, sentences, limit=2):
+    """Fallback context finder for references with no in-text marker.
+
+    Matches a reference by a 5-consecutive-word slice of its title appearing
+    verbatim in a body sentence — i.e. a narrative / title-mention citation
+    ("Building on <Exact Title Phrase>, we ..."). The 5-word window keeps this
+    conservative: a single shared keyword can't trigger it, so it adds
+    coverage without fabricating contexts. Returns up to ``limit`` contexts in
+    the same ``{sentence, marker, before, after}`` shape as the marker passes.
+    """
+    title = (ref.get("title") or "").strip()
+    if not title:
+        return []
+    norm = re.sub(r"[^a-z0-9 ]+", " ", title.lower())
+    words = [w for w in norm.split() if w]
+    if len(words) < 5:
+        return []
+    grams = {" ".join(words[i:i + 5]) for i in range(0, len(words) - 4)}
+    out = []
+    for i, sent in enumerate(sentences):
+        s = (sent or "").strip()
+        # _is_header_noise is local to _attach_citation_contexts; a 5-word
+        # title phrase almost never lands in a running header anyway, so the
+        # module-level table-noise guard plus a length floor is enough here.
+        if not s or len(s) < 25 or _is_table_noise(s):
+            continue
+        sl = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", s.lower()))
+        if any(g in sl for g in grams):
+            out.append({
+                "sentence": s[:400],
+                "marker": "(title mention)",
+                "before": (sentences[i - 1].strip()[:160] if i > 0 else ""),
+                "after": (sentences[i + 1].strip()[:160] if i + 1 < len(sentences) else ""),
+            })
+            if len(out) >= limit:
+                break
+    return out
+
+
 def _attach_citation_contexts(references, paper_text):
     """Find the sentences in the paper where each reference is cited.
 
@@ -527,20 +716,28 @@ def _attach_citation_contexts(references, paper_text):
             existing_idx = 0
         if existing_idx <= 0:
             ref["index"] = i + 1
-    global _NUMERIC_MARKER_RE
-    if _NUMERIC_MARKER_RE is None:
-        # Match three citation-marker shapes:
-        #   1. Square brackets:  [12]  [12, 14]  [12-15]  [12–15]
-        #   2. Parentheses:      (12)  (12, 14)  (12–15)        — Vancouver/AMA
-        #   3. Superscripts:     ¹²³   ¹·²   ¹⁻³                — medical journals
-        # Each form supports comma- and dash-separated ranges. group(0)
-        # is the whole marker so we can highlight it; inner findall pulls
-        # the ASCII numbers out (superscripts are translated below).
-        _NUMERIC_MARKER_RE = re.compile(
-            r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
-            r"|\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
-            r"|[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
-        )
+    # Build the numeric-marker regex from the article's DETECTED citation style
+    # so we match ONLY that form. A bracket-style paper's tables/CIs are full of
+    # '(1–2)', '(3–4)', '(50–99)' that the generic '(N)' branch used to match —
+    # splicing table rows into the citation context. Matching just '[N]' for a
+    # bracket paper (or just superscripts / just parens for those styles)
+    # eliminates that whole class of false context.
+    _num_refs = len(references)
+    _style = _detect_citation_style(paper_text, _num_refs)
+    _BRACKET_PAT = r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
+    _PAREN_PAT = r"\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
+    _SUPER_PAT = r"[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
+    if _style == "superscript":
+        _marker_pat = _SUPER_PAT
+    elif _style == "paren":
+        _marker_pat = _PAREN_PAT
+    elif _style == "bracket":
+        _marker_pat = _BRACKET_PAT
+    else:
+        # Unknown / author-year dominant: brackets + superscripts only, never the
+        # ambiguous bare-parens form, so table stats can't fabricate citations.
+        _marker_pat = _BRACKET_PAT + "|" + _SUPER_PAT
+    _numeric_marker_re = re.compile(_marker_pat)
 
     sentences = _sentence_tokenize(paper_text)
 
@@ -642,7 +839,10 @@ def _attach_citation_contexts(references, paper_text):
         # v0.7.67 (Issue 5): skip page-header / running-foot lines
         if _is_header_noise(stripped):
             continue
-        for m in _NUMERIC_MARKER_RE.finditer(stripped):
+        # Skip table / figure rows so their data cells aren't shown as context.
+        if _is_table_noise(stripped):
+            continue
+        for m in _numeric_marker_re.finditer(stripped):
             marker_text = m.group(0)
             # v0.7.66 (Issue A2): if this is the `(N)` parens form, reject
             # contexts that look like volume(issue) notation. Diagnostic
@@ -690,11 +890,27 @@ def _attach_citation_contexts(references, paper_text):
                     expanded.update(range(lo, hi + 1))
             for n in nums_in_marker:
                 expanded.add(n)
+            # A real citation can only point at a reference we actually have:
+            # bound the marker numbers by the reference count so a table cell
+            # like '[69, 82]' (range/CI) or '(50–99)' can't attach to a ref.
+            if _num_refs > 0:
+                expanded = {n for n in expanded if 1 <= n <= _num_refs}
+            if not expanded:
+                continue
             # Trim the sentence aggressively but keep enough on either
             # side of the marker that the citation reads naturally.
             sent_clean = re.sub(r"\s+", " ", stripped)[:420]
-            before = (sentences[i - 1].strip()[:160] + " ") if i > 0 else ""
-            after = (" " + sentences[i + 1].strip()[:160]) if i + 1 < len(sentences) else ""
+            # Bracket papers: isolate the clause that actually holds the marker
+            # so a context can't bleed into a following table/figure caption.
+            if _style == "bracket":
+                sent_clean = _extract_clause_containing_marker(sent_clean, marker_text)[:420]
+            # Neighbour context: drop a before/after snippet when it's page-header
+            # or table/figure noise (never the matched sentence) — worst case a
+            # slightly shorter context, never a dropped citation.
+            _prev = sentences[i - 1].strip() if i > 0 else ""
+            _next = sentences[i + 1].strip() if i + 1 < len(sentences) else ""
+            before = (_prev[:160] + " ") if (_prev and not _is_header_noise(_prev) and not _is_table_noise(_prev)) else ""
+            after = (" " + _next[:160]) if (_next and not _is_header_noise(_next) and not _is_table_noise(_next)) else ""
             for n in expanded:
                 lst = by_index.setdefault(n, [])
                 if len(lst) >= 3:
@@ -797,6 +1013,7 @@ def _attach_citation_contexts(references, paper_text):
                     })
 
     for ref in references:
+        ref.setdefault("is_inline_cited", False)
         try:
             idx = int(ref.get("index") or 0)
         except Exception:
@@ -805,9 +1022,19 @@ def _attach_citation_contexts(references, paper_text):
             continue
         hits = by_index.get(idx)
         if not hits:
-            continue
+            # Fallback for references that carry no numeric / author-year
+            # marker in the body — narrative or title-mention citations
+            # ("As demonstrated in <Title>, ..."). Conservative: requires a
+            # 5-consecutive-word slice of the reference title to appear in a
+            # sentence, so we don't fabricate contexts.
+            hits = _title_phrase_contexts(ref, sentences)
+            if not hits:
+                continue
         ref["citation_contexts"] = hits
         ref["citation_count"] = len(hits)
+        # A reference is "inline cited" when we located it anywhere in the
+        # body (marker- or title-based). Powers the verified-cited badge.
+        ref["is_inline_cited"] = True
         # Legacy single-string field — kept so consumers that don't yet
         # know about citation_contexts still see something useful.
         ref["citation_context"] = " … ".join(h["sentence"][:240] for h in hits[:2])
@@ -914,7 +1141,10 @@ class ProgressRefChecker:
                  ai_detection_api_key: Optional[str] = None,
                  ai_detection_consent: bool = False,
                  ai_detection_service: str = "pangram",
-                 paperclip_api_key: Optional[str] = None):
+                 ai_detection_detectors: Optional[List[str]] = None,
+                 paperclip_api_key: Optional[str] = None,
+                 detection_mode: str = "both",
+                 enrich_enabled: bool = True):
         """
         Initialize the progress-aware refchecker
 
@@ -949,7 +1179,28 @@ class ProgressRefChecker:
         self.ai_detection_api_key = ai_detection_api_key
         self.ai_detection_consent = bool(ai_detection_consent)
         self.ai_detection_service = (ai_detection_service or "pangram").lower()
+        # Optional multi-detector selection (R61). When a non-empty list of
+        # detector keys is supplied (local backend only), the AI-detection pass
+        # runs each selected detector and returns a side-by-side comparison
+        # under ``ai_detection["multi"]``. Default (None/empty) preserves the
+        # exact single-detector behaviour — FULL backward compatibility.
+        self.ai_detection_detectors = [
+            str(k).strip().lower() for k in (ai_detection_detectors or []) if str(k).strip()
+        ]
         self.paperclip_api_key = paperclip_api_key
+        # Cross-source enrichment backfill is ON by default (mirrors the web/API
+        # default). The CLI exposes a `--no-enrich` opt-out which sets this to
+        # False so verification results carry no backfilled counts/abstract/tldr.
+        self.enrich_enabled = bool(enrich_enabled)
+        # Detection mode: "references" (verify refs only — the default behaviour),
+        # "ai_only" (skip reference extraction + verification, just analyze the
+        # body text for AI-generated content), or "both". AI-only implies the
+        # AI-detection pass, so enable it even if the flag wasn't set explicitly.
+        self.detection_mode = (detection_mode or "both").lower()
+        if self.detection_mode not in ("references", "ai_only", "both"):
+            self.detection_mode = "both"
+        if self.detection_mode == "ai_only" and not self.ai_detection_enabled:
+            self.ai_detection_enabled = True
         self.hallucination_provider = None
         self.hallucination_model = None
         self.hallucination_api_key = None
@@ -1048,6 +1299,28 @@ class ProgressRefChecker:
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path}")
 
+        # R04: dedicated, bounded thread pool for the hallucination LLM
+        # checks. Previously these ran on the default (shared) executor,
+        # which could saturate and let a hung LLM request wedge the whole
+        # check. A small private pool isolates them and bounds concurrency.
+        self._ha_executor = ThreadPoolExecutor(
+            max_workers=8, thread_name_prefix="halluc",
+        )
+
+    def close(self) -> None:
+        """Release the dedicated hallucination executor.
+
+        Best-effort: safe to call multiple times. Not strictly required
+        (worker threads are daemonic and the process tears them down), but
+        lets long-lived callers reclaim threads deterministically.
+        """
+        ex = getattr(self, '_ha_executor', None)
+        if ex is not None:
+            try:
+                ex.shutdown(wait=False)
+            except Exception:
+                pass
+
     def _format_verification_result(
         self,
         reference: Dict[str, Any],
@@ -1074,17 +1347,33 @@ class ProgressRefChecker:
             # Track if this was originally a warning_type (warning, not error)
             is_warning = 'warning_type' in err
             logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
-            sanitized.append({
+            # Backfill actual_value from the typed correction fields: "missing"
+            # issues (year/venue/title/authors) populate ONLY ref_*_correct, not
+            # actual_value, so the corrected-bibtex builder would otherwise drop
+            # exactly the value the warning told the user to add.
+            _actual = err.get('actual_value')
+            if not _actual:
+                _actual = (err.get('ref_year_correct') or err.get('ref_venue_correct')
+                           or err.get('ref_title_correct') or err.get('ref_authors_correct')
+                           or err.get('ref_doi_correct'))
+            _san = {
                 # Preserve original error_type for suggestion_type mapping;
                 # use is_suggestion flag for categorization instead.
                 # Map 'timeout' to 'unverified' since timeouts mean we couldn't verify
                 "error_type": 'unverified' if e_type == 'timeout' else (e_type or 'unknown'),
                 "error_details": details if e_type != 'timeout' else 'Verification timed out',
                 "cited_value": err.get('cited_value'),
-                "actual_value": err.get('actual_value'),
+                "actual_value": _actual,
                 "is_suggestion": is_info,  # Preserve info_type as suggestion flag
                 "is_warning": is_warning,  # Preserve warning_type as warning flag
-            })
+            }
+            # Carry the typed correction fields through so the FE corrected-bibtex
+            # builder can recover year/venue/title/authors even when the checker
+            # only set the typed field (belt-and-suspenders with the backfill).
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct", "ref_doi_correct"):
+                if err.get(_k):
+                    _san[_k] = err.get(_k)
+            sanitized.append(_san)
 
         # Determine status - items originally from warning_type are warnings, items from error_type are errors
         # Items originally from info_type are suggestions, not errors
@@ -1223,11 +1512,19 @@ class ProgressRefChecker:
         formatted_suggestions = []
         for err in sanitized:
             err_obj = {
-                "error_type": err.get('error_type', 'unknown'),
+                # Preserve warning_type if error_type is absent — otherwise a
+                # typed warning (e.g. 'venue') with no explicit error_type key
+                # collapses to the meaningless "Unknown mismatch" badge.
+                "error_type": err.get('error_type') or err.get('warning_type') or 'unknown',
                 "error_details": err.get('error_details', ''),
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value')
             }
+            # Propagate typed correction fields so the FE corrected-bibtex builder
+            # always has year/venue/title/authors to insert.
+            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct", "ref_doi_correct"):
+                if err.get(_k):
+                    err_obj[_k] = err.get(_k)
             # Check is_suggestion flag (set when original had info_type)
             if err.get('is_suggestion'):
                 # Store as suggestion with full details
@@ -1262,11 +1559,43 @@ class ProgressRefChecker:
         # try/except because this is a display nicety — failing here
         # must not break the verification result.
         enrichment_payload: Dict[str, Any] = {}
+        # `--no-enrich` opt-out (CLI): skip cross-source backfill and the
+        # enrichment projection entirely. The reference is still fully verified;
+        # only the display-nicety enrichment strip is omitted. ON by default to
+        # mirror the web/API behaviour.
+        if getattr(self, "enrich_enabled", True):
+            try:
+                from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
+                # Cross-source backfill (R21/R22): when a non-S2 source won the
+                # verification race, its payload often lacks counts / abstract /
+                # tldr / funding. Backfill the MISSING-ONLY signals by DOI from
+                # OpenAlex / Crossref / S2 before projecting — never overwrites a
+                # real value, never fabricates, soft-fails, and is bounded
+                # (per-DOI TTL cache + 1 retry + short timeout + concurrency cap)
+                # so a 30+ ref bibliography doesn't stall.
+                if isinstance(verified_data, dict):
+                    backfill_enrichment(verified_data, reference)
+                enrichment_payload = build_enrichment(verified_data) or {}
+            except Exception as e:
+                logger.debug("enrichment build failed: %s", e)
+
+        # Recover the FULL author list when the cited names were truncated to
+        # "<Author> et al." at parse time. enrichment.authors carries the real,
+        # complete author list straight from the verified work (OpenAlex /
+        # Crossref / Semantic Scholar), so surface those real names instead of
+        # the truncated "et al." for the UI. REAL DATA ONLY — never fabricated;
+        # falls back silently (display_authors stays None) when there's no
+        # richer verified list. Behind the et-al sentinel check so refs whose
+        # cited list was already complete are untouched.
+        display_authors = None
         try:
-            from refchecker.utils.enrichment import build_enrichment
-            enrichment_payload = build_enrichment(verified_data) or {}
+            from refchecker.utils.text_utils import recover_full_authors_from_enrichment
+            display_authors = recover_full_authors_from_enrichment(
+                reference.get('authors'),
+                enrichment_payload.get('authors'),
+            )
         except Exception as e:
-            logger.debug("enrichment build failed: %s", e)
+            logger.debug("author recovery failed: %s", e)
 
         # Carry top-level doi / arxiv_id / pmid through to the result so the
         # Seen-Refs identity key can resolve to a stable DOI/arxiv bucket
@@ -1302,7 +1631,7 @@ class ProgressRefChecker:
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
-            "authors": reference.get('authors', []),
+            "authors": display_authors if display_authors else reference.get('authors', []),
             "year": reference.get('year') or None,
             "venue": reference.get('venue'),
             "cited_url": reference.get('cited_url') or reference.get('url'),
@@ -1614,13 +1943,14 @@ class ProgressRefChecker:
         ai_detection_task = None
 
         try:
-            # Reset per-check counters so the UI token meter reflects what
-            # THIS check spent, not lifetime totals across the session.
-            try:
-                from . import usage_tracker as _usage
-                _usage.reset_usage()
-            except Exception as _e:
-                logger.debug("Could not reset usage tracker: %s", _e)
+            # NOTE: do NOT reset the process-wide backend.usage_tracker here.
+            # That tracker holds the LIFETIME (session) token/$ totals shown on
+            # the cumulative meter; the per-CHECK badge is already reset above
+            # via usage_tracker.reset(self.check_id). Calling reset_usage() at
+            # every check start wiped the session totals on each run and — in a
+            # concurrent batch — let each child clear the shared totals, making
+            # the lifetime meter unreliable. The session meter is only cleared
+            # by the explicit "reset meter" action, never per check.
             self._global_cache_writes = 0
 
             # Step 1: Get paper content
@@ -1734,6 +2064,25 @@ class ProgressRefChecker:
                         bibliography_source_kind = 'pdf'
                         set_extraction_method('cache')
                         await maybe_update_title_from_direct_pdf(paper_source)
+                        # A cache hit gives us the bibliography but NOT the
+                        # manuscript body — yet inline citation contexts AND
+                        # AI-text detection both need it. If the PDF was
+                        # downloaded on a prior run it's still on disk, so
+                        # extract the body locally (no network) here. Before this
+                        # fix paper_text stayed empty on every cache hit, so
+                        # _attach_citation_contexts had nothing to scan and the
+                        # references silently lost their "cited in: …" context.
+                        # (The _fetch_body_text_for_ai_detection recovery further
+                        # down is the network fallback for when the PDF is gone.)
+                        try:
+                            cached_pdf = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf')
+                            if cached_pdf and os.path.exists(cached_pdf) and os.path.getsize(cached_pdf) > 0:
+                                paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, cached_pdf)
+                                if paper_text:
+                                    pdf_path_for_fallback = cached_pdf
+                                    logger.info("Cache hit: recovered %d chars of body text from the cached PDF for citation contexts / AI detection", len(paper_text))
+                        except Exception as _body_e:  # noqa: BLE001
+                            logger.debug("Cache-hit body extraction skipped: %s", _body_e)
 
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
                     else:
@@ -2037,11 +2386,12 @@ class ProgressRefChecker:
                         # Extract text using the same CLI path for parity.
                         paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
                     else:
-                        # We already have high-quality references from the
-                        # source .bbl, but still need body text for inline
-                        # citation contexts. Download/extract the PDF as a
-                        # best-effort context source without changing the
-                        # reference-extraction method away from bbl/bib.
+                        # References came from the .bbl/.bib source files, so LLM
+                        # reference extraction is skipped — but we still need the
+                        # manuscript BODY for inline citation contexts AND the
+                        # opt-in AI detector. Always extract the PDF (cached);
+                        # NOT gated on AI detection (contexts are a core feature).
+                        # This does not change the reference-extraction method.
                         try:
                             pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
                             if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
@@ -2049,7 +2399,7 @@ class ProgressRefChecker:
                             pdf_path_for_fallback = pdf_path
                             paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
                             logger.info(
-                                "Extracted PDF body text for citation contexts after %s source extraction (%d chars)",
+                                "Extracted PDF body text for citation contexts / AI detection after %s source extraction (%d chars)",
                                 extraction_method,
                                 len(paper_text or ""),
                             )
@@ -2216,6 +2566,23 @@ class ProgressRefChecker:
             # citation sentences. The function is cheap (regex over the
             # body text, no LLM), idempotent on refs that already have
             # contexts, and a no-op when paper_text is empty.
+            # If references were read from a structured source (Crossref DOI,
+            # .bbl/.bib) so paper_text is empty, but the manuscript PDF is still
+            # fetchable (e.g. an open-access PDF URL), download + extract the body
+            # now — so the inline citation CONTEXTS below get the article text.
+            # NOT gated on AI detection: contexts are a core feature and a
+            # URL/DOI check (references via Crossref) otherwise has no body, so
+            # the "▶ Context" expandable silently disappeared when AI detection
+            # was off. The fetch is cached, so the cost is paid once.
+            if not (paper_text or "").strip():
+                fetched_body = await self._fetch_body_text_for_ai_detection(paper_source)
+                if fetched_body:
+                    paper_text = fetched_body
+                    logger.info("Recovered %d chars of body text for citation contexts (source=%s)", len(fetched_body), extraction_method)
+                else:
+                    # No body text anywhere → contexts/AI detection can't run.
+                    # Make it visible instead of silently dropping every context.
+                    logger.warning("No body text available for citation contexts (source=%s, refs=%d) — inline 'cited in' contexts will be empty for this article", extraction_method, len(references or []))
             _attach_citation_contexts(references, paper_text)
             _ctx_attached = sum(1 for r in (references or []) if r.get("citation_context"))
             logger.info(
@@ -2252,6 +2619,13 @@ class ProgressRefChecker:
             except Exception as e:
                 logger.debug("LLM citation-context fallback skipped: %s", e)
 
+            # AI-only detection mode: the user asked to skip reference checking
+            # entirely. Drop any extracted references and route through the
+            # body-text-only path below — it already runs AI detection on
+            # paper_text and emits a completion with an empty reference list.
+            if self.detection_mode == "ai_only":
+                references = []
+
             if not references:
                 # Diagnostic: log every signal that helps explain why
                 # extraction returned empty. v0.7.51 added this after
@@ -2268,20 +2642,27 @@ class ProgressRefChecker:
                     bool(self.llm),
                     len(arxiv_source_references) if arxiv_source_references else None,
                 )
-                detail_msg = "No references could be extracted from this paper."
-                if not self.llm and extraction_method in ('pdf', 'file', 'text'):
-                    detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
-                elif not paper_text or len(paper_text or "") < 200:
-                    detail_msg += " The file's text content looks empty or too short."
+                if self.detection_mode == "ai_only":
+                    detail_msg = "AI-text detection only — reference checking was skipped for this run."
+                else:
+                    detail_msg = "No references could be extracted from this paper."
+                    if not self.llm and extraction_method in ('pdf', 'file', 'text'):
+                        detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
+                    elif not paper_text or len(paper_text or "") < 200:
+                        detail_msg += " The file's text content looks empty or too short."
                 # Still run AI-text detection on the body even when no
                 # references were found — a bibliography-less manuscript with
                 # real prose is exactly the case the feature is wanted for.
                 # paper_text is live here; it is dropped from the return dict.
-                try:
-                    no_ref_detection = await self._run_ai_detection(paper_text, paper_title)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("AI detection (no-refs path) failed (non-fatal): %s", e)
-                    no_ref_detection = None
+                # Explicit gate (mirrors the with-references path) so the intent
+                # is clear; _run_ai_detection also self-gates internally.
+                no_ref_detection = None
+                if self.ai_detection_enabled and self.detection_mode != "references":
+                    try:
+                        no_ref_detection = await self._run_ai_detection(paper_text, paper_title)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("AI detection (no-refs path) failed (non-fatal): %s", e)
+                        no_ref_detection = None
                 await self.emit_progress("completed", {
                     "total_refs": 0,
                     "errors_count": 0,
@@ -2314,6 +2695,11 @@ class ProgressRefChecker:
                 return no_ref_result
 
             # Step 3: Check references in parallel (like CLI)
+            # total_refs MUST reflect the real, final reference count — this is
+            # the authoritative count the whole progress stream divides by. It
+            # is recomputed from len(references) here (after all extraction /
+            # de-dup / merge passes have run) so processed can never overshoot
+            # an early estimate and push the bar past 100% ("28/23 · 122%").
             total_refs = len(references)
             await self.emit_progress("references_extracted", {
                 "total_refs": total_refs,
@@ -2347,7 +2733,9 @@ class ProgressRefChecker:
             # (never 'reference_result'), so it doesn't touch the Seen-Refs
             # upsert path or the reference accumulators; usage records are
             # tracked under a distinct flow and the tracker is lock-guarded.
-            if self.ai_detection_enabled:
+            # Gate on the mode too: "references" mode never runs AI detection,
+            # even if the flag is somehow set (contradictory input).
+            if self.ai_detection_enabled and self.detection_mode != "references":
                 ai_detection_task = asyncio.create_task(
                     self._run_ai_detection(paper_text, paper_title)
                 )
@@ -2392,6 +2780,13 @@ class ProgressRefChecker:
             )
 
             # Step 4: Return final results
+            # Reconcile the reported total to the REAL final reference count.
+            # `results` is the verified reference list actually streamed to the
+            # UI; if it ever carries more entries than the early `total_refs`
+            # estimate (de-dup/merge/re-extraction), raise the total so
+            # processed_refs == total_refs and progress lands exactly at 100%
+            # rather than overshooting.
+            final_total_refs = max(total_refs, len(results))
             final_result = {
                 "paper_title": paper_title,
                 "paper_source": paper_source,
@@ -2399,8 +2794,8 @@ class ProgressRefChecker:
                 "bibliography_source_kind": bibliography_source_kind,
                 "references": results,
                 "summary": {
-                    "total_refs": total_refs,
-                    "processed_refs": total_refs,
+                    "total_refs": final_total_refs,
+                    "processed_refs": final_total_refs,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,
@@ -2457,6 +2852,143 @@ class ProgressRefChecker:
                 except BaseException:  # noqa: BLE001 — reaping a cancelled task
                     pass
 
+    async def _download_and_extract_pdf_body(self, url: str) -> str:
+        """Download a single URL and, if it is a PDF, extract its text.
+
+        Returns "" for non-PDF (HTML/paywall) responses or any failure. Caches
+        the downloaded PDF under the artifact cache so repeat runs are cheap.
+        Never raises.
+        """
+        try:
+            src = str(url or "").strip()
+            if not src.lower().startswith(("http://", "https://")):
+                return ""
+            pdf_path = get_cached_artifact_path(self.cache_dir, src, "ai_body.pdf", create_dir=True)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                import requests as _req
+                resp = await asyncio.to_thread(
+                    _req.get, src,
+                    headers={
+                        # Some publishers (Springer/BMC) 403 a bare UA; send a
+                        # realistic browser UA while still identifying ourselves.
+                        "User-Agent": (
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
+                            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                            "Safari/605.1.15 RefChecker/0.7 (mailto:moniriario@gmail.com)"
+                        ),
+                        "Accept": "application/pdf,*/*",
+                    },
+                    timeout=60,
+                    allow_redirects=True,
+                )
+                if resp.status_code != 200:
+                    return ""
+                content = resp.content or b""
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                is_pdf = content[:5] == b"%PDF-" or "pdf" in ctype or src.lower().endswith(".pdf")
+                if not is_pdf:
+                    return ""  # HTML / paywalled — let the honest "no body" message stand
+                with open(pdf_path, "wb") as fh:
+                    fh.write(content)
+            text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
+            logger.info("AI-detection body fetch: extracted %d chars from %s", len(text or ""), src)
+            return text or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI-detection body fetch failed for %s: %s", url, exc)
+            return ""
+
+    async def _resolve_doi_to_pdf_urls(self, doi: str) -> List[str]:
+        """Resolve a DOI to candidate open-access PDF URLs (best-effort).
+
+        Tries Crossref `message.link[content-type=application/pdf]` first
+        (deterministic, no key), then Unpaywall `best_oa_location.url_for_pdf`.
+        Returns an ordered, de-duplicated list of URLs to try. Never raises.
+        """
+        urls: List[str] = []
+        try:
+            import requests as _req
+            try:
+                cr = await asyncio.to_thread(
+                    _req.get,
+                    f"https://api.crossref.org/works/{doi}",
+                    headers={"User-Agent": "RefChecker/0.7 (mailto:moniriario@gmail.com)"},
+                    timeout=15,
+                )
+                if cr.status_code == 200:
+                    msg = (cr.json() or {}).get("message", {}) or {}
+                    for link in (msg.get("link") or []):
+                        if not isinstance(link, dict):
+                            continue
+                        if "pdf" in str(link.get("content-type", "")).lower():
+                            u = link.get("URL")
+                            if u:
+                                urls.append(u)
+            except Exception as _cr_err:  # noqa: BLE001
+                logger.debug("Crossref PDF-link lookup failed for %s: %s", doi, _cr_err)
+            try:
+                uw = await asyncio.to_thread(
+                    _req.get,
+                    f"https://api.unpaywall.org/v2/{doi}?email=moniriario@gmail.com",
+                    timeout=20,
+                )
+                if uw.status_code == 200:
+                    loc = (uw.json() or {}).get("best_oa_location") or {}
+                    pdf = loc.get("url_for_pdf")
+                    if pdf:
+                        urls.append(pdf)
+            except Exception as _uw_err:  # noqa: BLE001
+                logger.debug("Unpaywall lookup failed for %s: %s", doi, _uw_err)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("DOI->PDF resolution failed for %s: %s", doi, exc)
+        # De-dup, preserve order.
+        seen = set()
+        ordered: List[str] = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                ordered.append(u)
+        return ordered
+
+    async def _fetch_body_text_for_ai_detection(self, paper_source: Optional[str]) -> str:
+        """Best-effort fetch of the manuscript body when references came from a
+        structured source (Crossref DOI / .bbl) so paper_text is empty.
+
+        Covers every input "page type" that otherwise yields no body text:
+          • a direct PDF link (open-access publisher PDF URL) — download it;
+          • a DOI link or a bare DOI (`10.xxxx/…`, `doi.org/…`) — resolve the
+            DOI to an open-access PDF via Crossref/Unpaywall, then download it;
+          • a publisher landing-page URL that embeds a DOI — same DOI path.
+        HTML/paywalled bodies are intentionally NOT scraped here (unreliable),
+        so closed-access inputs correctly fall back to the honest "no body
+        text available" message. Never raises.
+        """
+        try:
+            src = str(paper_source or "").strip()
+            if not src:
+                return ""
+
+            # 1) Direct PDF URL (the common "paste a PDF link" case).
+            if src.lower().startswith(("http://", "https://")):
+                text = await self._download_and_extract_pdf_body(src)
+                if text.strip():
+                    return text
+
+            # 2) DOI input (bare `10.xxxx/…`, a doi.org link, or a publisher
+            #    URL that embeds a DOI) — resolve to an OA PDF and download it.
+            import re as _re_doi
+            doi_match = _re_doi.search(r"10\.\d{4,9}/[^\s?#&]+", src)
+            doi = doi_match.group(0).rstrip(".,;)]}'\"") if doi_match else None
+            if doi:
+                for pdf_url in await self._resolve_doi_to_pdf_urls(doi):
+                    text = await self._download_and_extract_pdf_body(pdf_url)
+                    if text.strip():
+                        logger.info("AI-detection body: resolved DOI %s -> %s", doi, pdf_url)
+                        return text
+            return ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI-detection body fallback failed: %s", exc)
+            return ""
+
     async def _run_ai_detection(self, paper_text: str, paper_title: Optional[str]) -> Optional[Dict[str, Any]]:
         """Analyze the manuscript body for AI-generated-text likelihood.
 
@@ -2499,7 +3031,23 @@ class ProgressRefChecker:
         except Exception as e:  # noqa: BLE001
             logger.debug("ai_detection phase emit skipped: %s", e)
 
+        # Multi-detector compare path (R61): only for the local backend and only
+        # when >1 detector was explicitly selected. A single selected detector
+        # (or none) falls through to the existing single-detector path so the
+        # default behaviour is byte-for-byte unchanged.
+        run_multi = (
+            backend == "local"
+            and len(self.ai_detection_detectors) > 1
+        )
+
         try:
+            # The local engine serializes inference behind a process-wide lock,
+            # so in a BULK run every child's detection queues on the same lock.
+            # A tight 150s budget meant the later children in a large batch
+            # timed out before their turn — surfacing as "AI detection didn't
+            # load for some articles". Give serialized batch inference real
+            # headroom (it's best-effort and runs concurrently with reference
+            # checking, so it never blocks the reference results from streaming).
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     run_detection,
@@ -2509,9 +3057,28 @@ class ProgressRefChecker:
                     check_id=self.check_id,
                     **opts,
                 ),
-                timeout=150,
+                timeout=480,
             )
             payload = result.to_dict()
+            if run_multi:
+                # Attach the side-by-side comparison under ``multi`` — the
+                # top-level result stays the single configured detector for
+                # full backward compatibility. Best-effort: a failure here
+                # never affects the primary result.
+                try:
+                    from refchecker.ai_detection import run_detectors
+                    multi = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            run_detectors,
+                            paper_text or "",
+                            self.ai_detection_detectors,
+                        ),
+                        timeout=480,
+                    )
+                    payload["multi"] = multi
+                except Exception as me:  # noqa: BLE001
+                    logger.warning("multi-detector compare failed for check %s: %s",
+                                   self.check_id, me)
         except asyncio.TimeoutError:
             # The asyncio wrapper is cancelled, but the underlying OS worker
             # thread keeps running run_detection() to completion (threads can't
@@ -3737,9 +4304,19 @@ class ProgressRefChecker:
                         ha_task = asyncio.create_task(
                             asyncio.wait_for(
                                 loop.run_in_executor(
-                                    None, self._run_hallucination_check_sync, c_result, c_ref
+                                    # R04: dedicated bounded pool (not the
+                                    # shared default executor) so a hung LLM
+                                    # request can't saturate everything else.
+                                    self._ha_executor,
+                                    self._run_hallucination_check_sync, c_result, c_ref
                                 ),
-                                timeout=150.0,
+                                # R04: lowered from 150s → 90s. The verifier's
+                                # own per-client timeouts (60–90s) bound each
+                                # request; this outer wall-clock cap guarantees
+                                # the ref can never stay pending much longer.
+                                # Read from an instance attr so tests can inject
+                                # a tiny budget without monkeypatching the loop.
+                                timeout=getattr(self, '_ha_task_timeout', 90.0),
                             ),
                             name=f"hallucination-{c_idx}",
                         )
@@ -3754,6 +4331,11 @@ class ProgressRefChecker:
                         except asyncio.CancelledError:
                             for t in ha_pending:
                                 t.cancel()
+                            # Don't leave the not-yet-finished refs spinning on
+                            # "Checking for hallucination with LLM…" forever.
+                            for _c_idx, _t in ha_tasks:
+                                if results.get(_c_idx) and results[_c_idx].get('hallucination_check_pending'):
+                                    results[_c_idx]['hallucination_check_pending'] = False
                             raise
 
                         ha_done, ha_pending = await asyncio.wait(
@@ -3857,7 +4439,14 @@ class ProgressRefChecker:
         for idx in range(total_refs):
             if results.get(idx):
                 results[idx].pop('_raw_errors', None)
-        
+                # Never persist a reference stuck on "Checking for hallucination
+                # with LLM…": by the time we build the final list the check is
+                # over, so any lingering pending flag (e.g. the hallucination
+                # phase was interrupted/skipped) must be cleared so the card
+                # doesn't show a spinner forever on reload.
+                if results[idx].get('hallucination_check_pending'):
+                    results[idx]['hallucination_check_pending'] = False
+
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue } from './formatters'
+import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex, normalizeAuthors, isEtAlSentinel, hasEtAlSentinel } from './formatters'
 
 describe('formatters', () => {
   describe('formatDate', () => {
@@ -144,6 +144,122 @@ describe('formatters', () => {
       const result = formatReference(ref)
       expect(result).toBe('John Smith "Undated Tool"')
       expect(displayReferenceValue('n.d.')).toBe('')
+    })
+  })
+
+  describe('exportReferenceAsBibtex — corrected values', () => {
+    it('includes year + venue + DOI named by errors/warnings (no authoritative_urls)', () => {
+      // Regression for #53 (R06/R07): warnings name the missing year/venue via
+      // typed correction fields, and a doi-type error names the verified DOI.
+      // The corrected @article{awcomparison} bibtex must carry year=2018, the
+      // venue, AND doi=10.5812/ijem.12104 — with NO ref.doi and NO
+      // authoritative_urls to fall back on. The verifier-named DOI wins.
+      const ref = {
+        title: 'Comparison of osteoporosis pharmacotherapy fracture rates',
+        authors: ['Reynolds AW', 'Liu G', 'Kocis PT'],
+        // ref.doi intentionally absent — the DOI must come from the error.
+        errors: [
+          { error_type: 'doi', actual_value: '10.5812/ijem.12104' },
+        ],
+        warnings: [
+          { error_type: 'year', error_details: "Year missing: should include '2018'", ref_year_correct: '2018' },
+          { error_type: 'venue', error_details: "Venue missing: should include 'International Journal of Endocrinology and Metabolism'", ref_venue_correct: 'International Journal of Endocrinology and Metabolism' },
+        ],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('2018')
+      expect(bibtex).toContain('International Journal of Endocrinology and Metabolism')
+      expect(bibtex).toContain('doi = {10.5812/ijem.12104}')
+    })
+
+    it('R06: a verifier-named DOI wins over the (wrong) cited ref.doi', () => {
+      const ref = {
+        title: 'Some paper',
+        authors: ['Doe J'],
+        doi: '10.0000/wrong.cited',
+        errors: [{ error_type: 'doi', actual_value: 'https://doi.org/10.1234/correct.5678' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      // Emitted DOI is the verified one, normalized off the https://doi.org/ prefix.
+      expect(bibtex).toContain('doi = {10.1234/correct.5678}')
+      expect(bibtex).not.toContain('10.0000/wrong.cited')
+    })
+
+    it('R06: DOI from ref_doi_correct (no actual_value) is emitted in bibtex', () => {
+      const ref = {
+        title: 'Typed-correction paper',
+        authors: ['Roe J'],
+        warnings: [{ error_type: 'doi', ref_doi_correct: '10.9999/typed.doi' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('doi = {10.9999/typed.doi}')
+    })
+
+    it('R06: falls back to authoritative_urls DOI when no doi-type issue exists', () => {
+      const ref = {
+        title: 'Fallback paper',
+        authors: ['Poe J'],
+        authoritative_urls: [{ type: 'doi', url: 'https://doi.org/10.5555/from.url' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('doi = {10.5555/from.url}')
+    })
+
+    it('still honours explicit actual_value when present', () => {
+      const ref = {
+        title: 'Some paper',
+        authors: ['Doe J'],
+        errors: [{ error_type: 'year', actual_value: '2020' }],
+      }
+      const bibtex = exportReferenceAsBibtex(ref, 0)
+      expect(bibtex).toContain('2020')
+    })
+  })
+
+  // R41 / R09: et-al/"and others" truncation sentinels must never render as a
+  // fake author chip; normalizeAuthors strips them from the display list.
+  describe('normalizeAuthors — et-al sentinel filtering (R41)', () => {
+    it('filters a trailing "et al." token from an array', () => {
+      expect(normalizeAuthors(['Jane Smith', 'John Doe', 'et al.'])).toEqual(['Jane Smith', 'John Doe'])
+    })
+
+    it('filters "and others" / "others" sentinels (any case, trailing punctuation)', () => {
+      expect(normalizeAuthors(['A. Author', 'and others'])).toEqual(['A. Author'])
+      expect(normalizeAuthors(['A. Author', 'Others'])).toEqual(['A. Author'])
+      expect(normalizeAuthors(['A. Author', 'ET AL'])).toEqual(['A. Author'])
+    })
+
+    it('filters the sentinel from a comma-separated string', () => {
+      expect(normalizeAuthors('Jane Smith, John Doe, et al.')).toEqual(['Jane Smith', 'John Doe'])
+    })
+
+    it('keeps real names that merely contain "et" or "al" as substrings', () => {
+      expect(normalizeAuthors(['Pete Albers', 'Alan Etheridge'])).toEqual(['Pete Albers', 'Alan Etheridge'])
+    })
+
+    it('isEtAlSentinel classifies only standalone truncation tokens', () => {
+      expect(isEtAlSentinel('et al.')).toBe(true)
+      expect(isEtAlSentinel('and others')).toBe(true)
+      expect(isEtAlSentinel('Jane Smith')).toBe(false)
+    })
+  })
+
+  // R09: detect a trailing et-al sentinel so the UI can offer an "et al. (show
+  // N authors)" expand control to the full enriched list.
+  describe('hasEtAlSentinel (R09)', () => {
+    it('is true when the raw list ends in an et-al token', () => {
+      expect(hasEtAlSentinel(['Jane Smith', 'John Doe', 'et al.'])).toBe(true)
+      expect(hasEtAlSentinel('Jane Smith, et al.')).toBe(true)
+    })
+
+    it('is false for a complete author list', () => {
+      expect(hasEtAlSentinel(['Jane Smith', 'John Doe'])).toBe(false)
+      expect(hasEtAlSentinel('Jane Smith, John Doe')).toBe(false)
+    })
+
+    it('is false for empty / null input', () => {
+      expect(hasEtAlSentinel(null)).toBe(false)
+      expect(hasEtAlSentinel([])).toBe(false)
     })
   })
 })

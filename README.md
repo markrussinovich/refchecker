@@ -1,8 +1,16 @@
 # RefChecker
 
 <p align="center">
+  <img alt="RefChecker" src="assets/hero.svg" width="100%">
+</p>
+
+<p align="center">
   <strong>Validate reference accuracy in academic papers.</strong><br>
   Catch citation errors, fabricated references, and metadata mismatches before they reach reviewers.
+</p>
+
+<p align="center">
+  <img alt="Extract → Verify → Detect → Share" src="assets/flow.svg" width="100%">
 </p>
 
 <p align="center">
@@ -36,30 +44,86 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.19)
+### ✨ What the desktop app adds
 
-- **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
-- **Global reference library (read + write, every code path).** Every verified reference — including ones that flow through post-processing rewriters like the hallucination resolver — is now persisted to the global identity cache (DOI / arXiv / normalized title key) via a single `emit_progress` hook. Previous builds only persisted along one of six code paths, which left a lot of refs uncached. Future verifications consult the cache automatically for instant matches. New *Seen References (library)* view at the top of the main panel.
-- **Find similar papers — multi-source, actively verified.** Pulls candidates from **Semantic Scholar** (recommendations + co-citation), **OpenAlex** (DOI-resolved co-citation), the user's configured **web-search provider** (OpenAI / Anthropic / Gemini), and the user's default **LLM** ("what else should I read?"). Candidates are deduped across sources, each row shows a source badge, and any cache-miss candidate is actively re-verified through the hybrid checker before display — so you see real ✓ verified or ? unconfirmed, not just metadata.
-- **Real citation graph.** Force-directed view of the paper's references, edges drawn from the real Semantic Scholar citation graph (ref A → ref B iff A cites B), **nodes sized by in-paper in-degree** (how many other refs in the same bibliography cite each one). Double-click any node to expand one hop further — pulls in that paper's top outgoing references as new nodes.
-- **Citation context.** Each reference card shows the sentence in the paper where it's cited — now matches both numeric markers (`[12]`) AND author-year style (`(Smith et al., 2020)`, `Smith (2020)`), so APA / Chicago papers light up too. Up to two sentences per ref, captured at parse time with no extra LLM call.
-- **Live citation health badge.** Score recomputes on every edit (Apply Fix / Add / Remove). Copy as Markdown for a README badge.
-- **Add / Remove / Suggest alternative — everywhere.** Now in both the References tab and the Corrections tab. Newly-added references are re-verified live, and *Apply Fix* in the Corrections tab also re-runs the verifier on the corrected metadata so the citation-health chip moves in real time. *Suggest alternative* combines an LLM-backed "what real paper did the author probably mean?" with Semantic Scholar title-search — **and each candidate is rendered in your currently-selected citation style** (APA / IEEE / BibTeX / your custom template) with a one-click Copy button, so the replacement drops into your bibliography in the right format.
-- **Minimal Grammarly-style citation-health chip** sits inline in the Summary header — color-coded, hover for breakdown, recomputes on every edit. No copy / download clutter; the score follows you.
-- **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. now expose Max-authors, et-al threshold, and Include-URL toggles. Need a journal-specific format? *Customize style → New custom style* lets you save a template like `{authors} ({year}). {title}. {venue}. {doi}` and pick it from the dropdown forever after.
-- **Seen References — live + clearable.** The library auto-refreshes whenever a check finishes (newly-verified refs appear immediately) and a *Clear cache* button wipes the whole identity table when you need a fresh start.
-- **LLM token + cost meter.** Inline chip in the Summary header tracks total tokens and an estimated USD cost across every provider you've used (OpenAI / Anthropic / Gemini) with a per-provider breakdown on hover. Counters persist across restarts via `llm_usage.json`. Cost rates are list-price USD-per-1K-tokens, hand-curated per model.
-- **Smoother citation graph.** Labels are now hover-on-demand (one node at a time, source always labelled) so the canvas stays readable; hovered node gets a soft outline ring. Slower force-cooldown lets the network breathe.
-- **Bullet-proof external links.** *Open in browser* / GitHub / DOI / arXiv buttons now use an explicit `shell:allow-open` scope (`https://**`, `http://**`, `mailto:**`, `tel:**`) so the Tauri shell plugin actually opens them — the default scope was silently empty.
-- **Apply Fix actually moves the citation-health chip.** Accepting a correction now merges the verifier's suggested metadata back into the stored reference before re-verifying, so the ref flips to *verified* and the badge updates in real time. Apply-all-visible parallelises the re-verifies at 4 in flight.
-- **Better "Similar Papers" diagnostics.** When nothing comes back, the panel now shows which sources were tried and how many candidates each produced, and explicit hints for the common causes (rate limits, refs without DOIs, no web-search-capable LLM provider).
-- **Token meter shows per-kind breakdown + cascade savings hint.** Hover the chip for tokens grouped by call kind (extraction / hallucination / suggest-alt / web-search). When cascade saved measurable cost vs an LLM-only path, the savings are estimated and surfaced at the bottom of the tooltip.
-- **Desktop version visible in Settings.** Settings → footer now shows both the desktop bundle version (e.g. `Desktop v0.6.6`) and the underlying Python engine version separately so you can tell at a glance which build you're on.
-- **Reference-manager export (RIS).** New *Export → RIS* option produces a `.ris` file that imports directly into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — including the verifier's corrected metadata (DOI, arXiv ID, fixed authors) instead of the wrong-as-cited values. The export menu also gets a *Sort* control: citation order, alphabetical (first author), or year ascending/descending.
-- **References tab honors the citation-style picker live.** Pick APA / IEEE / BibTeX / your custom template in the References-tab header and each card renders a styled preview line above the structured metadata. Title / authors / venue rows stay below so per-field badges keep working.
-- **Tab pill counts respect Summary filters.** Click "Errors" in the Summary chips and the References tab pill drops to "3" instead of staying at the full bibliography count — so the tab header matches the in-page header.
-- **Author rendering no longer leaks `[object Object]`.** `formatAuthors` now normalises every author shape we've seen from upstream (bare strings, `{name}`, `{display_name}`, OpenAlex `{author:{display_name}}`, CSL JSON `{family, given}`, JSON-encoded arrays).
-- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
+The desktop app wraps the same engine in a native Tauri shell and layers on a full
+review workspace. **The highlights below are grouped and collapsed** — click any
+section to expand it.
+
+> **Newest in v0.9.x** — a **2×2 article-tools grid** (Retractions · Gap-finder ·
+> Citation-numbering · Chat) with full-width detail panels ·
+> **Chat-with-PDF & Summarize**, grounded in the article text ·
+> **Similar papers + "Cites & Refs"** with a ResearchRabbit-style **Explore graph** ·
+> **Teams & realtime shared-batch presence** · **journal-name & author hovers**
+> (h-index · ORCID · author guidelines) · an **inline-citation numbering checker** ·
+> **AI-generated-text detection** with rich visualizations · and a **fully legible,
+> colour-gradient CLI banner**.
+
+<details>
+<summary><strong>🤖 AI-generated-text detection</strong> — opt-in, advisory, never proof of misconduct</summary>
+
+<br>
+
+- **Three engines, your choice.** A **local calibrated model** (desklib DeBERTa-v3, MIT — runs offline after a one-time download), an **LLM-judge** that reuses your hallucination-check provider, or an **external API** (Pangram / GPTZero, key + explicit consent required).
+- **GPTZero-style visualizations.** A confidence **donut**, **AI / Mixed / Human** probability pills, a **page-by-page** likelihood breakdown, and **Top AI / Top Human** sentence lists — all descriptive of the model's windowed scores, never a probability of guilt.
+- **Flagged passages, in context.** Click any advisory passage to **see it highlighted in the document**, with zoom + find.
+- **Run mode.** Settings → *Run mode* lets you check **references only** (default), **AI text only** (skips reference verification entirely), or **both**.
+- **Honesty-first.** A permanent disclaimer, distinct *inconclusive* / *unavailable* states, and abstention on short or highly technical text. The model is cited in-app and in [Sources & credits](#sources--credits).
+
+</details>
+
+<details>
+<summary><strong>📤 Share, export & document viewing</strong></summary>
+
+<br>
+
+- **Share this document.** One click produces a **self-contained HTML report** (references + verdicts + AI-detection visuals, all inline) you can download and send anywhere.
+- **Publish a link.** Opt-in *Publish to web* pushes the report to a host (GitHub Gist → viewable link) so *anyone with the link* can view the results.
+- **Video walkthrough.** Export an in-app **animated WebM** of the verdict gauge, reference stats, and AI band — no external tools, no screen-share.
+- **Native-feeling document viewer.** The extracted body renders as a centered, serif **"page"** with flagged passages highlighted in place, plus **zoom** and an in-document **find** bar (⌘F, match navigation).
+- **PDF page viewer with zoom.** Browse the original PDF pages full-screen with +/- zoom and fit.
+- **Reference-manager export (RIS).** Imports straight into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — with the verifier's *corrected* metadata, not the wrong-as-cited values. Includes a *Sort* control (citation order / alphabetical / year).
+
+</details>
+
+<details>
+<summary><strong>🕸️ Graphs & the reference library</strong></summary>
+
+<br>
+
+- **Obsidian-style 3D library graph.** Visualize **every reference you've ever verified** as a 3D force-directed graph — node size = how many times it's been seen, edges = shared authors / venue.
+- **Real per-paper citation graph.** Force-directed view of one paper's bibliography, edges from the **real Semantic Scholar citation graph** (A → B iff A cites B), nodes sized by **in-paper in-degree**. Double-click a node to expand one hop further; toggle an **AI-likelihood ring** on the nodes.
+- **Global reference library (Seen References).** Every verified reference is persisted to a global identity cache (DOI / arXiv / normalized-title key) and consulted automatically for instant matches. Live-refreshing, searchable, and clearable.
+- **Find similar papers — multi-source, actively verified.** Candidates from **Semantic Scholar**, **OpenAlex**, your **web-search provider**, and your **default LLM**, deduped with source badges and *re-verified* before display — real ✓ verified / ? unconfirmed, not just metadata.
+
+</details>
+
+<details>
+<summary><strong>✏️ Corrections, citation styles & live health</strong></summary>
+
+<br>
+
+- **Add / Remove / Suggest alternative — everywhere.** In both the References and Corrections tabs. *Apply Fix* merges the verifier's suggested metadata and **re-verifies live**, so the ref flips to *verified* and the health chip moves in real time (apply-all parallelizes 4 in flight).
+- **Suggest alternative** combines an LLM "what real paper did they mean?" with Semantic Scholar title-search — **each candidate rendered in your selected citation style** with one-click Copy.
+- **Live citation-health chip.** A minimal Grammarly-style score in the Summary header — color-coded, hover for a breakdown, recomputes on every edit, copyable as a Markdown badge.
+- **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. expose Max-authors, et-al threshold, and Include-URL toggles; save a custom template like `{authors} ({year}). {title}. {venue}. {doi}`.
+- **Author cards on hover.** Hovering an author shows **affiliation, paper & citation counts, h-index, homepage, and recent papers** (Semantic Scholar, cached). An **inline-cited ✓ badge** marks references actually cited in the body text.
+
+</details>
+
+<details>
+<summary><strong>⚙️ Extraction, cost tracking & quality-of-life</strong></summary>
+
+<br>
+
+- **Cascade extraction (token saver).** *Reference Extraction* picks **cascade** (regex / BibTeX / GROBID first, LLM only on messy entries) or **LLM-only** — typically 60–90% fewer LLM tokens on well-formatted papers.
+- **LLM token + cost meter.** Tracks tokens and an estimated USD cost across every provider, with per-provider and per-kind breakdowns and a cascade-savings hint. Persists across restarts.
+- **Citation context.** Each card shows the sentence where the reference is cited — numeric `[12]` **and** author-year `(Smith et al., 2020)` styles, with a retry/fallback that also catches narrative & title-mention citations.
+- **Batch workspace.** Run hundreds of papers, with a batch summary view, per-paper status, expand/collapse-all, and aggregate counters.
+- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / text file — or right-click → RefChecker in Finder/Explorer — and the check starts immediately.
+- **Auto-updating, signed builds.** Native installers for macOS / Windows / Linux, signed and shipped by GitHub Actions on every release tag, with a built-in updater.
+
+</details>
 
 ---
 
@@ -69,10 +133,47 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 
 ---
 
+## 🆕 Recent updates
+
+<details open>
+<summary><strong>Latest release highlights</strong> (desktop app)</summary>
+
+<br>
+
+- **v0.9.22** — **Article-tools layout + "sometimes missing" fixes.** The four on-demand article tools (**Retractions · Gap-finder · Citation-numbering · Chat & Summarize**) now sit in a tidy **2×2 button grid**; clicking one opens its details **full-width directly below** (one at a time — the buttons never shift). **Fix: the native document viewer no longer comes up empty** for pasted text / `.bib` / `.bbl` sources (the extracted text is now served). **Fix: inline "cited in…" contexts no longer silently vanish** on a re-check — when references load from cache the manuscript body is re-read so citation contexts (and AI detection) have text to work with. Settings: the **Accounts & Teams** label is left-aligned and the panel header shows the full name. *(The "Citation numbering — n/a · mixed citation styles" message is honest abstention, not a bug: flagging a genuinely mixed-style paper would be a false alarm.)*
+- **v0.9.21** — **Progress + chips.** **Fix: the reference progress can no longer read past 100%** (`28/23 · 122%`, `59/43`) — `total_refs` is reconciled to the real reference count across the backend and the UI, so the bar always lands at 100%. The **"Filter by issue" chips** are aligned to the button design-system (one 8px radius, colour-only hover/selected, proper toggle semantics). *(Release builds are now pinned via a committed `Cargo.lock` so a drifting Rust dependency can't break a desktop build.)*
+- **v0.9.20** — **Reliability + polish.** **Fix (P0): checks no longer get stuck `in_progress` forever** — a reconciler finalizes orphaned checks (e.g. after a restart or a hung detection) on startup *and* on demand, and AI detection is now hard-bounded so it always returns. **AI-generated-text result no longer gets trapped** behind a stuck finalization. The **Share card/video counts now match the results bar exactly** (errors are no longer double-counted with hallucinations). **Author matching** handles Brazilian/Iberian names where the cited surname is a middle compound (`de Oliveira SD` ↔ `Danilo de Oliveira Silva`). Each reference gets a **Funding** button (opens the funder/grant data, like Abstract). The walkthrough **video shows only in the Share popup** (not the stats summary), and the **accounts/sign-in text is left-aligned**.
+- **v0.9.19** — **Multi-detector AI detection**: install and run any mix of the best open-source detectors (desklib · SuperAnnotate · e5-small-LoRA · MAGE; heavy zero-shot ones listed as opt-in), compare their scores **side-by-side** with per-sentence agreement, and **export exactly the detectors you tick** — plus CLI `--detectors` / `--list-detectors`. **In-PDF navigation**: clicking an inline citation jumps to the entry **inside the PDF**, whole-sentence highlights, **Cmd/Ctrl+F find** in every native viewer, pinch-zoom in the context overlay. **Teams**: share checks with your team and work the same batch together; enabling accounts applies **without a restart**. **Add-to-list** rejects duplicates, commits the **renumbered** reference list, and renders tracked was→should-be changes into the PDF. **Live token + $ meter** across every LLM flow; **one canonical count** across badge / report / export; the share video uses **real per-article numbers** and the stats page gets its own. Chat and Summarize choose **separate models**; per-reference chat grounds in the **fetched full text** when open access allows (honest TL;DR fallback). Plus: AS-CITED corrections carry the **verified DOI**, suggested papers gain **verification + provenance** links, "et al." expands to the full author list, ORCID iD + link in the author card, alphabetic numbering schemes, unified buttons with **no click-jump**, and a full **CLI parity / feature-matrix** docs pass.
+- **v0.9.18** — A working **email-support** link; **Retraction / Gap-finder / Citation-numbering** are now **per-article** in a batch (no more cross-leak); the **walkthrough** is gone from the stats page and the video plays **once in the share banner**; **"Unknown mismatch" fixed** (accented venues/authors — "Bengio" vs "Béngio" — are no longer flagged as spurious mismatches); **clickable DOIs** in the library graph; author hover gains **Semantic Scholar / Google Scholar** logo links, a **per-reference Chat** button, and a **per-card Remove** from the library.
+- **v0.9.17** — **Enable accounts & Teams from inside the app** — Settings now has a real form: flip on multi-user mode, paste your Google / GitHub / Microsoft OAuth credentials, and **Apply** — the app saves them, relaunches, and the sign-in screen + Teams light up. No more hand-editing a `.env` or restarting the server by hand. Single-user stays the default; secrets are stored locally (write-only, never echoed back).
+- **v0.9.16** — Discovery modes reworked to **References / Citations / Both** — find papers that share your **references**, share your **citations** (co-cited), or both, on real OpenAlex data. A **"Chat about this reference"** button (grounded on that reference). The author hover card now shows **h-index** + citation count. Adding a suggested reference shows a clear **before→after renumber diff** (`[5] → [6]`, accent-highlighted).
+- **v0.9.15** — **Export reports restyled** to match the app (HTML/PDF/Markdown/Word — dark + light, green accent, status colours, Mac-native type) with a governing `docs/design.md`. **Sign-in & Teams** surfaced in the app (Settings/header) so accounts + team editing are reachable. Journal-name hover now shows a **single** popover. The per-check **walkthrough** is wired into the article stats.
+- **v0.9.14** — **Native "view in document"**: the flagged-passages / AI-detection viewer now renders the **real PDF** (pdf.js) with **colour-coded** status highlights and **click-to-jump-to-reference** back-links; sources that aren't already a PDF (pasted text, `.tex`, `.bib`, `.txt`) are **converted to a self-contained PDF** so they render the same way (graceful text fallback). PDF viewer defaults to **fit-width** (no longer over-zoomed) with **trackpad pinch-zoom**. **Explore graph** no longer renders empty/collapsed — it builds reactively with a readable spread layout. **Per-AI-sentence "View in document"** buttons. Redundant "Published" badge removed; **Full link** + **Funding** added. **Enrichment** now cross-fills from all sources so references show maximum info.
+- **v0.9.13** — **Fix (P0):** **Re-verify / Suggest-alternative / Remove no longer blank the whole page** (a rules-of-hooks crash, React #310) — plus an app-wide **error boundary** so any render error shows a recoverable screen instead of a blank window. The **retraction check** button stays clickable (turns **green** when clean) and re-runs on click; **info-only badges** (Published, Topics) no longer look clickable; the **author hover** card scrolls when long; the **scroll-to-top** button no longer overlaps content. **Teams** gain an **activity log** (who created the team, added/removed which member, who left) · the **radial library graph** shows full **article info on hover** · calmer **3D graph glow** · **bug reports** open the **upstream** repo · reliable **email support**.
+- **v0.9.12** — **Fix:** **batch checks** failed with a 500 (`'BatchUrlsRequest' object has no attribute 'semantic_scholar_api_key'`) — the batch request model now carries the full per-check config (LLM · hallucination · Semantic Scholar · AI-detection · detection-mode), matching single checks. Plus a **fully legible, colored CLI banner** — the `REFCHECKER` wordmark renders as renderer-independent pixels (no font dependency, no text overlap), and colour now follows the **actual output stream (stderr)**, so the gradient stays even when stdout is piped (e.g. `--report-format json > out.json`).
+- **v0.9.11** — A **bolder, more legible CLI banner** — the `REFCHECKER` wordmark now uses solid 2-cell-wide strokes instead of thin scattered blocks.
+- **v0.9.10** — Fix: the Chat/Summarize **abstract-fallback** crashed on Python 3.11 (a mid-pattern inline-regex flag — `re.error: global flags not at the start`); CI is green across the full Python-3.11 suite again.
+- **v0.9.9** — Hardening: the **Published** badge now renders the backend's real human date (and a **Topics** badge from OpenAlex fields-of-study + a live **Checking/Pending** status pill); **Chat & Summarize** shows an honest "configure a model in Settings" empty-state; **Teams** gains remove-member / leave-team and a hardened presence roster. +26 frontend + several backend tests.
+- **v0.9.8** — **Similar → "Cites & Refs" (and Both)** mode (real OpenAlex `referenced_works` + `cites:`) · **Chat-with-PDF + Summarize**, grounded in the article text with a per-feature model selector and honest abstain when no text · **Teams** (create / members) + **realtime shared-batch presence** · **ResearchRabbit-style Explore graph** · **journal-name hover** (OpenAlex `/sources` metadata + DOAJ author-guidelines link) · author **h-index / ORCID** backfill for non-Semantic-Scholar authors · inline **ordering-consistency** check (alphabetical vs order-of-appearance). CI: Tauri-bundle retry to ride out GitHub-CDN 504s.
+- **v0.9.6** — **"Additional Info" bar** under each reference (Abstract · Claim/TL;DR · Preprint · open-access **Full text** · **Add to Library**) · **Support menu** in the header (email + open a GitHub issue) · **Mac-native** system-font design tokens · author hover gains a **Google Scholar** link and is **scrollable** · fixes the **"Did you miss these" 404** (stale bundled frontend regenerated).
+- **v0.9.3–v0.9.5** — Fixes: **all share/export 500s** (live-breaking) · the **suggested correction** now includes the year/venue the warnings name · **"Checking for hallucination" no longer hangs** · the two summary badges reconcile. Features: **inline-citation numbering checker** (gaps / out-of-order / duplicates / undefined / uncited, scheme-aware, adversarially hardened) with a badge · **Add to references** with a before/after renumber **doc-diff** preview · per-reference enrichment (**abstract · TL;DR · OA-PDF · preprint**) · **view-in-document** opens zoomed + scroll-centered on the cited sentence with a status-coloured pulse and a two-way reference↔document link · radial-graph **edge-pinning** + an **Obsidian-style 3D graph** (bloom, click-to-spotlight, flow particles).
+- **v0.8.1** — Fixes: **Share → Download HTML** now produces a complete report (was 500 / empty references); **AI detection no longer skipped** for some papers in bulk; author-matching tolerates **surname typos** (`Guruprasad`↔`Guruprashad`) and a **small omission** in an otherwise-correct author list; the **session token/$ meter** no longer resets mid-run. UX: PDF viewer **zoom moved to the side** + **⌘F / Ctrl+F find**; the Share dialog shows an **in-page results animation** while building the report (the downloadable-video button was removed) and the **Share button** is now a prominent action.
+- **v0.8.0** — **Modern CLI banner** (block-pixel `REFCHECKER` wordmark, gradient, grouped command / environment / help panels); the AI-detection panel and **Top AI / Human sentences** are now **collapsible**; refreshed README with animated SVGs.
+- **v0.7.99** — **Detection run-mode**: run **references only**, **AI detection only**, or **both**. In-app **citation** of the local detection model (desklib, Hugging Face). Animated README banners.
+- **v0.7.98** — **AI-detection visualizations** (confidence donut, AI/Mixed/Human pills, page-by-page bands, Top AI/Human sentences) · **Share this document** (self-contained HTML, publish link, video) · **3D Seen-References library graph** · document-viewer **zoom + find** · richer **author hover** cards · inline-**cited ✓ badge** · title-typo & "unknown mismatch" fixes.
+- **v0.7.96** — Upstream sync with [markrussinovich/refchecker](https://github.com/markrussinovich/refchecker) · sidebar **expand/collapse-all** for batches.
+
+See the [full release list](https://github.com/ArioMoniri/refchecker/releases) for every build.
+
+</details>
+
+---
+
 ## Contents
 
 - [Quick Start](#quick-start)
 - [Features](#features)
+- [Feature Matrix (Web / Desktop / CLI / API)](#feature-matrix-web--desktop--cli--api)
 - [Sample Output](#sample-output)
 - [Install](#install)
 - [Web UI](#web-ui)
@@ -139,8 +240,56 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
 | **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
 | **Corrections** | Auto-generates corrected BibTeX, plain-text, and bibitem entries for each error |
+| **Visual analysis** | **3D reference-library graph** (Obsidian-style), real per-paper **citation graph**, and a **native-feeling document viewer** with zoom + in-document find |
+| **Share & export** | **Self-contained HTML report**, **publish-to-web link** (GitHub Gist), an **animated video** walkthrough, and **RIS** export for Zotero / EndNote / Mendeley |
 | **Web UI** | Real-time progress, history sidebar, batch tracking, split extraction/hallucination LLM settings, export (Markdown/text/BibTeX), dark mode |
 | **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
+
+---
+
+## Feature Matrix (Web / Desktop / CLI / API)
+
+RefChecker ships in four access methods that share **one** verification engine
+(`ProgressRefChecker`). The table below shows where each capability is available.
+The **CLI** column lists the exact flag — these match `refchecker-webui check --help`
+([CLI guide](#cli) below). UI-interactive surfaces (in-app viewers, graphs, share
+video, author hovers) are **web/desktop-only** and are documented as such. For
+per-feature guides see [docs/FEATURES.md](docs/FEATURES.md); for multi-user setup
+see [docs/MULTIUSER.md](docs/MULTIUSER.md).
+
+Legend: ✅ available · — not applicable to that surface · 🌐 needs a hosted/multi-user server.
+
+| Capability | Web UI | Desktop (Tauri) | CLI | API | Notes |
+|---|:---:|:---:|:---:|:---:|---|
+| Reference verification (S2 / OpenAlex / CrossRef / DBLP / ACL) | ✅ | ✅ | ✅ | ✅ | Core engine; identical results across surfaces |
+| LLM extraction (Anthropic / OpenAI / Google / Azure / vLLM) | ✅ | ✅ | ✅ `--llm-provider` | ✅ | `--no-llm` for regex/structural only |
+| Hallucination detection (deep web search) | ✅ | ✅ | ✅ `--check-hallucinations` | ✅ | Needs a web-search-capable provider; see [Hallucination Detection](#hallucination-detection) |
+| Inline-citation numbering/ordering check | ✅ | ✅ | ✅ `--check-citation-order` | ✅ | Scheme-aware; **abstains** when unclear |
+| Retraction screening (OpenAlex) | ✅ | ✅ | ✅ `--check-retractions` | ✅ | Flags only references OpenAlex reports retracted |
+| Gap-finder / co-citation suggestions | ✅ | ✅ | ✅ `--suggest-missing` | ✅ | OpenAlex-resolved real works only |
+| Enrichment (counts · abstract · claim/TL;DR · funding · author metrics incl. ORCID · h-index) | ✅ | ✅ | ✅ on by default (`--no-enrich`) | ✅ | Mirrors the web/API default |
+| Add-to-reference-list (dedup + renumbered list + tracked PDF diff) | ✅ | ✅ | — | — | Interactive editing surface |
+| AI-generated-text detection (opt-in, advisory) | ✅ | ✅ | ✅ `--ai-detection {local,api}` + `--ai-detection-consent` | ✅ | Opt-in + consent required; never proof of misconduct |
+| Multi-detector compare + checkbox export (RAID-informed roster) | ✅ | ✅ | ✅ `--detectors key1,key2` · `--list-detectors` | ✅ | Per-detector scores shown honestly; no synthetic ensemble; uninstalled ⇒ abstains |
+| Local databases for offline / faster verification | ✅ | ✅ | ✅ `--database-dir` / `--s2-db` / … | ✅ | Same resolver across surfaces |
+| Structured machine-readable output | ✅ | ✅ | ✅ `--json` | ✅ (JSON responses) | Progress to **stderr**, JSON to **stdout** |
+| Bulk / batch checking | ✅ | ✅ | ✅ (`academic-refchecker --paper-list` / `--openreview`) | ✅ | See [Bulk Checking](#bulk-checking) |
+| Native PDF viewers (find · in-PDF citation links · color coding · pinch-zoom) | ✅ | ✅ | — | — | Interactive UI surface (R02/R28/R42) |
+| Seen-library graphs (radial + Obsidian-style 3D) + per-paper citation graph | ✅ | ✅ | — | — | Interactive UI surface |
+| Similar papers + "Cites & Refs" + common-works view | ✅ | ✅ | — | — | Interactive UI surface |
+| Per-reference chat (full-text grounded, TL;DR fallback) + Summarize | ✅ | ✅ | — | — | Separate model selection per feature |
+| Share / export (HTML · Markdown · PDF · DOCX · RIS · video) | ✅ | ✅ | — | — | Interactive share surface; CLI uses `--report-file`/`--report-format` |
+| Author / journal hover cards (h-index · ORCID · guidelines) | ✅ | ✅ | — | — | Interactive UI surface |
+| Live token / $ telemetry per LLM flow (R47) | ✅ | ✅ | — | ✅ (per-request usage) | UI meter is web/desktop; usage is returned by the API |
+| Accounts · Teams · realtime shared-batch presence (R26/R27) | 🌐 | 🌐 | — | 🌐 | Opt-in multi-user mode; see [Multi-User Server](#multi-user-server-oauth) |
+| Support menu (email + open a GitHub issue) | ✅ | ✅ | — | — | In-app header menu |
+
+> **Single-user vs multi-user.** Web/Desktop/CLI all run **single-user/local by
+> default** — no login, no team, no presence. Accounts, Teams, and shared-batch
+> presence light up only when you enable multi-user mode (set `REFCHECKER_MULTIUSER=true`
+> **and** configure an OAuth provider, or use the in-app **Accounts & Teams** form
+> with hot-reload). The CLI is always single-user and never makes a team/collaboration
+> claim. Full setup: [docs/MULTIUSER.md](docs/MULTIUSER.md).
 
 ---
 
@@ -148,10 +297,31 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 
 ### Web UI
 
-<!-- screenshot: webui-main — main UI showing a completed check with stats badges and reference cards -->
-![RefChecker Web UI](assets/webui.png)
+A completed check — summary health, the 2×2 article-tools grid (retractions · gap-finder · citation-numbering · chat & summarize), and AI-generated-text detection with a per-page breakdown:
 
-### CLI — Single Paper
+<!-- screenshot: webui-main — completed check: stats badges, 2×2 action grid, AI-detection -->
+![RefChecker — completed check overview](assets/webui.png)
+
+Per-reference verification and enrichment — matched database, verified/DOI links, citation counts, and the Additional-Info bar (abstract · claim · topics · full link · add-to-library):
+
+<!-- screenshot: webui-references — a reference card with verification + enrichment -->
+![RefChecker — reference verification detail](assets/webui-references.png)
+
+### CLI — Startup banner
+
+Running the CLI prints an environment + capabilities banner (colourised on a TTY,
+plain when piped). `--help` lists the full options and examples.
+
+<p align="center">
+  <img alt="RefChecker CLI startup banner" src="assets/cli-banner.svg" width="760">
+</p>
+
+<p align="center">
+  <sub>The banner prints to <strong>stderr</strong> (so machine-readable stdout like <code>--report-format json</code> stays clean). <code>NO_COLOR=1</code> disables colour · <code>FORCE_COLOR=1</code> forces it.</sub>
+</p>
+
+<details>
+<summary><strong>CLI output — single-paper scan</strong> (errors, warnings, summary)</summary>
 
 ```
 📄 Processing: Attention Is All You Need
@@ -175,7 +345,10 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 ❌ Total errors: 55  ⚠️ Total warnings: 16  ❓ Unverified: 15
 ```
 
-### CLI — Hallucination Flagging
+</details>
+
+<details>
+<summary><strong>CLI output — hallucination flagging</strong></summary>
 
 ```
 [5/7] Efficient Neural Network Pruning Using Iterative Sparse Retraining
@@ -186,6 +359,10 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
          academic database. The paper does not appear in ICML 2019 proceedings,
          indicating it is probably fabricated.
 ```
+
+</details>
+
+> Full CLI usage, flags, and examples are in the [CLI](#cli) section below.
 
 ---
 
@@ -291,6 +468,9 @@ academic-refchecker --openreview aistats2025 --openreview-list-only --openreview
 
 ### All CLI Options
 
+<details>
+<summary><strong>Show every flag</strong> (input, LLM, hallucination, AI detection, output, OpenReview)</summary>
+
 ```
 Input (choose one):
   --paper PAPER              ArXiv ID, URL, PDF, LaTeX, text, or BibTeX file
@@ -337,6 +517,62 @@ Output:
   --debug                    Verbose logging
 ```
 
+</details>
+
+### `refchecker-webui check` — single-paper checker (web-parity flags)
+
+The `refchecker-webui` command (installed with the `[webui]` extra) has two
+subcommands. With no subcommand it **serves** the Web UI / API (the historical
+behaviour); the `check` subcommand runs the **same** pipeline the web app uses
+(`ProgressRefChecker`) against a single paper from the terminal, exposing the
+web/API feature flags — hallucination check, inline-citation numbering/ordering,
+retraction screening, gap-finder suggestions, enrichment backfill, and opt-in
+AI-text detection. It reuses the real backend implementations (it never forks the
+verification, retraction, gap-finder, inline-citation, or AI-detection logic).
+
+```bash
+# Serve the Web UI / API (default — no subcommand needed)
+refchecker-webui                     # http://localhost:8000
+refchecker-webui serve --port 9000   # explicit subcommand form
+
+# Check a single paper from the terminal (examples match `check --help`)
+refchecker-webui check --paper 2406.01234
+refchecker-webui check --paper ./paper.pdf --json
+refchecker-webui check --paper ./refs.bib --check-retractions --suggest-missing
+refchecker-webui check --paper 2406.01234 --check-hallucinations \
+    --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
+refchecker-webui check --paper ./paper.pdf --ai-detection api \
+    --ai-detection-consent --ai-detection-key $PANGRAM_KEY
+
+# Multi-detector AI-text compare (only INSTALLED detectors run; rest abstain)
+refchecker-webui check --list-detectors            # roster: installed vs. available
+refchecker-webui check --paper ./paper.pdf \
+    --ai-detection local --ai-detection-consent \
+    --detectors desklib,e5-small-lora
+```
+
+**Structured output (`--json`).** A single JSON document is printed to **stdout**;
+all progress logging goes to **stderr**, so stdout stays machine-readable. The
+document always carries `paper_title`, `paper_source`, `source_type`, `summary`,
+and `references`, plus — only when you set the corresponding flag — `citation_order`
+(`--check-citation-order`), `retractions` (`--check-retractions`), `suggestions`
+(`--suggest-missing`), and `ai_detection` (`--ai-detection`).
+
+**Web/desktop-only — not on the CLI.** The native in-app PDF viewers and in-PDF
+citation hyperlinks, the seen-library / similar-papers 3D graphs, the shareable
+per-check "video", and the author hover/pin profile cards are interactive UI
+surfaces, available only in the Web UI and the desktop (Tauri) build. The CLI
+makes no team / collaboration claim — it is always single-user/local.
+
+> **Honesty notes (same as `--help`).** No fabrication — every author / paper /
+> DOI / count comes from a real resolved source, and checks **abstain** rather than
+> emit a wrong badge. Cross-source enrichment backfill is **on by default** (pass
+> `--no-enrich` to opt out). AI-generated-text detection is **opt-in and advisory
+> only** (never proof of misconduct) — it requires `--ai-detection` plus an explicit
+> `--ai-detection-consent` flag.
+
+Run `refchecker-webui check --help` for the full, authoritative flag list.
+
 ---
 
 ## Hallucination Detection
@@ -382,15 +618,48 @@ Hallucination assessments appear inline in CLI output, in Web UI reference cards
 
 > **Opt-in and advisory only.** AI-text detection is unreliable on academic, technical, and non-native-English writing, and on human text polished with AI. RefChecker frames every result as a low/medium/high *likelihood band* with a permanent disclaimer — **never** a binary verdict or proof of misconduct, and never a basis for an accusation, grade, or decision. Below ~300 words, or on equation/code/citation-heavy passages, it abstains (`inconclusive`).
 
-When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. If both reference checking and AI detection are on, they run **in parallel**. Results show a band + score, an optional list of advisory flagged passages, and the engine/model used.
+When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. Results include a **confidence donut**, **AI / Mixed / Human** probability pills, a **page-by-page** breakdown, **Top AI / Top Human** sentence lists, and advisory **flagged passages** you can open highlighted in the document — alongside the engine/model used and a permanent disclaimer.
+
+**Run mode.** Settings → *Run mode* controls what a check actually runs:
+
+| Mode | Reference checking | AI detection |
+|------|:---:|:---:|
+| **References only** (turn AI detection off) | ✅ | — |
+| **Reference check + AI detection** | ✅ | ✅ (runs in parallel) |
+| **AI detection only** | — (extraction & verification skipped) | ✅ |
 
 ### Detection engines (pick one in Settings)
 
 | Engine | What it is | Cost | Notes |
 |--------|-----------|------|-------|
-| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via ONNX/Transformers | Free | One-time download (managed in Settings); calibrated, reproducible; no data leaves your machine |
+| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via Transformers + PyTorch | Free | One-time model **and** runtime download, both installable from Settings → AI Detection; calibrated, reproducible; no data leaves your machine |
 | **LLM judge** | Reuses your configured LLM provider (OpenAI/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
 | **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
+
+The local model needs an inference runtime (`torch` + `transformers`) that is **not** bundled, to keep the desktop app small. Click **Install runtime** under Settings → AI Detection to fetch it on demand (installed into the app's data folder and used without a restart), or install it yourself with `pip install torch transformers`. The LLM-judge and External-API engines need no runtime.
+
+### Multi-detector compare (RAID-leaderboard-informed roster)
+
+Beyond the default `desklib` model you can install **one or more** open-source detectors and run them **side-by-side**. Each detector's verdict is shown **on its own** — there is **no synthetic "ensemble truth"**; disagreement between detectors is surfaced as signal. Detectors are **installed on demand** (never bundled), and an **uninstalled detector abstains — it never reports a number**. Heavy Tier-2 metric/zero-shot detectors are listed for honesty but are **opt-in and not runnable in this build** (real size / RAM warnings are shown so you understand why).
+
+| Key | Model | Arch | Tier | Size | License | Note |
+|---|---|---|:---:|---|---|---|
+| `desklib` *(default)* | [`desklib/ai-text-detector-v1.01`](https://huggingface.co/desklib/ai-text-detector-v1.01) | DeBERTa-v3-large | 1 | ~870 MB | MIT | RAID leaderboard leader among open models |
+| `superannotate` | [`SuperAnnotate/ai-detector`](https://huggingface.co/SuperAnnotate/ai-detector) | RoBERTa-Large | 1 | ~1.4 GB | research/eval | [#1 open-source on RAID](https://www.superannotate.com/blog/ai-content-detection-superannotate) (late 2024) |
+| `e5-small-lora` | [`MayZhou/e5-small-lora-ai-generated-detector`](https://huggingface.co/MayZhou/e5-small-lora-ai-generated-detector) | e5-small + LoRA | 1 | ~130 MB | MIT | tiny/fast/CPU-friendly (~89% acc) |
+| `mage` | [`yaful/MAGE`](https://huggingface.co/yaful/MAGE) | Longformer | 1 | ~570 MB | Apache-2.0 | "Detection in the wild" (ACL 2024) |
+| `binoculars` | paired causal LMs | metric zero-shot | 2 (heavy) | ~14 GB | see models | best at low FPR; **opt-in, not runnable here** |
+| `fast-detectgpt` | GPT-Neo-2.7B scorer | metric zero-shot | 2 (heavy) | ~11 GB | see models | 340× faster DetectGPT; **opt-in, not runnable here** |
+| `radar` | [`TrustSafeAI/RADAR-Vicuna-7B`](https://huggingface.co/TrustSafeAI/RADAR-Vicuna-7B) | adversarial classifier | 2 (heavy) | ~13 GB | see card | robust to paraphrase; **opt-in, not runnable here** |
+
+Roster informed by the **[RAID benchmark (ACL 2024)](https://github.com/liamdugan/raid)** ([leaderboard](https://raid-bench.xyz/) · [paper](https://arxiv.org/abs/2405.07940)). In **Settings → AI Detection** you install/remove each detector (real size + license shown), run any subset, compare per-detector scores + per-sentence agreement, and **checkbox-export** only the detectors you select (MD / CSV / JSON). From the CLI:
+
+```bash
+refchecker-webui check --list-detectors            # roster: installed vs. available
+refchecker-webui check --paper ./paper.pdf \
+    --ai-detection local --ai-detection-consent \
+    --detectors desklib,e5-small-lora              # only INSTALLED run; rest abstain
+```
 
 ### Usage & cost tracking
 
@@ -593,7 +862,9 @@ docker compose pull       # Update to latest
 
 ### Multi-User Server (OAuth)
 
-By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required, and every request runs as a built-in local admin. Multi-user mode is **opt-in**: it turns on only when you both set `REFCHECKER_MULTIUSER=true` **and** configure at least one OAuth provider's client ID and secret (Google, GitHub, or Microsoft). Setting the flag alone — with no provider credentials — leaves the app in single-user mode and shows no login screen. Once at least one provider is configured, the Web UI gates behind a login page that renders a sign-in button **only** for the providers the server reports at `/api/auth/providers`, and every API route requires a valid session.
+
+If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -623,7 +894,8 @@ JWT_SECRET_KEY=<output from step 1>
 SITE_URL=https://<your-domain>
 HTTPS_ONLY=true
 
-# At least one OAuth provider
+# At least one OAuth provider — only providers whose ID *and* secret are set
+# appear as login buttons. Microsoft uses the MS_* prefix.
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 
@@ -632,6 +904,13 @@ GITHUB_CLIENT_SECRET=...
 
 MS_CLIENT_ID=...
 MS_CLIENT_SECRET=...
+
+# Optional — by default the callback URL is derived from SITE_URL as
+# <SITE_URL>/api/auth/callback/{google,github,microsoft}. Override per provider
+# only if you registered a different redirect URI:
+# GOOGLE_REDIRECT_URI=https://<your-domain>/api/auth/callback/google
+# GITHUB_REDIRECT_URI=https://<your-domain>/api/auth/callback/github
+# MS_REDIRECT_URI=https://<your-domain>/api/auth/callback/microsoft
 
 # Optional
 REFCHECKER_ADMINS=github:you  # comma-separated; first sign-in is auto-admin
@@ -765,7 +1044,14 @@ The downloader also writes a `latest_snapshot.txt` file next to the SQLite datab
 
 ## Documentation
 
-Detailed project documentation lives under [docs/README.md](docs/README.md), including the Web UI guide and testing guide.
+Detailed project documentation lives under [docs/README.md](docs/README.md):
+
+- [Feature guide & access-method matrix](docs/FEATURES.md) — per-feature guides
+  across web / desktop / CLI / API, with CLI usage examples that match
+  `refchecker-webui check --help`.
+- [Multi-user & Teams setup](docs/MULTIUSER.md) — enable accounts, Teams, and
+  presence from the in-app form (hot-reload) or via environment variables.
+- [Web UI guide](docs/web-ui.md) and [Testing guide](docs/testing.md).
 
 ---
 

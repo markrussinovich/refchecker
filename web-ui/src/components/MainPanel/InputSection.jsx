@@ -25,12 +25,28 @@ function getConfigApiKey(keyStore, config) {
 function aiDetectionValues() {
   const s = useAiDetectionStore.getState()
   if (!s.enabled) return null
-  const out = { ai_detection_enabled: true, ai_detection_backend: s.backend }
+  // detection_mode controls whether reference checking also runs. 'both' (the
+  // default) verifies references AND detects AI text; 'ai_only' skips reference
+  // verification entirely. With AI detection disabled the backend default
+  // ('both' + ai off) is already reference-checking-only.
+  const out = {
+    ai_detection_enabled: true,
+    ai_detection_backend: s.backend,
+    detection_mode: s.detectionMode === 'ai_only' ? 'ai_only' : 'both',
+  }
   if (s.backend === 'api') {
     out.ai_detection_service = s.service
     out.ai_detection_consent = !!s.consent
     const key = useKeyStore.getState().getKey(s.service)
     if (key) out.ai_detection_api_key = key
+  }
+  // R61 — the user's chosen multi-detector run set (local backend only). An
+  // empty list is omitted so the backend falls back to the single default
+  // detector (backward compatible — existing desklib users are unaffected).
+  // Sent as a repeated `ai_detection_detectors` form field → a List[str]
+  // server-side, mirroring the wrapper's `ai_detection_detectors` param.
+  if (s.backend === 'local' && Array.isArray(s.selectedDetectors) && s.selectedDetectors.length > 0) {
+    out.ai_detection_detectors = s.selectedDetectors
   }
   return out
 }
@@ -38,8 +54,15 @@ function aiDetectionValues() {
 function appendAiDetection(formData) {
   const v = aiDetectionValues()
   if (!v) return
-  Object.entries(v).forEach(([k, val]) =>
-    formData.append(k, typeof val === 'boolean' ? String(val) : val))
+  Object.entries(v).forEach(([k, val]) => {
+    // A list field (ai_detection_detectors) is appended once per element so the
+    // server receives a repeated form field → List[str].
+    if (Array.isArray(val)) {
+      val.forEach((item) => formData.append(k, String(item)))
+      return
+    }
+    formData.append(k, typeof val === 'boolean' ? String(val) : val)
+  })
 }
 
 /**
@@ -123,22 +146,6 @@ export default function InputSection() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
-      setPendingAutoSubmit(false)
-      handleSubmit()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
-
-  useEffect(() => {
-    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
-      setPendingAutoSubmit(false)
-      handleSubmit()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
 
   const handleSubmit = async () => {
     // Validate input
@@ -277,6 +284,25 @@ export default function InputSection() {
       setIsSubmitting(false)
     }
   }
+
+  // Auto-submit hooks live AFTER handleSubmit is declared so the effect
+  // closures don't reference it before its declaration (React Compiler flags
+  // use-before-declare even though the effect only fires post-mount).
+  useEffect(() => {
+    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
 
   const handleBulkSubmit = async () => {
     // Validate input

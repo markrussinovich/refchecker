@@ -8,8 +8,12 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { invokeTauri, isTauri, openExternal, getAppVersion } from '../../utils/tauriBridge'
 import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
+import EnableAccountsForm from './EnableAccountsForm'
 
 const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
+// Bug reports / feature requests go upstream to Mark Russinovich's repo;
+// release downloads stay on this fork (where the desktop builds are published).
+const ISSUES_URL = 'https://github.com/markrussinovich/refchecker'
 
 /**
  * Settings panel component - ChatGPT-style with left navigation
@@ -39,16 +43,40 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
+  // Accounts / Teams section needs the full auth picture (single vs multi-user,
+  // configured OAuth providers, and the signed-in user when there is one).
+  const authRequired = useAuthStore(state => state.authRequired)
+  const authProviders = useAuthStore(state => state.providers)
+  const authUser = useAuthStore(state => state.user)
+  const loginWithGoogle = useAuthStore(state => state.loginWithGoogle)
+  const loginWithGithub = useAuthStore(state => state.loginWithGithub)
+  const loginWithMicrosoft = useAuthStore(state => state.loginWithMicrosoft)
+  const authLogout = useAuthStore(state => state.logout)
 
   // AI-generated-text detection (opt-in, client preference + local model mgmt)
   const aiDetection = useAiDetectionStore()
   const [aiDetKey, setAiDetKey] = useState('')
+  const [aiDebugOpen, setAiDebugOpen] = useState(false)
+  const [modelUpdate, setModelUpdate] = useState(null)  // { update_available, ... }
   useEffect(() => {
     if (isSettingsOpen && activeSection === 'AI Detection') {
       aiDetection.fetchModelStatus()
+      aiDetection.fetchRuntimeStatus()
+      // R61 — also load the multi-detector registry so the manager can list the
+      // roster with real size/license/tier + per-detector install state.
+      aiDetection.fetchDetectors()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsOpen, activeSection])
+  // Off the status-poll hot path: when the section opens and the model IS
+  // installed, ask HF (once) whether a newer revision exists.
+  useEffect(() => {
+    if (isSettingsOpen && activeSection === 'AI Detection' && aiDetection.modelStatus?.installed) {
+      api.checkAIDetectionModelUpdate()
+        .then((r) => setModelUpdate(r?.data || null))
+        .catch(() => setModelUpdate(null))
+    }
+  }, [isSettingsOpen, activeSection, aiDetection.modelStatus?.installed])
   
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
@@ -120,7 +148,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       // status so the user can distinguish that case from a genuine
       // "up to date" answer.
       const update = await invokeTauri('plugin:updater|check')
-      // eslint-disable-next-line no-console
       console.info('[updater] check response:', update)
       const noUpdate = !update || update.available === false ||
         (update.version && appVersion && update.version === appVersion)
@@ -203,7 +230,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     const shortBody = diagReport
       ? '## What I expected\n\n\n## What happened\n\n\n<!-- Diagnostic report was copied to your clipboard. Paste it here (Cmd/Ctrl-V). -->\n'
       : '## What I expected\n\n\n## What happened\n\n'
-    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
+    const url = `${ISSUES_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
     openExternal(url)
   }
 
@@ -264,7 +291,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         const res = await api.getDatabaseDownloadStatus()
         if (cancelled) return
         setDbBuildStatus(res.data.tasks || {})
-      } catch (e) {
+      } catch {
         // settings panel can stay open in multiuser mode where caller isn't admin
       }
     }
@@ -306,7 +333,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const handleDbBuildCancel = async (dbName) => {
     try {
       await api.cancelDatabaseDownload(dbName)
-    } catch (e) {
+    } catch {
       // ignore — UI will reflect the next poll
     }
   }
@@ -406,7 +433,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   if (!isSettingsOpen) return null
 
   const notifyApiKeyStatusChanged = () => {
-    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('refchecker:api-keys-updated')) } catch { /* event dispatch is advisory; ignore failures */ }
   }
 
   const handleSettingChange = (key, value) => {
@@ -545,6 +572,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAIDetectionSection = () => {
     const ms = aiDetection.modelStatus
+    const rs = aiDetection.runtimeStatus
     const backend = aiDetection.backend
     const fmtMB = (b) => (b ? `${(b / (1024 * 1024)).toFixed(0)} MB` : '')
     const aiKeyName = aiDetection.service // 'pangram' | 'gptzero'
@@ -578,6 +606,35 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }}
           />
         </label>
+
+        {/* Run mode — what a check actually runs. Off = references only;
+            on splits into "both" or "AI text only" (skips reference checking). */}
+        {aiDetection.enabled && (
+          <div className="py-1">
+            <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Run mode</div>
+            <div className="text-xs mb-1.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+              Turn off “Detect AI-generated text” above for reference checking only.
+            </div>
+            {[
+              ['both', 'Reference check + AI detection', 'Verify the bibliography AND analyze the body text for AI-generated content.'],
+              ['ai_only', 'AI detection only', 'Skip reference extraction & verification — just analyze the body text. Faster when you only want the AI signal.'],
+            ].map(([id, label, desc]) => (
+              <label key={id} className="flex items-start gap-2 py-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="detection-run-mode"
+                  checked={(aiDetection.detectionMode || 'both') === id}
+                  onChange={() => aiDetection.setDetectionMode(id)}
+                  style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+                />
+                <span>
+                  <span style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+                  <span className="block text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{desc}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
 
         {/* Engine selector */}
         <div className="py-1">
@@ -614,10 +671,23 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                   {ms && ms.installed && `Installed${ms.size_bytes ? ` · ${fmtMB(ms.size_bytes)}` : ''} · ${ms.repo}`}
                   {ms && !ms.installed && ms.deps_available && 'Not downloaded yet.'}
                   {ms && !ms.installed && !ms.deps_available &&
-                    'Runtime not installed. Install onnxruntime + transformers (or torch + transformers), or use another engine.'}
+                    'Inference runtime not installed — install it below, or use the LLM-judge / API engine.'}
+                </div>
+                <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                  Model:{' '}
+                  <a
+                    href={`https://huggingface.co/${ms?.repo || 'desklib/ai-text-detector-v1.01'}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(`https://huggingface.co/${ms?.repo || 'desklib/ai-text-detector-v1.01'}`) } }}
+                    style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+                  >
+                    {ms?.repo || 'desklib/ai-text-detector-v1.01'}
+                  </a>
+                  {' '}— DeBERTa-v3 detector by Desklib (MIT), via Hugging Face.
                 </div>
                 {aiDetection.modelError && (
-                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.modelError}</div>
+                  <div className="text-xs mt-1 rounded p-2 whitespace-pre-wrap" style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{aiDetection.modelError}</div>
                 )}
               </div>
               <div className="flex gap-2">
@@ -645,6 +715,223 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 )}
               </div>
             </div>
+            {ms && ms.installed && modelUpdate?.update_available && !aiDetection.modelBusy && (
+              <div className="mt-2 flex items-center justify-between flex-wrap gap-2 rounded-lg p-2"
+                style={{ backgroundColor: 'var(--color-accent-bg, rgba(59,130,246,0.1))', border: '1px solid var(--color-accent, #3b82f6)' }}>
+                <div className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  A newer version of the detection model is available.
+                </div>
+                <button
+                  type="button"
+                  disabled={aiDetection.modelBusy}
+                  onClick={async () => {
+                    try {
+                      await aiDetection.deleteModel()
+                      await aiDetection.downloadModel()
+                      setModelUpdate(null)
+                    } catch { /* surfaced via aiDetection.modelError */ }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{ backgroundColor: accent, color: 'white' }}
+                >
+                  Update model
+                </button>
+              </div>
+            )}
+            {(aiDetection.modelBusy || (ms && ms.state === 'downloading')) && (
+              <div className="mt-2">
+                <div style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                  <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                </div>
+                <div className="text-[11px] mt-1 font-mono truncate" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                  {(ms && ms.message) || 'Downloading…'}
+                </div>
+              </div>
+            )}
+            {ms && !ms.deps_available && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Inference runtime</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  The local model needs <strong>torch + transformers</strong> (it ships safetensors). Install it
+                  here — a one-time download — or use the LLM-judge / API engine, which need no runtime.
+                </div>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <button
+                    type="button"
+                    disabled={aiDetection.runtimeBusy}
+                    onClick={() => aiDetection.installRuntime('torch')}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                    style={{ backgroundColor: accent, color: 'white', opacity: aiDetection.runtimeBusy ? 0.5 : 1, cursor: aiDetection.runtimeBusy ? 'not-allowed' : 'pointer' }}
+                  >
+                    {aiDetection.runtimeBusy ? 'Installing runtime…' : 'Install runtime'}
+                  </button>
+                  <span className="text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                    {aiDetection.runtimeBusy
+                      ? (rs && rs.message) || 'Downloading torch + transformers…'
+                      : 'Large one-time download (torch).'}
+                  </span>
+                </div>
+                {(aiDetection.runtimeBusy || (rs && rs.state === 'installing')) && (
+                  <div className="mt-2">
+                    <div style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                      <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                    </div>
+                    {rs && rs.log && rs.log.length > 0 && (
+                      <div className="text-[11px] mt-1 font-mono truncate" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                        {rs.log[rs.log.length - 1]}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {aiDetection.runtimeError && (
+                  <div className="text-xs mt-2 rounded p-2 whitespace-pre-wrap" style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{aiDetection.runtimeError}</div>
+                )}
+                {rs && rs.is_frozen && (
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                    Installs into the app’s data folder. If it can’t install here, run{' '}
+                    <code>pip install torch transformers</code> in your environment instead.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* R61 — Multi-detector manager. Lists the DETECTOR_REGISTRY roster with
+            real size/license/tier; install/remove per detector with progress;
+            Tier-2 (heavy) rows show the explicit resource warning and are
+            disabled when unavailable. The single-model card above is preserved
+            for existing users; this is additive. */}
+        {backend === 'local' && aiDetection.detectors.length > 0 && (
+          <div className="rounded-lg p-3 border space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Detectors</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                Install one or more open-source detectors and run them side by side. Each shows its
+                own verdict — there is no blended “ensemble” score. Heavy (Tier-2) detectors download
+                multi-GB models and need extra RAM.
+              </div>
+              {/* R61 — run-selection helper. Only INSTALLED detectors can be put
+                  into the run set (the store guards this); an empty selection
+                  falls back to the single default detector for existing users. */}
+              <div className="text-xs mt-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {aiDetection.selectedDetectors.length > 0
+                  ? `Next check will run: ${aiDetection.selectedDetectors.join(', ')}`
+                  : 'Tick “Run” on the installed detectors you want the next check to use. With none ticked, the default detector runs.'}
+              </div>
+            </div>
+            <ul className="space-y-2">
+              {aiDetection.detectors.map((d) => {
+                const busy = !!aiDetection.detectorBusy[d.key]
+                const err = aiDetection.detectorError[d.key]
+                const heavy = d.tier === 2 || d.heavy
+                // A heavy detector with no runtime/host support is disabled.
+                const unavailable = d.available === false
+                const sizeLabel = d.size_bytes ? fmtMB(d.size_bytes) : (d.size || null)
+                return (
+                  <li key={d.key} className="rounded-lg p-2.5 border"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                            {d.label || d.key}
+                          </span>
+                          {heavy && (
+                            <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded"
+                              style={{ color: 'var(--color-warning)', border: '1px solid var(--color-warning)' }}>
+                              Tier 2 · heavy
+                            </span>
+                          )}
+                          {d.installed && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                              style={{ color: 'var(--color-success)', border: '1px solid var(--color-success)' }}>
+                              Installed
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                          {[d.arch, sizeLabel, d.license].filter(Boolean).join(' · ')}
+                        </div>
+                        {d.repo && (
+                          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                            <a
+                              href={`https://huggingface.co/${d.repo}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(`https://huggingface.co/${d.repo}`) } }}
+                              style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'underline' }}
+                            >
+                              {d.repo}
+                            </a>
+                          </div>
+                        )}
+                        {d.raid_note && (
+                          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{d.raid_note}</div>
+                        )}
+                        {heavy && (
+                          <div className="text-xs mt-1 rounded p-1.5"
+                            style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)' }}>
+                            ⚠ Heavy detector — {sizeLabel ? `${sizeLabel} download, ` : ''}large RAM footprint. Opt-in only.
+                          </div>
+                        )}
+                        {err && (
+                          <div className="text-xs mt-1 rounded p-1.5 whitespace-pre-wrap"
+                            style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{err}</div>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        {/* R61 — per-detector "Run" toggle (installed only). Adds
+                            the detector to the multi-run set threaded into the
+                            next check request as ai_detection_detectors. */}
+                        {d.installed && (
+                          <label className="flex items-center gap-1.5 text-xs cursor-pointer"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title="Run this detector on the next check (side-by-side with the others ticked)">
+                            <input
+                              type="checkbox"
+                              data-testid={`run-check-${d.key}`}
+                              aria-label={`Run ${d.label || d.key} on the next check`}
+                              checked={aiDetection.selectedDetectors.includes(d.key)}
+                              onChange={() => aiDetection.toggleSelectedDetector(d.key)}
+                              style={{ width: 14, height: 14, accentColor: accent }}
+                            />
+                            Run
+                          </label>
+                        )}
+                        {d.installed ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => aiDetection.removeDetectorByKey(d.key)}
+                            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+                          >
+                            {busy ? 'Removing…' : 'Remove'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy || unavailable}
+                            title={unavailable ? 'This detector is not available on your system.' : undefined}
+                            onClick={() => aiDetection.installDetectorByKey(d.key)}
+                            className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                            style={{ backgroundColor: accent, color: 'white', opacity: (busy || unavailable) ? 0.5 : 1, cursor: (busy || unavailable) ? 'not-allowed' : 'pointer' }}
+                          >
+                            {busy ? 'Installing…' : (unavailable ? 'Unavailable' : 'Install')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {busy && (
+                      <div className="mt-2" style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                        <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         )}
 
@@ -718,6 +1005,80 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </div>
         )}
 
+        {/* Debugger: runtime install log + recent detection-run events. */}
+        <div className="pt-2 mt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+          <button
+            type="button"
+            onClick={() => { const n = !aiDebugOpen; setAiDebugOpen(n); if (n) aiDetection.fetchDiagnostics() }}
+            className="flex items-center gap-1 text-xs font-medium"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <span style={{ display: 'inline-block', width: 10 }}>{aiDebugOpen ? '▾' : '▸'}</span>
+            Diagnostics &amp; logs
+          </button>
+          {aiDebugOpen && (
+            <div className="mt-2 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Runtime: {rs ? `${rs.deps_available ? 'ready' : (rs.state || 'idle')}${rs.installed_variant ? ` · ${rs.installed_variant}` : ''}${rs.is_frozen ? ' · desktop' : ''}` : '…'}
+                  {rs && rs.target ? ` · ${rs.target}` : ''}
+                </span>
+                <button type="button" onClick={() => aiDetection.fetchDiagnostics()} className="text-xs underline" style={{ color: accent }}>
+                  Refresh
+                </button>
+              </div>
+              <div>
+                <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Install log</div>
+                <pre
+                  className="text-[11px] rounded p-2 overflow-auto m-0"
+                  style={{ maxHeight: 170, backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                >
+                  {rs && rs.log && rs.log.length ? rs.log.join('\n') : 'No install log yet — click “Install runtime”.'}
+                </pre>
+              </div>
+              {(() => {
+                const mlog = (ms && ms.log && ms.log.length)
+                  ? ms.log
+                  : ((aiDetection.diagnostics && aiDetection.diagnostics.model && aiDetection.diagnostics.model.log) || [])
+                return (
+                  <div>
+                    <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Model download log</div>
+                    <pre
+                      className="text-[11px] rounded p-2 overflow-auto m-0"
+                      style={{ maxHeight: 140, backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                    >
+                      {mlog.length ? mlog.join('\n') : 'No model download log yet — click “Download model”.'}
+                    </pre>
+                  </div>
+                )
+              })()}
+              <div>
+                <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Recent detection runs</div>
+                {(() => {
+                  const evs = (aiDetection.diagnostics && aiDetection.diagnostics.events) || []
+                  if (!evs.length) {
+                    return <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>No detection runs recorded yet (run a check with AI detection on).</div>
+                  }
+                  return (
+                    <div className="text-[11px] font-mono space-y-0.5 rounded p-2 overflow-auto" style={{ maxHeight: 170, backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {evs.map((e, i) => (
+                        <div key={i} style={{ color: 'var(--color-text-secondary)' }}>
+                          {e.ts} · {e.backend} · <strong>{e.outcome}</strong>
+                          {e.score != null ? ` (${Number(e.score).toFixed(2)})` : ''}
+                          {e.reason ? ` · ${e.reason}` : ''}
+                          {e.word_count != null ? ` · ${e.word_count}w` : ''}
+                          {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
+                          {e.error ? ` · ${e.error}` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Attribution for the open-source detectors / services used. */}
         <div className="pt-2 mt-1 border-t text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
           <div className="mb-1">Detection sources & credits:</div>
@@ -745,6 +1106,122 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     )
   }
 
+  // Accounts & Teams — the single, always-reachable entry point for sign-in
+  // and team management, even in the single-user desktop build. Multi-user mode
+  // (OAuth login + Teams) is enabled server-side via REFCHECKER_MULTIUSER=true
+  // plus OAuth client credentials; the frontend cannot flip that flag, so when
+  // it is off we explain exactly how to turn it on instead of faking a session.
+  const accent = 'var(--color-accent, #3b82f6)'
+
+  const PROVIDER_META = {
+    google: { label: 'Continue with Google', login: loginWithGoogle },
+    github: { label: 'Continue with GitHub', login: loginWithGithub },
+    microsoft: { label: 'Continue with Microsoft', login: loginWithMicrosoft },
+  }
+
+  const renderAccountsSection = () => {
+    // State A — auth enabled AND signed in: show the account + a path to Teams.
+    if (authRequired && authUser) {
+      const initials = (authUser.name || authUser.email || '?')
+        .split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 py-2">
+            {authUser.avatar_url ? (
+              <img src={authUser.avatar_url} alt={authUser.name || 'User avatar'} className="w-12 h-12 rounded-full object-cover" />
+            ) : (
+              <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold text-white" style={{ backgroundColor: accent }}>
+                {initials}
+              </div>
+            )}
+            <div className="min-w-0">
+              {authUser.name && <div className="font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>{authUser.name}</div>}
+              {authUser.email && <div className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>{authUser.email}</div>}
+              {authUser.provider && <div className="text-xs mt-0.5 capitalize" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>Signed in via {authUser.provider}</div>}
+            </div>
+          </div>
+
+          <div className="py-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Teams</div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Create a team and add or remove members from the <strong>Teams</strong> menu in the header
+              (the people icon, top-right). Members share checks and a team activity log.
+            </div>
+          </div>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => { authLogout(); closeSettings() }}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+              style={{ borderColor: 'var(--color-error, #ef4444)', color: 'var(--color-error, #ef4444)' }}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // State B — auth enabled but signed out: surface the OAuth sign-in buttons
+    // right here so the user can reach login without hunting for it.
+    if (authRequired && authProviders.length > 0) {
+      return (
+        <div className="space-y-4">
+          <div>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Sign in</div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Accounts are enabled on this server. Sign in to sync your checks and manage teams.
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 max-w-sm">
+            {authProviders.map((p) => {
+              const meta = PROVIDER_META[p]
+              if (!meta) return null
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => meta.login()}
+                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border"
+                  style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                >
+                  {meta.label}
+                </button>
+              )
+            })}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--color-text-muted, #9ca3af)' }}>
+            After signing in, the <strong>Teams</strong> menu appears in the header for creating teams and managing members.
+          </div>
+        </div>
+      )
+    }
+
+    // State C — single-user desktop default: accounts/teams are off. Be honest
+    // about why, and explain exactly how to enable them (no fake logged-in state).
+    return (
+      <div className="space-y-4">
+        <div
+          className="rounded-lg p-3 text-sm border"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-secondary)' }}
+        >
+          <strong style={{ color: 'var(--color-text-primary)' }}>You're in single-user mode.</strong>{' '}
+          This desktop build runs locally with no account — all your checks stay on this machine.
+          Sign-in (Google / GitHub / Microsoft) and Teams are <strong>opt-in</strong> and require enabling
+          multi-user mode on the server, so they're hidden by default.
+        </div>
+
+        <div>
+          <div className="font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>Enable accounts &amp; Teams</div>
+          {/* Actionable in-app enablement: enter OAuth creds + flip the switch,
+              the backend persists it and the app relaunches in multi-user mode. */}
+          <EnableAccountsForm accent={accent} repoUrl={REPO_URL} />
+        </div>
+      </div>
+    )
+  }
+
   const navItems = [
     { id: 'General', label: 'General', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -766,6 +1243,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     { id: 'AI Detection', label: 'AI Detection', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+      </svg>
+    )},
+    { id: 'Accounts', label: 'Accounts & Teams', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
       </svg>
     )},
   ]
@@ -1316,6 +1798,30 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Chat-with-PDF LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used to answer questions about an article, grounded only in its own text. Works with any configured provider.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="chat" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Summarize LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used to summarize an article, grounded only in its own text. Choose a different model from Chat if you prefer. Defaults to the Chat-with-PDF model until you pick one.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="summarize" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
           Key Storage
         </div>
         <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1554,14 +2060,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               <button
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left"
                 style={{
                   backgroundColor: activeSection === item.id ? 'var(--color-bg-tertiary)' : 'transparent',
                   color: activeSection === item.id ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                 }}
               >
-                {item.icon}
-                {item.label}
+                {/* Icon never shrinks; the label takes the rest and stays
+                    LEFT-aligned even when it wraps to two lines (e.g. "Accounts
+                    & Teams") instead of reading centered. */}
+                <span className="flex-none flex items-center">{item.icon}</span>
+                <span className="flex-1 text-left leading-snug">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -1581,9 +2090,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         {/* Right Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Header */}
-          <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-              {activeSection}
+          <div className="px-6 py-4 border-b text-left" style={{ borderColor: 'var(--color-border)' }}>
+            {/* Use the nav LABEL (e.g. "Accounts & Teams") not the section id
+                ("Accounts"), so the header matches the sidebar entry. */}
+            <h2 className="text-lg font-semibold text-left" style={{ color: 'var(--color-text-primary)' }}>
+              {navItems.find((n) => n.id === activeSection)?.label || activeSection}
             </h2>
           </div>
 
@@ -1602,6 +2113,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 {activeSection === 'LLM' && renderLLMSection()}
                 {activeSection === 'API Keys' && renderAPIKeysSection()}
                 {activeSection === 'AI Detection' && renderAIDetectionSection()}
+                {activeSection === 'Accounts' && renderAccountsSection()}
               </>
             )}
           </div>
