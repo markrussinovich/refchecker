@@ -6,16 +6,17 @@ import asyncio
 import time
 import uuid
 import os
+import re
 import shutil
 import sys
 import tempfile
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic.fields import FieldInfo
 from pydantic import BaseModel
@@ -35,13 +36,15 @@ if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
 
 import aiosqlite
 from .database import db, get_data_dir, get_logs_dir
-from .websocket_manager import manager
+from .websocket_manager import manager, presence
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
+from .cites_refs import fetch_cites_and_refs, normalize_mode as _normalize_overlap_mode
 from .auth import (
     SITE_URL,
     is_multiuser_mode,
+    reload_config as reload_auth_config,
     require_user,
     get_current_user,
     get_user_id_filter,
@@ -935,11 +938,20 @@ class CheckLabelUpdate(BaseModel):
 
 
 class BatchLabelUpdate(BaseModel):
-    batch_label: str
+    # Both optional so a caller can update only the label, only the team share,
+    # or both. ``team_id`` of ``None`` is "leave unchanged"; pass 0 to unshare
+    # (R26). ``batch_label`` of ``None`` leaves the label untouched.
+    batch_label: Optional[str] = None
+    team_id: Optional[int] = None
 
 
 class BatchUrlsRequest(BaseModel):
-    """Request model for batch URL submission"""
+    """Request model for batch URL submission.
+
+    Carries the same per-check configuration as the single-check endpoint —
+    the /api/check/batch handler reads all of these off the request, so they
+    must be declared here (previously only urls/batch_label were, which made
+    the handler raise AttributeError -> HTTP 500 on the first config read)."""
     urls: list[str]
     batch_label: Optional[str] = None
     llm_config_id: Optional[LLMConfigId] = None
@@ -958,6 +970,48 @@ class BatchUrlsRequest(BaseModel):
     ai_detection_api_key: Optional[str] = None
     ai_detection_consent: bool = False
     ai_detection_service: str = "pangram"
+    # R61: the FE's chosen multi-detector run-set. >1 key routes through
+    # multi_run.run_detectors (compare); empty/1 keeps the single-detector path.
+    ai_detection_detectors: Optional[List[str]] = None
+    detection_mode: str = "both"
+
+
+class TeamCreate(BaseModel):
+    """Request model for creating a team (issue #66)."""
+    name: str
+
+
+class CheckShareRequest(BaseModel):
+    """Request model for sharing a single check with a team (R26).
+
+    ``team_id`` of 0/None unshares the check (clears its team)."""
+    team_id: Optional[int] = None
+
+
+class TeamMemberAdd(BaseModel):
+    """Request model for adding a member to a team by email or user id."""
+    email: Optional[str] = None
+    user_id: Optional[int] = None
+    role: str = "member"
+    llm_provider: str = "anthropic"
+    llm_model: Optional[str] = None
+    hallucination_config_id: Optional[LLMConfigId] = None
+    hallucination_provider: Optional[str] = None
+    hallucination_model: Optional[str] = None
+    use_llm: bool = True
+    api_key: Optional[str] = None
+    hallucination_api_key: Optional[str] = None
+    semantic_scholar_api_key: Optional[str] = None
+    paperclip_api_key: Optional[str] = None
+    ai_detection_enabled: bool = False
+    ai_detection_backend: str = "local"
+    ai_detection_api_key: Optional[str] = None
+    ai_detection_consent: bool = False
+    ai_detection_service: str = "pangram"
+    # R61: the FE's chosen multi-detector run-set. >1 key routes through
+    # multi_run.run_detectors (compare); empty/1 keeps the single-detector path.
+    ai_detection_detectors: Optional[List[str]] = None
+    detection_mode: str = "both"
 
 
 # Create FastAPI app
@@ -995,12 +1049,21 @@ async def _run_startup_tasks() -> None:
         logger.warning(f"Failed to load concurrency setting, using default: {e}")
         await init_limiter(DEFAULT_MAX_CONCURRENT)
 
+    # Reconcile orphaned in_progress checks left behind by a previous process
+    # (a run_check task that died — or the server restarted — between the last
+    # reference and the terminal 'completed' write, so the row stayed
+    # 'in_progress' forever and a polling FE never unstuck). At startup nothing
+    # is genuinely running yet, but pass the (empty) live map's ids anyway so
+    # this path is identical to the on-demand one. Each row is finalized to a
+    # status computed from its stored references (completed, or error if zero).
     try:
-        stale = await db.cancel_stale_in_progress()
-        if stale:
-            logger.info(f"Cancelled {stale} stale in-progress checks on startup")
+        active_ids = {meta.get("check_id") for meta in active_checks.values()
+                      if meta.get("check_id") is not None}
+        reconciled = await db.reconcile_stale_in_progress(active_check_ids=active_ids)
+        if reconciled:
+            logger.info(f"Reconciled {reconciled} orphaned in-progress checks on startup")
     except Exception as e:
-        logger.error(f"Failed to cancel stale checks: {e}")
+        logger.error(f"Failed to reconcile stale checks: {e}")
     logger.info("Database initialized")
 
 
@@ -1176,13 +1239,51 @@ async def _get_owned_check_or_404(check_id: int, current_user: UserInfo) -> dict
     return check
 
 
+async def _get_accessible_check_or_404(check_id: int, current_user: UserInfo) -> dict:
+    """Return a check if the requester owns it OR it is shared with a team the
+    requester belongs to (R26) — the single-check counterpart of
+    ``_get_accessible_batch_or_404``.
+
+    Used by the *read* endpoints so a team member can open a check shared with
+    them (e.g. from TeamMenu's "Shared checks" list) instead of getting a 404.
+    Mutating endpoints stay owner-scoped via ``_get_owned_check_or_404`` /
+    ``get_user_id_filter``. A non-owner non-member gets the same opaque 404 an
+    unknown check returns. In single-user mode (``user_id`` None) there is no
+    scoping, so this is equivalent to the owned variant."""
+    user_id = get_user_id_filter(current_user)
+    team_ids = await db.get_user_team_ids(current_user.id) if user_id is not None else []
+    check = await db.get_check_by_id(check_id, user_id=user_id, team_ids=team_ids)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+    return check
+
+
 async def _get_owned_batch_or_404(batch_id: str, current_user: UserInfo) -> tuple[dict, list[dict]]:
-    """Return a batch summary and checks only if they belong to the current user."""
+    """Return a batch summary and checks only if they belong to the current user.
+
+    Used by the *mutating* batch endpoints (cancel/delete) where only the owner
+    may act. Read endpoints use ``_get_accessible_batch_or_404`` (R26)."""
     user_id = get_user_id_filter(current_user)
     summary = await db.get_batch_summary(batch_id, user_id=user_id)
     if not summary:
         raise HTTPException(status_code=404, detail="Batch not found")
     checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    return summary, checks
+
+
+async def _get_accessible_batch_or_404(batch_id: str, current_user: UserInfo) -> tuple[dict, list[dict]]:
+    """Return a batch summary and checks if the requester is the owner OR a
+    member of the team the batch is shared with (R26).
+
+    In single-user mode (``user_id`` is None) there is no scoping, so this is
+    equivalent to the owned variant. A non-owner non-member gets 404 — the same
+    opaque response an unknown batch returns, so sharing isn't enumerable."""
+    user_id = get_user_id_filter(current_user)
+    team_ids = await db.get_user_team_ids(current_user.id) if user_id is not None else []
+    summary = await db.get_batch_summary_accessible(batch_id, user_id=user_id, team_ids=team_ids)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    checks = await db.get_batch_checks_accessible(batch_id, user_id=user_id, team_ids=team_ids)
     return summary, checks
 
 
@@ -1228,6 +1329,129 @@ _EXCHANGE_FNS = {
 async def auth_providers():
     """Return which OAuth providers are configured."""
     return {"providers": get_available_providers(), "multiuser": is_multiuser_mode()}
+
+
+def _auth_config_path() -> Path:
+    return get_data_dir() / "auth_config.env"
+
+
+def _read_auth_config_file() -> Dict[str, str]:
+    cfg: Dict[str, str] = {}
+    p = _auth_config_path()
+    try:
+        if p.exists():
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("auth_config read failed: %s", e)
+    return cfg
+
+
+@app.get("/api/auth/config")
+async def get_auth_config(current_user: UserInfo = Depends(require_user)):
+    """In-app multi-user / OAuth config STATE (presence only — never the secret
+    values). Powers Settings -> 'Enable accounts & Teams' so it can show what's
+    configured and whether a restart is pending."""
+    cfg = _read_auth_config_file()
+
+    def has(k: str) -> bool:
+        return bool(cfg.get(k) or os.environ.get(k))
+
+    want_multiuser = cfg.get("REFCHECKER_MULTIUSER", "").lower() in ("1", "true", "yes")
+    return {
+        "multiuser_active": is_multiuser_mode(),          # this running process
+        "multiuser_configured": want_multiuser,            # what's saved for next start
+        # R27: set_auth_config hot-reloads, so the running process matches the
+        # saved config — no restart needed when these already agree.
+        "needs_restart": want_multiuser != is_multiuser_mode(),
+        "providers": {
+            "google": has("GOOGLE_CLIENT_ID") and has("GOOGLE_CLIENT_SECRET"),
+            "github": has("GITHUB_CLIENT_ID") and has("GITHUB_CLIENT_SECRET"),
+            "microsoft": has("MS_CLIENT_ID") and has("MS_CLIENT_SECRET"),
+        },
+    }
+
+
+class _AuthConfigRequest(BaseModel):
+    """Multi-user + OAuth credentials saved from Settings. Secrets omitted (None)
+    are KEPT as-is so the UI never has to re-echo them."""
+    multiuser: bool = False
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    github_client_id: Optional[str] = None
+    github_client_secret: Optional[str] = None
+    ms_client_id: Optional[str] = None
+    ms_client_secret: Optional[str] = None
+
+
+@app.put("/api/auth/config")
+async def set_auth_config(payload: _AuthConfigRequest, current_user: UserInfo = Depends(require_user)):
+    """Persist the multi-user + OAuth config to a private app-data file that the
+    sidecar loads on its next start (server_entry.py). The desktop app then
+    relaunches to apply. Real-data only: nothing is invented; omitted secrets are
+    preserved. In multi-user mode this is restricted to admins."""
+    if is_multiuser_mode() and not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin only in multi-user mode")
+
+    existing = _read_auth_config_file()
+
+    def setk(k: str, v):
+        if v is not None and str(v).strip():
+            existing[k] = str(v).strip()
+
+    existing["REFCHECKER_MULTIUSER"] = "true" if payload.multiuser else "false"
+    setk("GOOGLE_CLIENT_ID", payload.google_client_id)
+    setk("GOOGLE_CLIENT_SECRET", payload.google_client_secret)
+    setk("GITHUB_CLIENT_ID", payload.github_client_id)
+    setk("GITHUB_CLIENT_SECRET", payload.github_client_secret)
+    setk("MS_CLIENT_ID", payload.ms_client_id)
+    setk("MS_CLIENT_SECRET", payload.ms_client_secret)
+
+    has_provider = any([
+        existing.get("GOOGLE_CLIENT_ID") and existing.get("GOOGLE_CLIENT_SECRET"),
+        existing.get("GITHUB_CLIENT_ID") and existing.get("GITHUB_CLIENT_SECRET"),
+        existing.get("MS_CLIENT_ID") and existing.get("MS_CLIENT_SECRET"),
+    ])
+    if payload.multiuser and not has_provider:
+        raise HTTPException(status_code=400, detail="Enabling accounts needs at least one provider's client id + secret")
+
+    lines = [
+        "# RefChecker multi-user / OAuth config — written by Settings -> Enable accounts & Teams.",
+        "# Loaded by the app's backend at startup. Delete this file to revert to single-user.",
+        "",
+    ] + [f"{k}={v}" for k, v in existing.items()]
+    p = _auth_config_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        try:
+            os.chmod(p, 0o600)  # restrict (best-effort)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not save config: {e}")
+
+    # R27: hot-reload the saved config into the running process so accounts /
+    # providers take effect without a backend restart. /api/auth/providers and
+    # the presence gate read live values, so they reflect the change at once.
+    try:
+        reload_auth_config(existing)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auth hot-reload failed (will apply on next restart): %s", e)
+
+    return {
+        "saved": True,
+        "multiuser": payload.multiuser,
+        "has_provider": bool(has_provider),
+        "multiuser_active": is_multiuser_mode(),
+        "providers": get_available_providers(),
+        # No restart needed now — kept for FE back-compat; it can drop its
+        # "please restart" banner since the change is already live.
+        "restart_required": False,
+    }
 
 
 @app.get("/api/auth/login/{provider}")
@@ -1336,6 +1560,191 @@ async def auth_me(current_user: UserInfo = Depends(require_user)):
     }
 
 
+# ---------------------------------------------------------------------------
+# Teams (issue #66): create a team, list my teams, add/list members.
+# All require_user; mutations are owner-gated.
+# ---------------------------------------------------------------------------
+
+async def _get_team_for_member_or_404(team_id: int, current_user: UserInfo) -> dict:
+    """Fetch a team the current user belongs to, or raise 404."""
+    team = await db.get_team(team_id)
+    if not team or not await db.is_team_member(team_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team
+
+
+@app.post("/api/teams")
+async def create_team(
+    payload: TeamCreate,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Create a team owned by the current user (who is also added as a member)."""
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Team name is required")
+    team = await db.create_team(name, current_user.id)
+    await db.log_team_activity(
+        team["id"], current_user.id, getattr(current_user, "email", None),
+        "created_team", detail=name,
+    )
+    return {"team": team}
+
+
+@app.get("/api/teams")
+async def list_teams(current_user: UserInfo = Depends(require_user)):
+    """List teams the current user owns or belongs to."""
+    return {"teams": await db.get_teams_for_user(current_user.id)}
+
+
+@app.get("/api/teams/{team_id}/members")
+async def list_team_members(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """List members of a team the current user belongs to."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"members": await db.get_team_members(team_id)}
+
+
+@app.get("/api/teams/{team_id}/activity")
+async def list_team_activity(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Team activity/audit log — who created the team, added or removed which
+    member, and who left. Visible to any member of the team."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"activity": await db.get_team_activity(team_id, limit=100)}
+
+
+@app.get("/api/teams/{team_id}/checks")
+async def list_team_checks(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """List checks shared with a team. Visible to any member of the team (R26).
+
+    Gated through ``_get_team_for_member_or_404`` so a non-member gets the same
+    opaque 404 a non-existent team returns."""
+    await _get_team_for_member_or_404(team_id, current_user)
+    return {"checks": await db.get_team_checks(team_id)}
+
+
+@app.post("/api/checks/{check_id}/share")
+async def share_check_with_team(
+    check_id: int,
+    payload: CheckShareRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Share (or unshare) a single check with a team (R26).
+
+    Only the check's owner may share it, and only with a team they belong to.
+    ``team_id`` of 0/None clears the share."""
+    user_id = get_user_id_filter(current_user)
+    # Owner-scoped fetch: a non-owner gets the same 404 an unknown check returns.
+    check = await db.get_check_by_id(check_id, user_id=user_id)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+
+    new_team_id: Optional[int] = payload.team_id if payload.team_id else None
+    if new_team_id is not None:
+        if user_id is None or not await db.is_team_member(new_team_id, current_user.id):
+            raise HTTPException(status_code=403, detail="You are not a member of that team")
+
+    await db.set_check_team(check_id, new_team_id)
+    return {"shared": new_team_id is not None, "team_id": new_team_id, "check_id": check_id}
+
+
+@app.post("/api/teams/{team_id}/members")
+async def add_team_member(
+    team_id: int,
+    payload: TeamMemberAdd,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Add a member by email or user id. Only the team owner may add members."""
+    team = await db.get_team(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the team owner can add members")
+
+    target = None
+    if payload.user_id is not None:
+        target = await db.get_user_by_id(payload.user_id)
+    elif payload.email:
+        target = await db.get_user_by_email(payload.email)
+    else:
+        raise HTTPException(status_code=400, detail="Provide an email or user_id")
+
+    if not target:
+        raise HTTPException(status_code=404, detail="No user found for that email or id")
+
+    role = (payload.role or "member").strip() or "member"
+    added = await db.add_team_member(team_id, target["id"], role)
+    if added:
+        await db.log_team_activity(
+            team_id, current_user.id, getattr(current_user, "email", None),
+            "added_member", target_user_id=target["id"],
+            target_email=target.get("email"), detail=role,
+        )
+    return {"added": added, "members": await db.get_team_members(team_id)}
+
+
+@app.delete("/api/teams/{team_id}/members/{user_id}")
+async def remove_team_member(
+    team_id: int,
+    user_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Remove a member from a team. Only the team owner may remove members, and
+    the owner cannot remove themselves this way (they must transfer or delete the
+    team / use the leave endpoint, which also forbids it)."""
+    team = await db.get_team(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the team owner can remove members")
+    if user_id == team["owner_user_id"]:
+        raise HTTPException(status_code=400, detail="The team owner cannot be removed")
+
+    target = await db.get_user_by_id(user_id)
+    removed = await db.remove_team_member(team_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="That user is not a member of this team")
+    await db.log_team_activity(
+        team_id, current_user.id, getattr(current_user, "email", None),
+        "removed_member", target_user_id=user_id,
+        target_email=(target or {}).get("email"),
+    )
+    return {"removed": True, "members": await db.get_team_members(team_id)}
+
+
+@app.post("/api/teams/{team_id}/leave")
+async def leave_team(
+    team_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Leave a team you belong to. The owner may not leave while other members
+    remain (they would orphan the team); a sole-owner can leave to empty it."""
+    team = await db.get_team(team_id)
+    if not team or not await db.is_team_member(team_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    if team["owner_user_id"] == current_user.id and await db.count_team_members(team_id) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="The owner cannot leave a team that still has other members",
+        )
+
+    removed = await db.remove_team_member(team_id, current_user.id)
+    if removed:
+        await db.log_team_activity(
+            team_id, current_user.id, getattr(current_user, "email", None),
+            "left_team", target_user_id=current_user.id,
+            target_email=getattr(current_user, "email", None),
+        )
+    return {"left": removed}
+
+
 @app.post("/api/auth/logout")
 async def auth_logout(
     request: Request = None,
@@ -1411,6 +1820,98 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.info(f"WebSocket disconnected: {session_id}")
 
 
+async def _can_access_presence_room(room_id: str, user_id: int) -> bool:
+    """Whether ``user_id`` may join a presence room (R26).
+
+    ``batch-{id}`` rooms are gated on owner-or-team-member access to that batch.
+    Any other room id keeps the prior authenticated-only behaviour (the caller
+    has already validated the JWT)."""
+    if not room_id.startswith("batch-"):
+        return True
+    batch_id = room_id[len("batch-"):]
+    if not batch_id:
+        return True
+    try:
+        team_ids = await db.get_user_team_ids(user_id)
+        summary = await db.get_batch_summary_accessible(
+            batch_id, user_id=user_id, team_ids=team_ids
+        )
+        return summary is not None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("presence room access check failed for %s: %s", room_id, e)
+        return False
+
+
+async def _broadcast_check_event_to_batch_room(check_id: int, event_type: str, data: dict) -> None:
+    """Mirror a per-check realtime event (reference_result / summary_update) to
+    the batch's presence room so every team member viewing it gets it live (R26).
+
+    Best-effort + cheap: skips the DB lookup entirely when nobody is present in
+    any batch room, and never raises into the check pipeline."""
+    if event_type not in ("reference_result", "summary_update"):
+        return
+    try:
+        info = await db.get_check_batch_team(check_id)
+        if not info:
+            return
+        batch_id = info.get("batch_id")
+        if not batch_id:
+            return
+        room_id = f"batch-{batch_id}"
+        if not presence.has_room(room_id):
+            return
+        await presence.broadcast_to_room(room_id, event_type, {**data, "check_id": check_id})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("batch-room broadcast failed for check %s: %s", check_id, e)
+
+
+@app.websocket("/api/ws/presence/{room_id}")
+async def presence_endpoint(websocket: WebSocket, room_id: str):
+    """Realtime presence for a shared room (batch/check id) — issue #67.
+
+    Authenticated users who open the same ``room_id`` see each other via
+    presence_join / presence_leave / presence_state messages. Presence requires
+    a real identity, so it only works when OAuth is configured (multi-user mode);
+    in single-user mode there is no "team" to show, so we close the socket.
+    """
+    if not get_available_providers():
+        await websocket.close(code=4003, reason="Presence requires multi-user mode")
+        return
+
+    token = websocket.cookies.get("rc_auth")
+    if not token:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    token_data = decode_access_token(token)
+    if not token_data:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    # Gate batch rooms on accessible-batch membership (R26): a user may only
+    # join a `batch-{id}` room if they own that batch or belong to the team it
+    # is shared with. Non-batch rooms (e.g. a bare check id) keep the prior
+    # authenticated-only behaviour.
+    if not await _can_access_presence_room(room_id, token_data.user_id):
+        await websocket.close(code=4003, reason="Not authorized for this room")
+        return
+
+    user = {
+        "user_id": token_data.user_id,
+        "name": token_data.name,
+        "email": token_data.email,
+    }
+    await websocket.accept()
+    await presence.join(websocket, room_id, user)
+    try:
+        # Keep the connection open; presence is driven by connect/disconnect.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await presence.leave(websocket, room_id)
+
+
 @app.post("/api/check")
 async def start_check(
     source_type: str = Form(...),
@@ -1433,6 +1934,10 @@ async def start_check(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    # R61: repeated form field — one value per chosen detector key. FastAPI
+    # collects the repeats into a list; >1 routes through the compare path.
+    ai_detection_detectors: Optional[List[str]] = Form(None),
+    detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -1473,6 +1978,7 @@ async def start_check(
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
         ai_detection_consent = _form_default_value(ai_detection_consent)
         ai_detection_service = _form_default_value(ai_detection_service)
+        detection_mode = _form_default_value(detection_mode)
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             _form_default_value(semantic_scholar_api_key)
         )
@@ -1668,7 +2174,9 @@ async def start_check(
                 ai_detection_api_key=ai_detection_api_key,
                 ai_detection_consent=ai_detection_consent,
                 ai_detection_service=ai_detection_service,
+                ai_detection_detectors=ai_detection_detectors,
                 paperclip_api_key=paperclip_api_key,
+                detection_mode=detection_mode,
             )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
@@ -1714,7 +2222,9 @@ async def run_check(
     ai_detection_api_key: Optional[str] = None,
     ai_detection_consent: bool = False,
     ai_detection_service: str = "pangram",
+    ai_detection_detectors: Optional[List[str]] = None,
     paperclip_api_key: Optional[str] = None,
+    detection_mode: str = "both",
 ):
     """
     Run reference check in background and emit progress updates
@@ -1762,7 +2272,12 @@ async def run_check(
             # Always include check_id so the frontend can reliably route messages
             data_with_id = {**data, "check_id": check_id}
             await manager.send_message(session_id, event_type, data_with_id)
-            
+
+            # R26: also fan live per-ref / summary updates out to the batch's
+            # presence room so team members collaborating on the same batch see
+            # them, not just the owner's session. No-op unless someone's present.
+            await _broadcast_check_event_to_batch_room(check_id, event_type, data)
+
             # Save reference results to DB as they come in
             if event_type == "reference_result":
                 accumulated_results.append(data)
@@ -1836,7 +2351,9 @@ async def run_check(
             ai_detection_api_key=ai_detection_api_key,
             ai_detection_consent=ai_detection_consent,
             ai_detection_service=ai_detection_service,
+            ai_detection_detectors=ai_detection_detectors,
             paperclip_api_key=paperclip_api_key,
+            detection_mode=detection_mode,
         )
 
         # Run the check
@@ -2006,6 +2523,17 @@ async def run_check(
             "check_id": check_id
         })
     finally:
+        # R54: release the per-request hallucination ThreadPoolExecutor (the
+        # 8-worker pool added in R04) so each check does not leak daemon threads.
+        # Best-effort + idempotent; runs after all progress/result emission, and
+        # `checker` may be unbound if construction failed early, so look it up
+        # defensively rather than assuming it exists.
+        _checker = locals().get('checker')
+        if _checker is not None:
+            try:
+                _checker.close()
+            except Exception:
+                pass
         active_checks.pop(session_id, None)
         await _release_user_check_slot(user_id)
 
@@ -2039,23 +2567,694 @@ async def get_check_detail(
     check_id: int,
     current_user: UserInfo = Depends(require_user),
 ):
-    """Get detailed results for a specific check"""
+    """Get detailed results for a specific check.
+
+    Read access is team-aware (R26): the owner, or any member of the team the
+    check is shared with, can open it. This is what makes TeamMenu's "Shared
+    checks" list openable for members instead of 404."""
     try:
-        user_id = get_user_id_filter(current_user)
-        check = await db.get_check_by_id(check_id, user_id=user_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_accessible_check_or_404(check_id, current_user)
 
         if check.get("status") == "in_progress":
             session_id = _session_id_for_check(check_id)
             if session_id:
+                # A genuinely running check — hand the FE its live session so
+                # it can keep streaming. NEVER reconcile this one.
                 check["session_id"] = session_id
+            else:
+                # Orphaned: in_progress but not in the live active_checks map.
+                # If it's also stale (refs done, or last activity too old),
+                # finalize it now so the polling FE unsticks on this very GET
+                # instead of looping forever. The active-ids guard (re-checked
+                # inside finalize_stale_check) keeps a check that started
+                # running between these two lines untouched.
+                active_ids = {m.get("check_id") for m in active_checks.values()
+                              if m.get("check_id") is not None}
+                try:
+                    stale = await db.find_stale_in_progress_checks(active_check_ids=active_ids)
+                    if any(int(r["id"]) == check_id for r in stale):
+                        finalized = await db.finalize_stale_check(check_id)
+                        if finalized:
+                            logger.info(
+                                "Reconciled orphaned in-progress check %s on read (-> %s)",
+                                check_id, finalized,
+                            )
+                            check = await _get_accessible_check_or_404(check_id, current_user)
+                except Exception as e:  # noqa: BLE001 — read must still return
+                    logger.warning("On-demand reconcile failed for check %s: %s", check_id, e)
         return check
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting check detail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _render_check_html(check_id: int, current_user: UserInfo) -> tuple[str, str]:
+    """Resolve a check and render it to standalone HTML. Returns (title, html).
+
+    Team-aware read (R26): a member of the team a check is shared with can export
+    it, mirroring the shared-check detail view (renders only the already-shared
+    references + verdicts, no owner-only raw assets)."""
+    check = await _get_accessible_check_or_404(check_id, current_user)
+    from backend.export import serialize_check_to_html
+    html_str = serialize_check_to_html(check)
+    title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
+    return title, html_str
+
+
+@app.get("/api/export/{check_id}/html")
+async def export_check_html(check_id: int, download: bool = True,
+                            current_user: UserInfo = Depends(require_user)):
+    """Self-contained HTML export of a check's results (references + verdicts +
+    AI-detection summary). The default download path drives 'Share → Download'."""
+    try:
+        title, html_str = await _render_check_html(check_id, current_user)
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{safe}.html"'
+        return HTMLResponse(content=html_str, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting check html: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not export this check as HTML.")
+
+
+class _PublishRequest(BaseModel):
+    adapter: str = "github_gist"   # 'github_gist'
+    token: str = ""                 # caller-supplied PAT (gist scope)
+    public: bool = False
+
+
+@app.get("/api/check/{check_id}/health")
+async def get_check_health(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Citation-health score for a check (same formula as the in-app badge)."""
+    try:
+        # Team-aware read (R26): the health badge must work in the shared-check
+        # detail view for a team member, not just the owner.
+        check = await _get_accessible_check_or_404(check_id, current_user)
+        from backend import export as _export
+        m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
+        return {"check_id": check_id, **m["health"], "stats": m["stats"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing health for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/retractions")
+async def get_check_retractions(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Flag cited references that OpenAlex reports as retracted (real signal only).
+
+    On-demand (one batched OpenAlex query). References with no DOI -> 'no_doi';
+    DOIs not found -> 'unknown'; never a fabricated retraction.
+    """
+    try:
+        # Team-aware read (R26): retraction check operates on the already-shared
+        # reference list, so a team member viewing the shared check may run it.
+        check = await _get_accessible_check_or_404(check_id, current_user)
+        from backend import export as _export
+        from backend.retraction import check_retractions
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        result = await asyncio.to_thread(check_retractions, refs)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking retractions for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _extract_paper_text_for_check(check_id: int, check: Dict[str, Any]) -> str:
+    """Best-effort extracted body text for a check (cache-first), for analyses
+    that need the full paper body. Mirrors get_paper_text's retrieval."""
+    try:
+        cache_dir = await _get_configured_cache_dir()
+        if cache_dir:
+            p = os.path.join(str(cache_dir), "paper_text", f"{check_id}.txt")
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                cached = await asyncio.to_thread(_read_cached_paper_text, p)
+                if cached and cached.strip():
+                    return cached
+    except Exception as _e:
+        logger.debug("citation-integrity cache read skipped: %s", _e)
+    source_type = check.get("source_type", "") or ""
+    paper_source = check.get("paper_source", "") or ""
+    from backend.refchecker_wrapper import _extract_pdf_text_cli_style
+    text = ""
+    if source_type == "file" and paper_source and os.path.exists(paper_source):
+        if paper_source.lower().endswith(".pdf"):
+            text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+        else:
+            try:
+                with open(paper_source, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except Exception:
+                text = ""
+    if not (text or "").strip() and paper_source:
+        try:
+            from refchecker.utils.cache_utils import get_cached_artifact_path
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                for artifact in ("ai_body.pdf", "paper.pdf"):
+                    pp = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                    if pp and os.path.exists(pp) and os.path.getsize(pp) > 0:
+                        text = await asyncio.to_thread(_extract_pdf_text_cli_style, pp, None)
+                        break
+        except Exception as _e:
+            logger.debug("citation-integrity pdf lookup failed: %s", _e)
+    return text or ""
+
+
+@app.get("/api/check/{check_id}/citation-integrity")
+async def get_citation_integrity(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Inline-citation numbering integrity (gaps / out-of-order / duplicates /
+    undefined / uncited), scheme-aware. Abstains when the scheme is unclear."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        text = await _extract_paper_text_for_check(check_id, check)
+        from backend import export as _export
+        from backend.inline_citation_checker import inline_citation_report
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        report = await asyncio.to_thread(inline_citation_report, text, refs)
+        report["has_text"] = bool((text or "").strip())
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking citation integrity for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --------------------------------------------------------------------------- #
+# EPIC-D: grounded Chat-with-PDF + Summarize                                   #
+# --------------------------------------------------------------------------- #
+# Grounding is REAL DATA ONLY: the extracted paper body (source='pdf'), or an
+# Abstract section sliced from that body as a fallback (source='abstract'). If
+# neither exists (source='none') the feature is disabled honestly — no LLM call.
+
+# Below this many chars of body text we treat the available text as an abstract
+# rather than a full paper (e.g. a .bbl/.bib source where only the abstract was
+# captured, or a very short note). The summarize/chat answer is then explicitly
+# flagged "from abstract only" in the UI.
+_CHAT_PDF_BODY_MIN_CHARS = 2500
+
+
+def _slice_abstract(text: str) -> str:
+    """Best-effort: return the Abstract section of a paper body, or ''.
+
+    Real-data only — slices the existing extracted text between an 'Abstract'
+    heading and the next section heading (Introduction / Keywords / 1 ...). No
+    fabrication; returns '' when no abstract block is recognizable.
+    """
+    if not text:
+        return ""
+    # NOTE: the leading (?im) applies to the WHOLE alternation, so a second
+    # inline (?i) mid-pattern is redundant AND illegal on Python 3.11+
+    # ("global flags not at the start of the expression"). Keep only the leading flags.
+    m = re.search(r'(?im)^\s*abstract\s*[:.\-]?\s*$|\babstract\b\s*[:.\-]', text)
+    if not m:
+        return ""
+    tail = text[m.end():]
+    stop = re.search(
+        r'(?im)^\s*(?:\d+\s*[.\)]?\s*)?(introduction|keywords|index terms|'
+        r'1\s+introduction|background|related work)\b',
+        tail,
+    )
+    abstract = tail[: stop.start()] if stop else tail[:2000]
+    return abstract.strip()
+
+
+async def _resolve_chat_grounding(check_id: int, check: Dict[str, Any]) -> tuple[str, str]:
+    """Resolve (grounding_text, source) for chat/summarize. Real data only.
+
+    source is one of: 'pdf' (full body), 'abstract' (only an abstract is
+    available), 'none' (nothing to ground on — caller disables the feature).
+    """
+    text = (await _extract_paper_text_for_check(check_id, check)) or ""
+    text = text.strip()
+    if len(text) >= _CHAT_PDF_BODY_MIN_CHARS:
+        return text, "pdf"
+    abstract = _slice_abstract(text)
+    if abstract:
+        return abstract, "abstract"
+    if text:
+        # Short body that is not a recognizable abstract block — still real
+        # extracted text; treat it as an abstract-grade snippet, honestly.
+        return text, "abstract"
+    return "", "none"
+
+
+class _ArticleSummaryRequest(BaseModel):
+    llm_config_id: Optional[LLMConfigId] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class _ArticleChatRequest(_ArticleSummaryRequest):
+    messages: List[Dict[str, str]] = []
+
+
+async def _resolve_article_assistant(req: _ArticleSummaryRequest, user_id: int, check_id=None):
+    """Resolve the Chat & Summarize provider via the shared LLM config path.
+
+    ``check_id`` attributes chat / summarize token spend to the per-check LLM
+    usage meter (the on-screen token/$ badge) so follow-up chat / summarize
+    calls tick the badge up live, with their own per-flow breakdown.
+    """
+    provider, model, api_key, endpoint = await _resolve_llm_config_for_request(
+        user_id=user_id,
+        use_llm=True,
+        llm_config_id=req.llm_config_id,
+        llm_provider=req.provider,
+        llm_model=req.model,
+        api_key=req.api_key,
+    )
+    if not provider:
+        raise HTTPException(status_code=400, detail="No LLM configured for Chat & Summarize.")
+    from backend.article_chat import ArticleAssistant
+    return ArticleAssistant(
+        provider=provider, api_key=api_key, endpoint=endpoint, model=model, check_id=check_id,
+    )
+
+
+@app.post("/api/check/{check_id}/summarize")
+async def summarize_article(
+    check_id: int,
+    req: _ArticleSummaryRequest = Body(default=_ArticleSummaryRequest()),
+    current_user: UserInfo = Depends(require_user),
+):
+    """Grounded one-shot summary of the article, from its own text only.
+
+    Honest by construction: when no paper text is available (source='none')
+    the feature is disabled and no LLM is called."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        grounding, source = await _resolve_chat_grounding(check_id, check)
+        if source == "none":
+            return {"summary": None, "source": "none",
+                    "detail": "No article text is available to summarize."}
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user), check_id=check_id)
+        if not assistant.available:
+            raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
+        result = await asyncio.to_thread(assistant.summarize, grounding, source)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error summarizing check {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/check/{check_id}/chat")
+async def chat_article(
+    check_id: int,
+    req: _ArticleChatRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Grounded chat over the article: answers ONLY from the document text.
+
+    The system prompt is prompt-injection-safe (document text is untrusted
+    data) and abstains ("the article does not state this") rather than guess.
+    When no paper text is available (source='none') the feature is disabled."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        grounding, source = await _resolve_chat_grounding(check_id, check)
+        if source == "none":
+            return {"answer": None, "source": "none",
+                    "detail": "No article text is available to chat about."}
+        if not req.messages:
+            raise HTTPException(status_code=400, detail="No message provided.")
+        assistant = await _resolve_article_assistant(req, get_user_id_filter(current_user), check_id=check_id)
+        if not assistant.available:
+            raise HTTPException(status_code=400, detail="LLM provider unavailable (missing API key?).")
+        result = await asyncio.to_thread(assistant.chat, req.messages, grounding, source)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in article chat for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --------------------------------------------------------------------------- #
+# R43: per-reference chat grounded in the reference's own fetched full text.   #
+# --------------------------------------------------------------------------- #
+# When a user opens Chat & Summarize for a CITED reference (not the host
+# paper), we try to fetch that reference's open-access PDF (arXiv → OpenAlex
+# best_oa_location / Unpaywall) and extract its real body text so chat can
+# answer from the document. HONESTY: only real fetched text is returned; on any
+# miss the FE keeps the existing TL;DR-only disclaimer verbatim — nothing is
+# fabricated. Retrieval is cached per identity (DOI/arXiv/title), soft-fails,
+# and is concurrency-bounded inside the retrieval module.
+
+
+class _ReferenceFulltextRequest(BaseModel):
+    # The minimal real identity of the cited reference, as the FE already holds
+    # it on each ReferenceCard: doi / arxiv_id / title (+ optional enrichment so
+    # an already-resolved oa_pdf_url can short-circuit the network).
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    title: Optional[str] = None
+    verified_doi: Optional[str] = None
+    enrichment: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/check/{check_id}/reference-fulltext")
+async def get_reference_fulltext(
+    check_id: int,
+    req: _ReferenceFulltextRequest = Body(default=_ReferenceFulltextRequest()),
+    current_user: UserInfo = Depends(require_user),
+):
+    """Retrieve a cited reference's REAL open-access full text for grounded chat.
+
+    Returns ``{source: 'pdf', grounding: <full_text>}`` when an OA PDF was
+    fetched + extracted, else ``{source: 'tldr', grounding: None}`` so the FE
+    keeps the existing TL;DR-only disclaimer. Never fabricates: on any miss it
+    returns the TL;DR fallback. The check ownership gate is reused so this
+    endpoint can't be used to fetch arbitrary PDFs anonymously.
+    """
+    try:
+        await _get_owned_check_or_404(check_id, current_user)
+        from refchecker.utils.reference_fulltext import get_reference_fulltext as _get_ft
+        reference = {
+            "doi": req.doi,
+            "verified_doi": req.verified_doi,
+            "arxiv_id": req.arxiv_id,
+            "title": req.title,
+            "enrichment": req.enrichment or {},
+        }
+        text, source = await asyncio.to_thread(_get_ft, reference)
+        if source == "pdf" and text:
+            return {"source": "pdf", "grounding": text}
+        # Honest fallback — no full text resolved; FE keeps the TL;DR disclaimer.
+        return {"source": "tldr", "grounding": None}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving reference full text for {check_id}: {e}", exc_info=True)
+        # Soft-fail to the TL;DR fallback rather than surfacing a 500 — the chat
+        # still works grounded in the reference metadata.
+        return {"source": "tldr", "grounding": None}
+
+
+@app.get("/api/check/{check_id}/citation-renumber-preview")
+async def get_citation_renumber_preview(
+    check_id: int,
+    insert_at: Optional[int] = None,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Read-only preview of how EXISTING inline numeric markers would renumber if
+    a new reference were inserted to take printed position ``insert_at`` (1-based;
+    omit to append). Abstains (empty shifts) whenever the inline-citation checker
+    abstains. Mutates nothing — the document/PDF is never edited."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        text = await _extract_paper_text_for_check(check_id, check)
+        from backend import export as _export
+        from backend.inline_citation_checker import renumber_preview
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        report = await asyncio.to_thread(renumber_preview, text, refs, insert_at)
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing renumber preview for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/corrected-reference-list")
+async def get_corrected_reference_list(
+    check_id: int,
+    style: str = "plaintext",
+    renumber: int = 1,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return the FULL reference list in *style* with new CONTIGUOUS numbers.
+
+    Used by the "Download new reference list" button after an Add/renumber: the
+    persisted references already carry contiguous ``index`` values (the write
+    path renumbers on insert), so with ``renumber=1`` (default) the list is
+    numbered 1..N in document order. Each row prefers the verified
+    ``corrected_reference`` and never fabricates fields. Mutates nothing."""
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        from backend import export as _export
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        chosen = style if style in _export.CITATION_STYLES else "plaintext"
+        rows = await asyncio.to_thread(
+            _export.serialize_reference_list, refs, chosen, bool(renumber)
+        )
+        text = "\n".join(f"[{row['number']}] {row['formatted']}" for row in rows)
+        return {
+            "style": chosen,
+            "renumbered": bool(renumber),
+            "count": len(rows),
+            "references": rows,
+            "text": text,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error building corrected reference list for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/gaps")
+async def get_check_gaps(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """"Did you miss these?" — works frequently co-cited by the bibliography's own
+    references but absent from it (OpenAlex). Advisory discovery aid, real data only."""
+    try:
+        # Team-aware read (R26): gap finder operates on the already-shared
+        # reference list, so a team member viewing the shared check may run it.
+        check = await _get_accessible_check_or_404(check_id, current_user)
+        from backend import export as _export
+        from backend.gap_finder import find_gaps
+        refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+        result = await asyncio.to_thread(find_gaps, refs)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding gaps for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/check/{check_id}/badge.svg")
+async def get_check_badge(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """A self-contained citation-health SVG badge (embeddable in reports/READMEs)."""
+    try:
+        # Team-aware read (R26): the badge mirrors the shared-check health score.
+        check = await _get_accessible_check_or_404(check_id, current_user)
+        from backend import export as _export
+        m = _export._model(check, corrections=False, sections=set(_export.ALL_SECTIONS))
+        h = m["health"]
+        svg = _export.render_badge_svg(h.get("score"), h.get("grade", "n/a"), h.get("color", "#6b7280"))
+        return Response(content=svg, media_type="image/svg+xml",
+                        headers={"Cache-Control": "no-cache"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering badge for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _export_filename(title: str, check_id: int, ext: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title or "")[:80].strip("-") or f"refchecker-{check_id}"
+    return f"{safe}.{ext}"
+
+
+def _parse_summary_param(summary: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Decode the FE's canonical ``buildReferenceSummary`` result from a query
+    param (URL-encoded JSON). R48: when the FE passes this through, the export's
+    headline counts + citation health are rendered IDENTICAL to the in-app
+    Summary badge / report card. Returns None for absent/garbage input so the
+    server-side computation is used as the fallback — never a 500."""
+    if not summary:
+        return None
+    try:
+        data = json.loads(summary)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        logger.debug("export: ignoring unparseable summary param")
+        return None
+
+
+@app.get("/api/export/{check_id}/file")
+async def export_check_file(check_id: int, fmt: str = "html", corrections: bool = False,
+                            include: Optional[str] = None, download: bool = True,
+                            summary: Optional[str] = None,
+                            current_user: UserInfo = Depends(require_user)):
+    """Multi-format export of one check: html | md | pdf | docx.
+
+    Query params drive the share-dialog controls:
+      * fmt          — output format.
+      * corrections  — include the stored corrected-reference suggestions.
+      * include      — comma list of sections to keep (summary,ai,issues,references).
+      * download     — attach a Content-Disposition filename.
+      * summary      — (R48) URL-encoded JSON of the FE's canonical
+                       buildReferenceSummary so the exported counts + citation
+                       health match the in-app Summary badge / report card
+                       exactly; falls back to server-side counts when absent.
+    """
+    try:
+        # Team-aware read (R26): a team member can export a shared check, matching
+        # the batch export path and the shared-check detail view (renders only the
+        # already-shared references/verdicts).
+        check = await _get_accessible_check_or_404(check_id, current_user)
+        from backend import export as _export
+        canonical_summary = _parse_summary_param(summary)
+        try:
+            content, media_type, ext = _export.render_export(
+                check, fmt, corrections=corrections, include=include,
+                summary=canonical_summary)
+        except _export.PdfEngineUnavailableError as e:
+            raise HTTPException(status_code=501, detail=str(e))
+        title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
+        headers = {}
+        if download:
+            headers["Content-Disposition"] = f'attachment; filename="{_export_filename(title, check_id, ext)}"'
+        return Response(content=content, media_type=media_type, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Don't leak the raw exception string to the client — log it server-side
+        # and return a stable, generic detail with the format that failed.
+        logger.error(f"Error exporting check {check_id} as {fmt}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not export this check as {fmt}.")
+
+
+@app.get("/api/export/batch/{batch_id}/file")
+async def export_batch_file(batch_id: str, fmt: str = "html", corrections: bool = False,
+                            include: Optional[str] = None, download: bool = True,
+                            current_user: UserInfo = Depends(require_user)):
+    """Multi-format batch report: one-page overview + each paper separately."""
+    try:
+        # Access already gated by team membership here, so per-check fetches
+        # are batch-scoped (not re-scoped to the requester) — a team member
+        # exporting an owner's shared batch needs the owner's check rows (R26).
+        summary, rows = await _get_accessible_batch_or_404(batch_id, current_user)
+        checks: list[dict] = []
+        for row in rows:
+            cid = row.get("id") or row.get("check_id")
+            if cid is None:
+                continue
+            full = await db.get_check_by_id(int(cid), user_id=None)
+            if full:
+                checks.append(full)
+        if not checks:
+            raise HTTPException(status_code=404, detail="No completed checks in this batch")
+        label = summary.get("batch_label") or f"Batch {batch_id[:8]}"
+        from backend import export as _export
+        try:
+            content, media_type, ext = _export.render_batch_export(
+                checks, fmt, corrections=corrections, include=include, label=label)
+        except _export.PdfEngineUnavailableError as e:
+            raise HTTPException(status_code=501, detail=str(e))
+        headers = {}
+        if download:
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label)[:80].strip("-") or "batch-report"
+            headers["Content-Disposition"] = f'attachment; filename="{safe}.{ext}"'
+        return Response(content=content, media_type=media_type, headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting batch {batch_id} as {fmt}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not export this batch report.")
+
+
+@app.post("/api/export/{check_id}/publish")
+async def publish_check(check_id: int, req: _PublishRequest,
+                        current_user: UserInfo = Depends(require_user)):
+    """Publish the HTML export to a web host and return a shareable URL.
+
+    Pluggable by adapter. The GitHub-Gist adapter needs a user-supplied token
+    (gist scope) and yields an htmlpreview.github.io link that renders the
+    standalone HTML. No credentials are persisted server-side here — the token
+    is used for this single request only.
+    """
+    # Guard the render: serialize_check_to_html (or resolving the check) can
+    # raise on a drifted/odd-shaped row, and this call used to sit OUTSIDE the
+    # per-adapter try/except — so any failure surfaced as a raw, detail-leaking
+    # 500 for EVERY share type. Wrap it into a stable, generic 500.
+    try:
+        title, html_str = await _render_check_html(check_id, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"publish_check render failed for {check_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not render this check for sharing.")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:80].strip("-") or f"refchecker-{check_id}"
+    import httpx
+
+    # Quick link: zero-config anonymous host (no domain, no token). The host
+    # (tmpfiles.org) rejects HTML uploads (anti-phishing), so we upload the PDF
+    # report instead — which renders/downloads for anyone with the URL and is
+    # ephemeral + public (surfaced as such in the UI). No credentials involved.
+    if req.adapter == "quick_link":
+        try:
+            user_id = get_user_id_filter(current_user)
+            check = await db.get_check_by_id(check_id, user_id=user_id)
+            if not check:
+                raise HTTPException(status_code=404, detail="Check not found")
+            from backend import export as _export
+            try:
+                pdf_bytes = await asyncio.to_thread(_export.render_check_to_pdf, check)
+            except _export.PdfEngineUnavailableError as e:
+                # No PDF engine in this bundle: quick-link needs a PDF, so tell
+                # the user to use Publish-to-web or download HTML/MD instead.
+                raise HTTPException(status_code=501, detail=str(e))
+            files = {"file": (f"{safe}.pdf", pdf_bytes, "application/pdf")}
+            async with httpx.AsyncClient() as client:
+                r = await client.post("https://tmpfiles.org/api/v1/upload", files=files, timeout=45.0)
+            if r.status_code not in (200, 201):
+                raise HTTPException(status_code=502, detail=f"Quick-link host unavailable (HTTP {r.status_code}). Try 'Publish to web', or download the report.")
+            url = ((r.json() or {}).get("data") or {}).get("url")
+            if not url:
+                raise HTTPException(status_code=502, detail="Quick-link host did not return a URL. Try 'Publish to web'.")
+            # tmpfiles serves the raw file at /dl/ ; rewrite so the PDF opens directly.
+            view = url.replace("tmpfiles.org/", "tmpfiles.org/dl/", 1) if "/dl/" not in url else url
+            return {"url": view, "page_url": url, "ephemeral": True, "adapter": "quick_link", "format": "pdf"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"quick_link publish failed: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail="Quick-link failed. Try 'Publish to web', or download the report.")
+
+    if req.adapter != "github_gist":
+        raise HTTPException(status_code=400, detail=f"Unknown publish adapter: {req.adapter}")
+    if not req.token:
+        raise HTTPException(status_code=400, detail="A GitHub token (gist scope) is required.")
+    payload = {
+        "description": f"RefChecker report — {title}",
+        "public": bool(req.public),
+        "files": {f"{safe}.html": {"content": html_str}},
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.github.com/gists",
+                json=payload,
+                headers={"Authorization": f"Bearer {req.token}",
+                         "Accept": "application/vnd.github+json"},
+                timeout=20.0,
+            )
+        if r.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"GitHub gist publish failed ({r.status_code}).")
+        gist = r.json()
+        raw_url = next((f.get("raw_url") for f in (gist.get("files") or {}).values() if f.get("raw_url")), None)
+        # htmlpreview renders the raw HTML in the browser.
+        preview = f"https://htmlpreview.github.io/?{raw_url}" if raw_url else gist.get("html_url")
+        return {"url": preview, "gist_url": gist.get("html_url"), "raw_url": raw_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"publish_check failed: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="Publish to web failed. Check your GitHub token, or download the report.")
 
 
 @app.get("/api/thumbnail/{check_id}")
@@ -2473,6 +3672,277 @@ async def get_preview_page(
     )
 
 
+class _LocateTarget(BaseModel):
+    text: str
+    span_index: Optional[int] = None
+    span_type: Optional[str] = "ai"   # 'ai' | 'citation'
+    band: Optional[str] = None
+    reason: Optional[str] = None
+    model_score: Optional[float] = None
+
+
+class _LocateRequest(BaseModel):
+    targets: List[_LocateTarget] = []
+
+
+@app.post("/api/preview/{check_id}/locate")
+async def locate_preview_spans(
+    check_id: int,
+    req: _LocateRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Locate target texts (AI-flagged passages / citation-context sentences)
+    inside this check's source PDF and return their page + normalized rects so
+    the frontend can highlight them ON the native page image. Returns
+    found=False per target that can't be located (never a fabricated position)."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        return {"available": False, "results": []}
+    targets = [t.model_dump() for t in (req.targets or [])]
+    if not targets:
+        return {"available": True, "results": []}
+    from backend.thumbnail import locate_text_spans_in_pdf
+    results = await asyncio.to_thread(locate_text_spans_in_pdf, pdf_path, targets)
+    return {"available": True, "results": results}
+
+
+@app.get("/api/preview/{check_id}/annotated-pdf")
+async def get_annotated_pdf(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return the source PDF with the AI-flagged passages highlighted as real
+    PDF annotations (PyMuPDF) — a downloadable native-highlighted artifact."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF source for this check")
+    ai = check.get("ai_detection") or {}
+    spans = ai.get("spans") if isinstance(ai, dict) else None
+    targets = [
+        {"text": s.get("quote") or "", "band": ai.get("band"), "model_score": s.get("model_score")}
+        for s in (spans or []) if isinstance(s, dict) and s.get("quote")
+    ]
+    if not targets:
+        raise HTTPException(status_code=404, detail="No flagged passages to annotate")
+    out_path = await asyncio.to_thread(_annotate_pdf_highlights, pdf_path, targets, str(cache_dir or ""), check_id)
+    if not out_path or not os.path.exists(out_path):
+        raise HTTPException(status_code=500, detail="Could not annotate PDF")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (check.get("paper_title") or f"refchecker-{check_id}"))[:80].strip("-")
+    return FileResponse(out_path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}-highlighted.pdf"'})
+
+
+def _annotate_pdf_highlights(pdf_path, targets, cache_dir, check_id):
+    """Add real PyMuPDF highlight annotations on the located target rects."""
+    try:
+        import fitz
+        from backend.thumbnail import locate_text_spans_in_pdf
+        located = locate_text_spans_in_pdf(pdf_path, targets)
+        doc = fitz.open(pdf_path)
+        band_rgb = {"high": (0.96, 0.45, 0.45), "medium": (0.98, 0.75, 0.18), "low": (0.55, 0.86, 0.6)}
+        added = 0
+        for r in located:
+            if not r.get("found"):
+                continue
+            page = doc.load_page(r["page"])
+            pw, ph = float(page.rect.width), float(page.rect.height)
+            color = band_rgb.get((r.get("band") or "").lower(), (0.98, 0.75, 0.18))
+            for nx0, ny0, nx1, ny1 in r["rects"]:
+                rect = fitz.Rect(nx0 * pw, ny0 * ph, nx1 * pw, ny1 * ph)
+                annot = page.add_highlight_annot(rect)
+                try:
+                    annot.set_colors(stroke=color)
+                    annot.update()
+                except Exception:
+                    pass
+                added += 1
+        if not added:
+            doc.close()
+            return None
+        out_dir = os.path.join(cache_dir or os.path.dirname(pdf_path), "annotated")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{check_id}-highlighted.pdf")
+        doc.save(out_path, garbage=3, deflate=True)
+        doc.close()
+        return out_path
+    except Exception as e:
+        logger.warning("PDF annotation failed: %s", e)
+        return None
+
+
+def _correction_targets_for_check(check: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Per flagged reference that carries a verified ``corrected_reference``, build
+    a locate target whose ``text`` is the ORIGINAL cited line (so it can be found
+    in the PDF) and whose ``corrected`` is the verified should-be line.
+
+    Honesty contract: a target is produced ONLY when a real ``corrected_reference``
+    exists AND it actually differs from the cited line — never a fabricated
+    correction, never a no-op strikeout. Returns [] when nothing should change."""
+    from backend import export as _export
+    refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+    targets: List[Dict[str, Any]] = []
+    for ref in refs:
+        if not isinstance(ref, dict) or not isinstance(ref.get("corrected_reference"), dict):
+            continue
+        corrected = _export._corrected_str(ref)
+        if not corrected:
+            continue
+        cited = _export._cited_str(ref)
+        if not cited or cited.strip() == corrected.strip():
+            # No baseline to strike, or an identical "correction" — skip (no
+            # fabricated annotation).
+            continue
+        # Locate the cited TITLE in the PDF (the most reliably present anchor),
+        # but carry the full corrected line as the inserted note.
+        anchor = (ref.get("title") or cited).strip()
+        if len(anchor) < 8:
+            anchor = cited
+        targets.append({
+            "text": anchor,
+            "ref_id": ref.get("index") or ref.get("ref_num"),
+            "cited": cited,
+            "corrected": corrected,
+        })
+    return targets
+
+
+def _annotate_pdf_corrections(pdf_path, targets, marker_shifts, cache_dir, check_id):
+    """R19: render the tracked was→should-be changes as REAL PDF annotations.
+
+    For each correction target, locate the cited text via
+    ``locate_text_spans_in_pdf`` (the same locator the highlight path uses),
+    strike it out (``page.add_strikeout_annot``) and attach a text note
+    (``page.add_text_annot``) carrying the verified corrected line. For inline
+    renumber, each ``marker_shifts`` row's OLD marker (e.g. ``[9]``) is located on
+    its page and annotated with its NEW form (e.g. ``[10]``).
+
+    Never fabricates a position: a target/marker that can't be located is simply
+    skipped. Returns the annotated PDF path, or None when nothing was annotated."""
+    try:
+        import fitz
+        from backend.thumbnail import locate_text_spans_in_pdf
+        added = 0
+        doc = fitz.open(pdf_path)
+        try:
+            located = locate_text_spans_in_pdf(pdf_path, targets) if targets else []
+            by_index = {i: t for i, t in enumerate(targets)}
+            for i, r in enumerate(located):
+                if not r.get("found"):
+                    continue
+                t = by_index.get(i, {})
+                corrected = (t.get("corrected") or "").strip()
+                page = doc.load_page(r["page"])
+                pw, ph = float(page.rect.width), float(page.rect.height)
+                note_pt = None
+                for nx0, ny0, nx1, ny1 in r["rects"]:
+                    rect = fitz.Rect(nx0 * pw, ny0 * ph, nx1 * pw, ny1 * ph)
+                    try:
+                        page.add_strikeout_annot(rect)
+                    except Exception:
+                        pass
+                    if note_pt is None:
+                        note_pt = fitz.Point(rect.x1, rect.y0)
+                    added += 1
+                # Attach the corrected line as a sticky text note anchored at the
+                # end of the struck text (the should-be side of the change).
+                if corrected and note_pt is not None:
+                    try:
+                        annot = page.add_text_annot(note_pt, f"Should be: {corrected}")
+                        annot.set_info(title="RefChecker correction")
+                        annot.update()
+                    except Exception:
+                        pass
+            # Inline renumber: annotate each OLD marker with its NEW form.
+            for sm in (marker_shifts or []):
+                if not isinstance(sm, dict):
+                    continue
+                old_m = (sm.get("marker") or "").strip()
+                new_m = (sm.get("new_marker") or "").strip()
+                if not old_m or not new_m or old_m == new_m:
+                    continue
+                for page in doc:
+                    try:
+                        hits = page.search_for(old_m)
+                    except Exception:
+                        hits = []
+                    if not hits:
+                        continue
+                    rect = hits[0]
+                    try:
+                        page.add_strikeout_annot(rect)
+                        annot = page.add_text_annot(
+                            fitz.Point(rect.x1, rect.y0), f"Renumber: {old_m} -> {new_m}")
+                        annot.set_info(title="RefChecker renumber")
+                        annot.update()
+                        added += 1
+                    except Exception:
+                        pass
+                    break  # annotate the first occurrence only (the marker's offset)
+            if not added:
+                return None
+            out_dir = os.path.join(cache_dir or os.path.dirname(pdf_path), "annotated")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{check_id}-corrections.pdf")
+            doc.save(out_path, garbage=3, deflate=True)
+            return out_path
+        finally:
+            doc.close()
+    except Exception as e:
+        logger.warning("PDF correction annotation failed: %s", e)
+        return None
+
+
+@app.get("/api/preview/{check_id}/corrections-annotated-pdf")
+async def get_corrections_annotated_pdf(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """R19 (G2): return the source PDF with the tracked was→should-be corrections
+    rendered as REAL PDF annotations — each corrected reference's cited text is
+    struck through and a note carries the verified corrected line; inline
+    renumber markers are annotated with their new number.
+
+    Returns a clean 404 when the source isn't a PDF or there are no real
+    corrections to render (never a blank/fabricated artifact)."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF source for this check")
+    targets = _correction_targets_for_check(check)
+
+    # Inline-renumber markers to annotate (only when the renumber preview did not
+    # abstain). Best-effort: a failure here must not block the strikeout path.
+    marker_shifts: List[Dict[str, Any]] = []
+    try:
+        text = await _extract_paper_text_for_check(check_id, check)
+        if text:
+            from backend.inline_citation_checker import renumber_preview
+            from backend import export as _export
+            refs = _export._as_list(check.get("results")) or _export._as_list(check.get("references"))
+            report = await asyncio.to_thread(renumber_preview, text, refs, None)
+            if isinstance(report, dict) and not report.get("abstained"):
+                marker_shifts = report.get("shifted_markers") or []
+    except Exception as e:
+        logger.debug("renumber preview for corrections-annotated-pdf failed: %s", e)
+
+    if not targets and not marker_shifts:
+        raise HTTPException(status_code=404, detail="No corrections to annotate")
+
+    out_path = await asyncio.to_thread(
+        _annotate_pdf_corrections, pdf_path, targets, marker_shifts, str(cache_dir or ""), check_id)
+    if not out_path or not os.path.exists(out_path):
+        # Nothing could be located on the page -> honest 404, not a 500.
+        raise HTTPException(status_code=404, detail="No corrections could be located in the PDF")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (check.get("paper_title") or f"refchecker-{check_id}"))[:80].strip("-")
+    return FileResponse(out_path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{safe}-corrections.pdf"'})
+
+
 @app.get("/api/text/{check_id}")
 async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
@@ -2556,6 +4026,230 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
         raise
     except Exception as e:
         logger.error(f"Error getting uploaded file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _read_cached_paper_text(path: str) -> str:
+    """Read a previously-extracted paper-text blob (blocking; call via to_thread)."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            return fh.read()
+    except Exception:
+        return ""
+
+
+def _write_cached_paper_text(path: str, text: str) -> None:
+    """Atomically persist extracted paper text (blocking; call via to_thread)."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        # Best-effort cache — a write failure must never break the response.
+        pass
+
+
+@app.get("/api/paper-pdf/{check_id}")
+async def get_paper_pdf(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Serve the original source PDF for a check (uploaded file or the PDF cached
+    during the check), so the frontend can render it natively with PDF.js.
+
+    Returns 404 when the source isn't a PDF (pasted text, .bib/.tex) or the cached
+    file was cleared — the viewer then falls back to the extracted-text view.
+    Real-data only: never synthesises a PDF.
+    """
+    check = await _get_owned_check_or_404(check_id, current_user)
+    source_type = check.get('source_type', '') or ''
+    paper_source = check.get('paper_source', '') or ''
+
+    pdf_path = None
+    # 1) Uploaded local PDF.
+    if (source_type == 'file' and paper_source
+            and paper_source.lower().endswith('.pdf') and os.path.exists(paper_source)):
+        pdf_path = paper_source
+    # 2) URL / DOI input — reuse the PDF cached during the check (same artifacts
+    #    the text extractor reads, so availability matches the text view).
+    if not pdf_path and paper_source:
+        try:
+            from refchecker.utils.cache_utils import get_cached_artifact_path
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                for artifact in ("ai_body.pdf", "paper.pdf"):
+                    p = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                    if p and os.path.exists(p) and os.path.getsize(p) > 0:
+                        pdf_path = p
+                        break
+        except Exception as _e:  # noqa: BLE001
+            logger.debug("paper-pdf cache lookup failed: %s", _e)
+
+    if pdf_path:
+        return FileResponse(pdf_path, media_type="application/pdf", headers=_private_artifact_headers())
+
+    # 2b) R02 — uploaded non-PDF document (.docx / .html / .htm): convert the
+    #     real document text to a self-contained PDF so the SAME native pdf.js
+    #     viewer renders it (highlights + back-links included). Cached as
+    #     {check_id}.gen.pdf. Honesty: only the document's own text is rendered.
+    if (source_type == 'file' and paper_source and os.path.exists(paper_source)
+            and paper_source.lower().endswith(('.docx', '.html', '.htm'))):
+        try:
+            cache_dir = await _get_configured_cache_dir()
+            if cache_dir:
+                text_dir = os.path.join(str(cache_dir), "paper_text")
+                gen_path = os.path.join(text_dir, f"{check_id}.gen.pdf")
+                if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                    return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+                from backend.pdf_convert import convert_to_pdf
+                title = check.get('title') or check.get('paper_title') or None
+                os.makedirs(text_dir, exist_ok=True)
+                await asyncio.to_thread(convert_to_pdf, paper_source, gen_path, title)
+                if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                    return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+        except Exception as _e:  # noqa: BLE001
+            logger.debug("paper-pdf docx/html→PDF conversion failed: %s", _e)
+            # fall through to the extracted-text render below
+
+    # 3) No original PDF (pasted text / .tex / .bib / .txt / .md) — render the
+    #    extracted body text into a clean, self-contained PDF so the SAME native
+    #    pdf.js viewer (with highlights + back-links) is used for every source.
+    #    Cached as {check_id}.gen.pdf. Real-data only: the PDF is exactly the
+    #    extracted text. Any failure falls through to 404 → the text view.
+    try:
+        cache_dir = await _get_configured_cache_dir()
+        if cache_dir:
+            text_dir = os.path.join(str(cache_dir), "paper_text")
+            gen_path = os.path.join(text_dir, f"{check_id}.gen.pdf")
+            if os.path.exists(gen_path) and os.path.getsize(gen_path) > 0:
+                return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+            # Prefer the already-cached extracted text; else extract on demand.
+            text = ""
+            txt_path = os.path.join(text_dir, f"{check_id}.txt")
+            if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
+                text = await asyncio.to_thread(_read_cached_paper_text, txt_path)
+            if not (text or "").strip():
+                text = await _extract_paper_text_for_check(check_id, check)
+            if (text or "").strip():
+                from backend.pdf_convert import text_to_pdf
+                title = check.get('title') or check.get('paper_title') or None
+                await asyncio.to_thread(text_to_pdf, text, gen_path, title)
+                return FileResponse(gen_path, media_type="application/pdf", headers=_private_artifact_headers())
+    except Exception as _e:  # noqa: BLE001
+        logger.debug("paper-pdf text→PDF conversion failed: %s", _e)
+
+    raise HTTPException(status_code=404, detail="No source PDF available for this check")
+
+
+@app.get("/api/paper-text/{check_id}")
+async def get_paper_text(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Return the extracted body text of a check's source document.
+
+    Powers the "view in document" highlighter: the frontend renders this text
+    and marks the AI-detection flagged passages / citation contexts in place.
+    Works for uploaded PDFs/text files AND URL/DOI inputs (via the PDF cached
+    during the check). Never throws on a missing source — returns available=False.
+    """
+    try:
+        check = await _get_owned_check_or_404(check_id, current_user)
+        source_type = check.get('source_type', '') or ''
+        paper_source = check.get('paper_source', '') or ''
+        text = ""
+        fmt = "text"
+
+        # ── Per-check extracted-text cache ────────────────────────────────
+        # PDF text extraction is CPU-bound (5-30s on a big paper) and was
+        # re-run on EVERY "View doc" / "View flagged" open — the source of
+        # the "extracting document text…" lag. The extracted body never
+        # changes for a given check, so memoise it to disk keyed by
+        # check_id. First open pays the extraction cost; every later open
+        # is an instant file read.
+        _text_cache_path = None
+        try:
+            _cache_dir = await _get_configured_cache_dir()
+            if _cache_dir:
+                _text_cache_dir = os.path.join(str(_cache_dir), "paper_text")
+                _text_cache_path = os.path.join(_text_cache_dir, f"{check_id}.txt")
+                if os.path.exists(_text_cache_path) and os.path.getsize(_text_cache_path) > 0:
+                    cached = await asyncio.to_thread(_read_cached_paper_text, _text_cache_path)
+                    if cached and cached.strip():
+                        MAX = 600_000
+                        return {
+                            "text": cached[:MAX],
+                            "format": "cached",
+                            "word_count": len(cached.split()),
+                            "truncated": len(cached) > MAX,
+                            "available": True,
+                        }
+        except Exception as _e:
+            logger.debug("paper-text cache read skipped: %s", _e)
+
+        def _read_textfile(path):
+            try:
+                with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                    return fh.read()
+            except Exception:
+                return ""
+
+        from backend.refchecker_wrapper import _extract_pdf_text_cli_style
+
+        # 1) Uploaded local file (pdf / txt / bib / tex).
+        if source_type == 'file' and paper_source and os.path.exists(paper_source):
+            if paper_source.lower().endswith('.pdf'):
+                text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+                fmt = "pdf"
+            else:
+                text = _read_textfile(paper_source)
+
+        # 1b) Pasted text / .bib / .bbl / .tex (source_type == 'text'). The body
+        #     is saved to a temp file (read it) — or, for an inline paste, IS the
+        #     stored string. Without this the DocumentViewer fell through to the
+        #     cached-PDF lookup below (no PDF exists for a structured/text
+        #     source) and showed "the original document text isn't available".
+        if not (text or "").strip() and source_type == 'text' and paper_source:
+            if os.path.exists(paper_source):
+                if paper_source.lower().endswith('.pdf'):
+                    text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, None)
+                    fmt = "pdf"
+                else:
+                    text = _read_textfile(paper_source)
+            elif len(paper_source) > 200:
+                # The pasted content was stored inline rather than as a file path.
+                text = paper_source
+
+        # 2) URL / DOI input — reuse the PDF cached during the check.
+        if not (text or "").strip() and paper_source:
+            try:
+                from refchecker.utils.cache_utils import get_cached_artifact_path
+                cache_dir = await _get_configured_cache_dir()
+                if cache_dir:
+                    for artifact in ("ai_body.pdf", "paper.pdf"):
+                        p = get_cached_artifact_path(str(cache_dir), paper_source, artifact)
+                        if p and os.path.exists(p) and os.path.getsize(p) > 0:
+                            text = await asyncio.to_thread(_extract_pdf_text_cli_style, p, None)
+                            fmt = "pdf"
+                            break
+            except Exception as _e:
+                logger.debug("paper-text cache lookup failed: %s", _e)
+
+        text = text or ""
+        # Persist the freshly-extracted text so the next open is instant.
+        if text.strip() and _text_cache_path:
+            try:
+                await asyncio.to_thread(_write_cached_paper_text, _text_cache_path, text)
+            except Exception as _e:
+                logger.debug("paper-text cache write skipped: %s", _e)
+        MAX = 600_000  # cap so a whole book can't bloat the response
+        return {
+            "text": text[:MAX],
+            "format": fmt,
+            "word_count": len(text.split()),
+            "truncated": len(text) > MAX,
+            "available": bool(text.strip()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting paper text: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2936,6 +4630,8 @@ async def start_batch_check(
                     ai_detection_api_key=request.ai_detection_api_key,
                     ai_detection_consent=request.ai_detection_consent,
                     ai_detection_service=request.ai_detection_service,
+                    ai_detection_detectors=getattr(request, 'ai_detection_detectors', None),
+                    detection_mode=getattr(request, 'detection_mode', 'both'),
                     paperclip_api_key=request.paperclip_api_key,
                 )
             )
@@ -2989,6 +4685,10 @@ async def start_batch_check_files(
     ai_detection_api_key: Optional[str] = Form(None),
     ai_detection_consent: bool = Form(False),
     ai_detection_service: str = Form("pangram"),
+    # R61: repeated form field — one value per chosen detector key. FastAPI
+    # collects the repeats into a list; >1 routes through the compare path.
+    ai_detection_detectors: Optional[List[str]] = Form(None),
+    detection_mode: str = Form("both"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -3015,6 +4715,7 @@ async def start_batch_check_files(
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
         ai_detection_consent = _form_default_value(ai_detection_consent)
         ai_detection_service = _form_default_value(ai_detection_service)
+        detection_mode = _form_default_value(detection_mode)
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -3205,7 +4906,9 @@ async def start_batch_check_files(
                     ai_detection_api_key=ai_detection_api_key,
                     ai_detection_consent=ai_detection_consent,
                     ai_detection_service=ai_detection_service,
+                    ai_detection_detectors=ai_detection_detectors,
                     paperclip_api_key=paperclip_api_key,
+                    detection_mode=detection_mode,
                 )
             )
             active_checks[session_id] = {
@@ -3254,7 +4957,7 @@ async def start_batch_check_files(
 async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Get batch summary and all checks in the batch"""
     try:
-        summary, checks = await _get_owned_batch_or_404(batch_id, current_user)
+        summary, checks = await _get_accessible_batch_or_404(batch_id, current_user)
         
         # Add session_id for in-progress checks
         for check in checks:
@@ -3287,9 +4990,7 @@ async def get_batch_llm_usage(
     individual children so a single missing snapshot doesn't blank the
     batch number.
     """
-    await _get_owned_batch_or_404(batch_id, current_user)
-    user_id = get_user_id_filter(current_user)
-    checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    summary, checks = await _get_accessible_batch_or_404(batch_id, current_user)
     try:
         import sys as _sys
         from pathlib import Path as _Path
@@ -3435,18 +5136,43 @@ async def delete_batch(batch_id: str, current_user: UserInfo = Depends(require_u
 
 @app.patch("/api/batch/{batch_id}")
 async def update_batch_label(batch_id: str, update: BatchLabelUpdate, current_user: UserInfo = Depends(require_user)):
-    """Update the label for a batch"""
+    """Update a batch's label and/or share it with a team (R26).
+
+    Only the owner may mutate a batch, so this stays on the owner-scoped DB
+    helpers. ``team_id`` semantics: ``None`` leaves the share unchanged; ``0``
+    unshares; a positive id shares the whole batch with that team (the caller
+    must be a member of it)."""
     try:
         user_id = get_user_id_filter(current_user)
-        success = await db.update_batch_label(batch_id, update.batch_label, user_id=user_id)
-        if success:
-            return {"message": "Batch label updated successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Batch not found")
+        touched = False
+
+        if update.batch_label is not None:
+            label_ok = await db.update_batch_label(batch_id, update.batch_label, user_id=user_id)
+            if not label_ok:
+                raise HTTPException(status_code=404, detail="Batch not found")
+            touched = True
+
+        if update.team_id is not None:
+            # Owner must belong to the team they're sharing with. user_id is None
+            # in single-user mode, where there are no teams to share to.
+            new_team_id: Optional[int] = update.team_id if update.team_id else None
+            if new_team_id is not None:
+                if user_id is None or not await db.is_team_member(new_team_id, current_user.id):
+                    raise HTTPException(status_code=403, detail="You are not a member of that team")
+            shared = await db.set_batch_team(batch_id, new_team_id, user_id=user_id)
+            if shared == 0:
+                raise HTTPException(status_code=404, detail="Batch not found")
+            touched = True
+
+        if not touched:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+
+        # Keep the historical message so existing callers/tests stay green.
+        return {"message": "Batch label updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating batch label: {e}", exc_info=True)
+        logger.error(f"Error updating batch: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4803,6 +6529,59 @@ async def add_reference_to_check(
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
 
+    # R17 (G3) — reject duplicates before inserting. Normalize the incoming
+    # identity (DOI via the same `normalize_doi` the retraction/gap-finder
+    # paths use; arXiv id and title lowercased) and compare it against every
+    # existing reference's cited AND verified identity. A match returns 409
+    # so the UI can say "already reference [N]" instead of silently creating
+    # a duplicate row that pollutes the renumbering map and the export list.
+    from backend.retraction import normalize_doi as _normalize_doi
+
+    def _norm_arxiv(v: Any) -> Optional[str]:
+        s = (str(v).strip().lower() if v else "")
+        # Strip a leading "arxiv:" scheme and any version suffix (v1/v2…)
+        # so "arXiv:2106.01345v2" and "2106.01345" compare equal.
+        if s.startswith("arxiv:"):
+            s = s[len("arxiv:"):]
+        s = re.sub(r"v\d+$", "", s)
+        return s or None
+
+    def _norm_title(v: Any) -> Optional[str]:
+        # Collapse whitespace + lowercase so trivial spacing/case differences
+        # don't slip a duplicate through.
+        s = " ".join(str(v).split()).strip().lower() if v else ""
+        return s or None
+
+    incoming_doi = _normalize_doi(payload.doi)
+    incoming_arxiv = _norm_arxiv(payload.arxiv_id)
+    incoming_title = _norm_title(payload.title)
+    if incoming_doi or incoming_arxiv or incoming_title:
+        for r in refs:
+            if not isinstance(r, dict):
+                continue
+            existing_doi = _normalize_doi(r.get("doi") or r.get("verified_doi"))
+            existing_arxiv = _norm_arxiv(r.get("arxiv_id") or r.get("verified_arxiv_id"))
+            existing_title = _norm_title(r.get("title") or r.get("verified_title"))
+            is_dup = (
+                (incoming_doi and existing_doi and incoming_doi == existing_doi)
+                or (incoming_arxiv and existing_arxiv and incoming_arxiv == existing_arxiv)
+                or (incoming_title and existing_title and incoming_title == existing_title)
+            )
+            if is_dup:
+                # Return the duplicate envelope at the top level (not wrapped
+                # in `detail`) so the FE can read `data.duplicate` /
+                # `data.existing_index` directly and render "already reference
+                # [N]". A bare HTTPException would bury it under `detail`.
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "duplicate": True,
+                        "existing_index": r.get("index"),
+                        "message": f"Already reference [{r.get('index')}] in this check.",
+                    },
+                )
+
     title = payload.title
     authors = payload.authors
     year = payload.year
@@ -4837,6 +6616,10 @@ async def add_reference_to_check(
         "warnings": [],
         "suggestions": [{"message": "Added manually — re-run the check or click Verify to validate.", "error_type": "manual"}],
     }
+    # Snapshot the existing printed indices BEFORE any renumber, so we can
+    # return a real before/after renumber map (drives the "document changes"
+    # preview in the UI — no PDF is mutated; this is the list-level diff only).
+    before_index = {r.get("id"): r.get("index") for r in refs if r.get("id") is not None}
     # Insert at the requested position when the caller specified one
     # (Undo Remove sends the original index). Append otherwise so the
     # default "Add reference" button keeps adding at the bottom.
@@ -4854,7 +6637,26 @@ async def add_reference_to_check(
     ok = await db.replace_check_references(check_id, refs, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to persist reference")
-    return {"reference": new_ref, "total_refs": len(refs)}
+    # Additive renumber map: which existing references changed printed index.
+    renumbering = []
+    for r in refs:
+        rid = r.get("id")
+        if rid is None or rid == new_ref["id"]:
+            continue
+        old = before_index.get(rid)
+        if old is not None and old != r.get("index"):
+            renumbering.append({
+                "id": rid,
+                "title": (str(r.get("title") or "")[:80]),
+                "old_index": old,
+                "new_index": r.get("index"),
+            })
+    return {
+        "reference": new_ref,
+        "total_refs": len(refs),
+        "inserted_index": new_ref["index"],
+        "renumbering": renumbering,
+    }
 
 
 @app.delete("/api/history/{check_id}/references/{ref_id}")
@@ -5126,7 +6928,13 @@ async def verify_single_reference(
         # count, Field of Study, per-author ORCID/OpenAlex IDs, etc.
         # Pulled by the References tab to render the metadata strip.
         try:
-            from refchecker.utils.enrichment import build_enrichment
+            from refchecker.utils.enrichment import backfill_enrichment, build_enrichment
+            # Cross-source backfill (R21/R22) for the add-ref verify path:
+            # backfill missing-only counts / abstract / tldr / funding by DOI
+            # from OpenAlex / Crossref / S2 before projecting. Never overwrites
+            # a real value, never fabricates, soft-fails, bounded.
+            if isinstance(verified_data, dict):
+                backfill_enrichment(verified_data, target)
             enrichment = build_enrichment(verified_data)
             if enrichment:
                 updated["enrichment"] = enrichment
@@ -5455,6 +7263,17 @@ class _SimilarPapersRequest(BaseModel):
     paper_title: Optional[str] = None
     paper_id: Optional[str] = None  # arXiv ID or DOI of the SOURCE paper
     limit: int = 5
+    # Discovery mode. Three CLEARLY-SCOPED, bibliography-overlap modes
+    # backed by real OpenAlex data (backend/cites_refs.py):
+    #   'references' — papers that SHARE REFERENCES with the source
+    #                  (overlap in their bibliographies / referenced_works).
+    #   'citations'  — papers that SHARE CITATIONS with the source
+    #                  (co-cited works: things the source's citers also cite).
+    #   'both'       — the union of the two.
+    # Legacy aliases are mapped: 'cites_refs' -> 'both'. The historical
+    # 'similar' co-citation pipeline (_find_similar_papers_impl) is still
+    # reachable for backward compatibility but is no longer a public mode.
+    mode: str = 'both'
 
 
 def _candidate_key(title: Optional[str], doi: Optional[str], arxiv: Optional[str]) -> str:
@@ -5497,7 +7316,15 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
     'unknown'.
     """
     try:
-        return await _find_similar_papers_impl(req, current_user)
+        raw_mode = (req.mode or "both").strip().lower()
+        # The historical Semantic-Scholar co-citation pipeline stays reachable
+        # for backward compatibility, but the public modes are now the three
+        # bibliography-overlap kinds (References / Citations / Both), all of
+        # which run on real OpenAlex data via _cites_refs_papers_impl.
+        if raw_mode == "similar":
+            return await _find_similar_papers_impl(req, current_user)
+        # 'references' | 'citations' | 'both' (+ legacy 'cites_refs' alias).
+        return await _cites_refs_papers_impl(req)
     except HTTPException:
         raise
     except Exception as e:
@@ -5507,6 +7334,224 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             "candidates": [],
             "error": f"Similar Papers lookup failed: {e}",
         }
+
+
+async def _cites_refs_papers_impl(req: _SimilarPapersRequest) -> Dict[str, Any]:
+    """CLEAN SEPARATE path: papers that overlap the SOURCE paper's
+    bibliography on real OpenAlex data. ``mode`` selects the overlap kind:
+
+      * 'references' — papers that SHARE REFERENCES with the source
+        (their bibliographies overlap the source's referenced_works).
+      * 'citations'  — papers that SHARE CITATIONS with the source
+        (co-cited works: what the source's citers also cite).
+      * 'both'       — the union of the two.
+
+    Legacy 'cites_refs' is mapped to 'both'. REAL OpenAlex data only;
+    empty in -> empty out.
+    """
+    import httpx
+    limit = max(1, min(20, int(req.limit or 5)))
+    resolved_mode = _normalize_overlap_mode(req.mode)
+    timeout = 12.0
+
+    async with httpx.AsyncClient() as client:
+        async def _fetch(url: str, params: Optional[dict] = None) -> Optional[dict]:
+            try:
+                r = await client.get(url, params=params, timeout=timeout)
+                if r.status_code == 200:
+                    return r.json()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("OpenAlex cites/refs fetch failed for %s: %s", url, e)
+            return None
+
+        result = await fetch_cites_and_refs(
+            _fetch,
+            _candidate_key,
+            paper_id=req.paper_id,
+            paper_title=req.paper_title,
+            limit=limit,
+            mode=resolved_mode,
+        )
+
+    candidates = _shape_cites_refs_candidates(result.get("candidates", []))
+    # R20 — populate REAL verification status (pre_verified / was_verified /
+    # verified_status) on each row so the existing SimilarPapersPanel chips
+    # render true "verified / ? unconfirmed" state instead of always-null.
+    # Reuses the same cache-lookup + active-verify discipline as the similar
+    # path (db.lookup_verified_reference -> checker.verify_reference), bounded
+    # by a semaphore. Real-data-gated: a candidate that can't be confirmed is
+    # marked unverified, never synthesized as verified.
+    await _verify_candidates_in_place(candidates)
+    # Tally by relation: 'reference' = shared-references match,
+    # 'citation' = shared-citations (co-cited) match.
+    source_counts: Dict[str, int] = {}
+    for c in candidates:
+        rel = c.get("relation") or "openalex"
+        source_counts[rel] = source_counts.get(rel, 0) + 1
+    return {
+        "source_paper": req.paper_title,
+        "candidates": candidates,
+        "source_counts": source_counts,
+        "total_candidates": len(candidates),
+        "mode": resolved_mode,
+        "source_work": result.get("source_work"),
+    }
+
+
+def _shape_cites_refs_candidates(raw: list) -> list:
+    """Project OpenAlex cites/refs candidates onto the same row shape the
+    Similar-Papers UI already renders, tagging each with its relation."""
+    out = []
+    for c in raw:
+        out.append({
+            "paperId": None,
+            "openalex_id": c.get("openalex_id"),
+            "title": c.get("title"),
+            "year": c.get("year"),
+            "authors": c.get("authors") or [],
+            "doi": c.get("doi"),
+            "arxiv_id": c.get("arxiv_id"),
+            "venue": None,
+            "reason": None,
+            "relation": c.get("relation"),  # 'reference' | 'citation'
+            # Overlap count that earned this candidate a place: number of the
+            # source's references it shares ('reference' rows), or number of
+            # the source's citers that co-cite it ('citation' rows).
+            "shared_with_source": c.get("shared_with_source") or 0,
+            "shared_refs_count": 0,
+            "shared_refs_pct": 0.0,
+            "shared_refs_jaccard": 0.0,
+            "candidate_ref_count": 0,
+            "shared_refs_titles": [],
+            # R08 — the ACTUAL works shared with the source paper (hydrated
+            # real OpenAlex records), so the panel can show WHICH works are
+            # shared, not just a count. For 'reference' rows these are the
+            # shared reference works; for 'citation' rows, the co-citing
+            # works. Real data only — empty when nothing resolved.
+            "shared_works": c.get("shared_works") or [],
+            "shared_works_titles": c.get("shared_works_titles") or [],
+            "shared_overlap_count": (
+                c.get("shared_overlap_count")
+                if c.get("shared_overlap_count") is not None
+                else (c.get("shared_with_source") or 0)
+            ),
+            "sources": ["openalex"],
+            "via": "openalex",
+            "semantic_scholar_url": None,
+            "url": c.get("url"),
+            "pre_verified": False,
+            "was_verified": False,
+            "verified_status": None,
+            "times_seen": 0,
+        })
+    return out
+
+
+def _build_similar_papers_checker():
+    """Best-effort init of the hybrid reference checker used to actively
+    verify candidate rows. Returns the checker or ``None`` if it can't load
+    (no network deps available, import error, etc.) — callers degrade to
+    cache-only verification. Mirrors the init in ``_find_similar_papers_impl``."""
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+        return EnhancedHybridReferenceChecker(debug_mode=False)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Could not init checker for cites/refs verification: %s", e)
+        return None
+
+
+async def _verify_candidates_in_place(candidates: list) -> None:
+    """R20 — populate REAL verification status on shaped candidate rows.
+
+    For each candidate row (already shaped by ``_shape_cites_refs_candidates``)
+    this resolves a real verification status using the SAME discipline as the
+    similar path's ``_enrich``:
+
+      1. Look the candidate up in the global identity cache
+         (``db.lookup_verified_reference``). A hit sets ``pre_verified`` /
+         ``was_verified`` and carries the cached status + ``times_seen``.
+      2. On a cache miss, actively verify via ``checker.verify_reference`` —
+         bounded by a semaphore so we never fan out unboundedly — and mark
+         ``verified`` only when a real database record is matched. No match
+         -> ``unverified`` ("? unconfirmed" chip). An error -> ``unknown``.
+
+    Mutates ``candidates`` in place. REAL-DATA-GATED: a row is only marked
+    verified when a real source confirmed it — never synthesized. When there
+    are no candidates, this is a no-op (no checker init, no network).
+    """
+    if not candidates:
+        return
+
+    checker = await asyncio.to_thread(_build_similar_papers_checker)
+    sem = asyncio.Semaphore(5)
+
+    async def _verify_one(row: dict) -> None:
+        probe = {
+            "doi": row.get("doi"),
+            "arxiv_id": row.get("arxiv_id"),
+            "title": row.get("title"),
+            "year": row.get("year"),
+        }
+        cached = None
+        try:
+            cached = await db.lookup_verified_reference(probe)
+        except Exception:
+            cached = None
+
+        if cached:
+            row["pre_verified"] = True
+            row["was_verified"] = True
+            row["verified_status"] = (cached or {}).get("status") or "verified"
+            row["times_seen"] = (cached or {}).get("times_seen") or 0
+            return
+
+        # Cache miss: actively verify if we have any identifier or title.
+        if checker is not None and (row.get("doi") or row.get("arxiv_id") or row.get("title")):
+            async with sem:
+                try:
+                    verified_data, _errors, url = await asyncio.to_thread(
+                        checker.verify_reference,
+                        {
+                            "title": row.get("title"),
+                            "authors": row.get("authors"),
+                            "year": row.get("year"),
+                            "doi": row.get("doi"),
+                            "arxiv_id": row.get("arxiv_id"),
+                            "venue": row.get("venue"),
+                        },
+                    )
+                    if verified_data:
+                        row["was_verified"] = True
+                        row["verified_status"] = "verified"
+                        if not row.get("doi") and verified_data.get("doi"):
+                            row["doi"] = verified_data["doi"]
+                        if not row.get("arxiv_id") and verified_data.get("arxiv_id"):
+                            row["arxiv_id"] = verified_data["arxiv_id"]
+                        if not row.get("url") and url:
+                            row["url"] = url
+                        try:
+                            await db.upsert_verified_reference({
+                                "doi": row.get("doi"),
+                                "arxiv_id": row.get("arxiv_id"),
+                                "title": row.get("title"),
+                                "year": row.get("year"),
+                                "status": "verified",
+                                "verified_url": url,
+                                "matched_db": (verified_data.get("source") if isinstance(verified_data, dict) else None),
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        # No record found — likely fake or just missing.
+                        row["verified_status"] = "unverified"
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Active verification failed for cites/refs candidate: %s", e)
+                    row["verified_status"] = "unknown"
+
+    await asyncio.gather(*[_verify_one(c) for c in candidates])
 
 
 async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo):
@@ -6127,6 +8172,10 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
 class _CitationGraphRequest(BaseModel):
     references: list  # list of {id?, title, doi?, arxiv_id?, authors?}
     paper_title: Optional[str] = None
+    # When true (and the local model is installed) attach a per-reference
+    # AI-generated-text band to each first-degree node so the graph's AI
+    # ring renders on the bibliography itself, not just expanded nodes.
+    ai_detection: bool = False
 
 
 @app.post("/api/papers/citation-graph")
@@ -6167,43 +8216,66 @@ async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = De
             logger.debug("S2 fetch failed for %s: %s", url, e)
         return None
 
+    want_ai = bool(getattr(req, "ai_detection", False))
+    _node_fields = "paperId,citationCount,references.paperId"
+    if want_ai:
+        _node_fields += ",abstract"
+
     # Cap at 60 — beyond that S2 rate-limits hard and the graph is unreadable.
     refs = refs[:60]
     nodes_out = []
     paperid_to_local = {}  # S2 paperId -> our local ref id
 
+    # Fetch every ref's S2 record CONCURRENTLY (bounded by a semaphore)
+    # instead of one-at-a-time. The old sequential loop spent ~1s per ref
+    # and, on a 60-ref bibliography under any network latency, sailed past
+    # the frontend's 120s timeout ("timeout of 120000ms exceeded"). A
+    # bounded fan-out keeps us polite to S2's per-IP rate limit (smaller
+    # pool when we have no API key) while cutting wall-time roughly Nx.
+    _graph_conc = 8 if api_key else 5
+    _graph_sem = asyncio.Semaphore(_graph_conc)
+
     async with httpx.AsyncClient() as client:
-        # Fetch each ref's citationCount + outgoing references list. We do
-        # this sequentially to be polite to the free-tier rate limit.
-        ref_details = []
-        for i, ref in enumerate(refs):
+        async def _fetch_ref(i, ref):
             local_id = str(ref.get("id") or ref.get("index") or f"ref-{i}")
             ident = s2_id_of(ref)
             paper = None
             references_list = []
             if ident:
-                data = await _fetch(
-                    client,
-                    f"https://api.semanticscholar.org/graph/v1/paper/{ident}",
-                    params={"fields": "paperId,citationCount,references.paperId"},
-                )
+                async with _graph_sem:
+                    data = await _fetch(
+                        client,
+                        f"https://api.semanticscholar.org/graph/v1/paper/{ident}",
+                        params={"fields": _node_fields},
+                    )
                 if data:
                     paper = data
                     references_list = [r.get("paperId") for r in (data.get("references") or []) if r.get("paperId")]
             pid = (paper or {}).get("paperId")
             citation_count = (paper or {}).get("citationCount") or 0
-            ref_details.append({
+            return {
                 "local_id": local_id,
                 "paperId": pid,
                 "citationCount": citation_count,
                 "references": references_list,
-            })
+                "abstract": (paper or {}).get("abstract") or "",
+                "title": ref.get("title") or (paper or {}).get("title") or "",
+            }
+
+        # return_exceptions so one ref's failure can't sink the whole graph.
+        _raw = await asyncio.gather(
+            *[_fetch_ref(i, ref) for i, ref in enumerate(refs)],
+            return_exceptions=True,
+        )
+        ref_details = [d for d in _raw if isinstance(d, dict)]
+        for det in ref_details:
+            pid = det["paperId"]
             if pid:
-                paperid_to_local[pid] = local_id
+                paperid_to_local[pid] = det["local_id"]
             nodes_out.append({
-                "id": local_id,
+                "id": det["local_id"],
                 "paperId": pid,
-                "citationCount": citation_count,
+                "citationCount": det["citationCount"],
             })
 
         edges = []
@@ -6220,7 +8292,51 @@ async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = De
                 seen_edges.add(key)
                 edges.append({"source": src, "target": tgt})
 
-    return {"nodes": nodes_out, "edges": edges}
+    # Optional per-first-degree-node AI-gen band from the abstract (free,
+    # offline). Mirrors the /papers/expand pass so the ring renders on the
+    # bibliography nodes themselves, not only on expanded ones. Bounded by a
+    # semaphore; short abstracts short-circuit before any model load.
+    if want_ai:
+        try:
+            band_by_local = {}
+            from refchecker.ai_detection import run_detection
+            model_ready = False
+            try:
+                from refchecker.ai_detection import model_manager
+                model_ready = model_manager.is_model_installed() and model_manager.deps_available()
+            except Exception:
+                model_ready = False
+
+            if model_ready:
+                _ai_sem = asyncio.Semaphore(4)
+
+                async def _detect_node(det):
+                    abstract = (det.get("abstract") or "").strip()
+                    if not abstract:
+                        band_by_local[det["local_id"]] = {"band": "unavailable", "score": None}
+                        return
+                    async with _ai_sem:
+                        res = await asyncio.to_thread(
+                            run_detection, abstract, title=det.get("title"), backend="local"
+                        )
+                    band_by_local[det["local_id"]] = {"band": res.band, "score": res.overall_score}
+
+                await asyncio.gather(
+                    *[_detect_node(det) for det in ref_details], return_exceptions=True
+                )
+            else:
+                for det in ref_details:
+                    band_by_local[det["local_id"]] = {"band": "unavailable", "score": None}
+
+            for n in nodes_out:
+                b = band_by_local.get(n["id"])
+                if b:
+                    n["ai_detection_band"] = b["band"]
+                    n["ai_detection_score"] = b["score"]
+        except Exception as e:
+            logger.debug("Graph AI-gen (first-degree) skipped: %s", e)
+
+    return {"nodes": nodes_out, "edges": edges, "ai_detection": want_ai}
 
 
 class _ExpandRequest(BaseModel):
@@ -6504,6 +8620,295 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     return {"paper_id": pid, "items": items, "ai_detection": want_ai}
 
 
+class _AuthorProfileRequest(BaseModel):
+    author_id: Optional[str] = None      # Semantic Scholar author id
+    openalex_id: Optional[str] = None    # OpenAlex author id (A…) — fallback for non-S2 authors
+
+
+# Module-level TTL cache for S2 author profiles — the hover tooltip can fire
+# many times for the same author across a bibliography; this keeps us well
+# under S2's per-IP rate limit. {author_id: (fetched_monotonic, payload)}
+_AUTHOR_PROFILE_CACHE: dict = {}
+_AUTHOR_PROFILE_TTL = 6 * 60 * 60  # 6 hours
+
+
+@app.post("/api/authors/profile")
+async def author_profile(req: _AuthorProfileRequest, current_user: UserInfo = Depends(require_user)):
+    """Fetch an enriched Semantic Scholar author profile for the hover card:
+    affiliation, paper/citation counts, h-index, homepage, and a few recent
+    papers. Cached (6h TTL) and soft-failing — returns {available: False} on
+    any error so the tooltip simply falls back to the basic identifiers.
+    """
+    import time as _time
+    author_id = (req.author_id or "").strip()
+    oa_id = (req.openalex_id or "").strip()
+    cache_key = author_id or (f"oa:{oa_id}" if oa_id else "")
+    if not cache_key:
+        return {"available": False}
+    # Serve from cache when fresh.
+    cached = _AUTHOR_PROFILE_CACHE.get(cache_key)
+    if cached and (_time.monotonic() - cached[0]) < _AUTHOR_PROFILE_TTL:
+        return cached[1]
+
+    import httpx
+    payload = {"available": False}
+    try:
+        if author_id:
+            # Semantic Scholar author API (richest: + recent papers).
+            api_key = await _resolve_semantic_scholar_api_key(None)
+            headers = {"x-api-key": api_key} if api_key else {}
+            fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
+            url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
+            if r.status_code == 200:
+                d = r.json() or {}
+                papers = [{"title": p.get("title"), "year": p.get("year")}
+                          for p in (d.get("papers") or []) if p.get("title")]
+                papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
+                payload = {
+                    "available": True, "name": d.get("name"),
+                    "affiliations": d.get("affiliations") or [],
+                    "paperCount": d.get("paperCount"), "citationCount": d.get("citationCount"),
+                    "hIndex": d.get("hIndex"), "homepage": d.get("homepage"),
+                    "papers": papers[:5], "source": "semantic_scholar",
+                }
+        elif oa_id:
+            # OpenAlex /authors fallback for authors with no S2 id — supplies
+            # h-index / citations / works-count / ORCID for the hover.
+            vid = oa_id if oa_id.startswith("A") else str(oa_id).rsplit("/", 1)[-1]
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"https://api.openalex.org/authors/{vid}", timeout=10.0)
+            if r.status_code == 200:
+                d = r.json() or {}
+                ss = d.get("summary_stats") or {}
+                insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
+                         if isinstance(i, dict) and i.get("display_name")]
+                if not insts:
+                    for aff in (d.get("affiliations") or [])[:2]:
+                        nm = ((aff or {}).get("institution") or {}).get("display_name")
+                        if nm:
+                            insts.append(nm)
+                orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
+                if isinstance(orcid, str):
+                    orcid = orcid.rsplit("/", 1)[-1]
+                payload = {
+                    "available": True, "name": d.get("display_name"),
+                    "affiliations": insts,
+                    "paperCount": d.get("works_count"), "citationCount": d.get("cited_by_count"),
+                    "hIndex": ss.get("h_index"), "homepage": None,
+                    "orcid": orcid if isinstance(orcid, str) else None,
+                    "papers": [], "source": "openalex",
+                }
+    except Exception as e:
+        logger.debug("author_profile fetch failed for %s: %s", cache_key, e)
+        payload = {"available": False}
+
+    _AUTHOR_PROFILE_CACHE[cache_key] = (_time.monotonic(), payload)
+    return payload
+
+
+# --------------------------------------------------------------------------- #
+# R10 (A3) — ID-less author resolution by name + paper title/year.             #
+#                                                                              #
+# When a reference's author carries NO author id (no s2_author_id / openalex   #
+# id), the hover popover can't fetch a profile. This sibling endpoint resolves #
+# a *single* high-confidence author id from a bare name PLUS the citing        #
+# paper's title (and optional year) — and ONLY returns it when a strong        #
+# corroboration signal exists: the candidate author actually appears on a work #
+# whose title matches the supplied title. Otherwise it returns                 #
+# {available: False, reason: 'no confident match'} — never a guess. This keeps #
+# the "ABSTAIN beats a wrong badge" / no-fabrication contract: a wrong author  #
+# profile is worse than none.                                                  #
+# --------------------------------------------------------------------------- #
+
+class _AuthorFindRequest(BaseModel):
+    name: str                              # bare author name (no id)
+    title: Optional[str] = None            # the citing paper's title (corroboration anchor)
+    year: Optional[int] = None             # optional year, tightens the corroboration
+
+
+# Separate, shorter-lived cache from the by-id profile cache: keyed on the
+# (name, title, year) triple so the same ID-less author on the same paper isn't
+# re-resolved across re-hovers.
+_AUTHOR_FIND_CACHE: dict = {}
+_AUTHOR_FIND_TTL = 6 * 60 * 60  # 6 hours
+
+
+def _normalize_person_name(name: str) -> str:
+    """Lowercase, strip diacritics + punctuation, collapse whitespace. Mirrors
+    the FE AuthorsLine `norm()` so 'Bössuyt' / 'Bossuyt,' both reduce to one
+    canonical token sequence for corroboration matching."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(name or ""))
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9\-' ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _name_tokens(name: str) -> set:
+    """Surname + given-name tokens (length >= 2; drops lone initials so 'J.' on
+    one side and 'John' on the other don't spuriously block a match)."""
+    return {t for t in _normalize_person_name(name).split(" ") if len(t) >= 2}
+
+
+def _author_corroborated_on_work(query_name: str, authorship_names: list) -> Optional[str]:
+    """Return the work-author display name that corroborates `query_name`, or
+    None. A match requires the surname to be present AND the multi-letter token
+    overlap to be non-empty — i.e. the cited name and the work's author name
+    share their distinctive tokens. Real-data gated: no fuzzy/approximate
+    surname guessing, only exact normalized-token containment."""
+    q_tokens = _name_tokens(query_name)
+    if not q_tokens:
+        return None
+    # The cited surname is (heuristically) the longest token — it must appear
+    # in the work-author's tokens for a corroboration to count.
+    q_surname = max(q_tokens, key=len)
+    for an in authorship_names:
+        a_tokens = _name_tokens(an)
+        if not a_tokens:
+            continue
+        if q_surname in a_tokens and (q_tokens & a_tokens):
+            return an
+    return None
+
+
+@app.post("/api/authors/find")
+async def author_find(req: _AuthorFindRequest,
+                      current_user: UserInfo = Depends(require_user)):
+    """R10: resolve a SINGLE high-confidence author id for an ID-less author,
+    corroborated by the citing paper's title.
+
+    Strategy (OpenAlex, no fabrication):
+      1. Require both a name and a title — without a corroboration anchor we
+         refuse outright (return empty), because a name-only search across
+         OpenAlex's 90M+ authors is an ambiguity machine.
+      2. Find the work by title (`/works?filter=title.search:<title>`,
+         optionally `,publication_year:<year>`). Pick the work whose title
+         actually matches (normalized) the supplied title.
+      3. In that work's authorships, find the single author whose name
+         corroborates the supplied name (surname + token overlap). That
+         author's OpenAlex id IS the high-confidence match — it's literally an
+         author of the cited paper.
+      4. Return that author's ids + metrics. If no work matches, or no/ambiguous
+         (>1) author on the matching work corroborates the name, return
+         {available: False, reason: 'no confident match'}.
+
+    Soft-fails to {available: False} on any error. Cached (6h TTL).
+    """
+    import time as _time
+    name = (req.name or "").strip()
+    title = (req.title or "").strip()
+    if not name or not title:
+        # No corroboration anchor -> never guess.
+        return {"available": False, "reason": "no confident match"}
+
+    cache_key = f"{_normalize_person_name(name)}|{_normalize_person_name(title)}|{req.year or ''}"
+    cached = _AUTHOR_FIND_CACHE.get(cache_key)
+    if cached and (_time.monotonic() - cached[0]) < _AUTHOR_FIND_TTL:
+        return cached[1]
+
+    import httpx
+    payload = {"available": False, "reason": "no confident match"}
+    norm_title = _normalize_person_name(title)
+    try:
+        filt = f"title.search:{title}"
+        if req.year:
+            filt += f",publication_year:{int(req.year)}"
+        works_fields = "id,title,publication_year,authorships"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.openalex.org/works",
+                params={"filter": filt, "per_page": 5, "select": works_fields},
+            )
+        if r.status_code == 200:
+            results = (r.json() or {}).get("results") or []
+            # Keep only works whose title genuinely matches the supplied one
+            # (exact normalized equality OR one fully contains the other) —
+            # title.search is a loose ranker, so we re-check ourselves.
+            def _title_matches(w):
+                wt = _normalize_person_name(w.get("title") or "")
+                if not wt:
+                    return False
+                return wt == norm_title or norm_title in wt or wt in norm_title
+
+            matching_works = [w for w in results if _title_matches(w)]
+            for w in matching_works:
+                authorships = w.get("authorships") or []
+                names = [((a or {}).get("author") or {}).get("display_name") or "" for a in authorships]
+                # All work-authors whose name corroborates the cited name.
+                corro = [
+                    (a, nm) for (a, nm) in zip(authorships, names)
+                    if nm and _author_corroborated_on_work(name, [nm])
+                ]
+                if len(corro) != 1:
+                    # 0 -> this work doesn't list the cited author; >1 ->
+                    # ambiguous (e.g. two same-surname authors). Either way,
+                    # ABSTAIN on this work.
+                    continue
+                author_obj = (corro[0][0] or {}).get("author") or {}
+                oa_author_id = author_obj.get("id") or ""
+                short_id = oa_author_id.rsplit("/", 1)[-1] if oa_author_id else ""
+                if not short_id.startswith("A"):
+                    continue
+                # Hydrate the resolved author for real metrics (h-index /
+                # citations / ORCID), reusing the same OpenAlex author shape as
+                # author_profile's OpenAlex fallback.
+                metrics = await _fetch_openalex_author_metrics(short_id)
+                payload = {
+                    "available": True,
+                    "name": author_obj.get("display_name") or corro[0][1],
+                    "openalex_id": short_id,
+                    "matched_work_title": w.get("title"),
+                    "matched_work_year": w.get("publication_year"),
+                    "source": "openalex",
+                    **metrics,
+                }
+                break
+    except Exception as e:
+        logger.debug("author_find failed for %s / %s: %s", name, title, e)
+        payload = {"available": False, "reason": "no confident match"}
+
+    _AUTHOR_FIND_CACHE[cache_key] = (_time.monotonic(), payload)
+    return payload
+
+
+async def _fetch_openalex_author_metrics(short_id: str) -> Dict[str, Any]:
+    """Fetch h-index / citations / works-count / ORCID / affiliations + recent
+    papers for a resolved OpenAlex author id. Returns {} on any failure so the
+    caller still reports the (corroborated) id without metrics."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"https://api.openalex.org/authors/{short_id}")
+        if r.status_code != 200:
+            return {}
+        d = r.json() or {}
+        ss = d.get("summary_stats") or {}
+        insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
+                 if isinstance(i, dict) and i.get("display_name")]
+        if not insts:
+            for aff in (d.get("affiliations") or [])[:2]:
+                nm = ((aff or {}).get("institution") or {}).get("display_name")
+                if nm:
+                    insts.append(nm)
+        orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
+        if isinstance(orcid, str):
+            orcid = orcid.rsplit("/", 1)[-1]
+        return {
+            "affiliations": insts,
+            "paperCount": d.get("works_count"),
+            "citationCount": d.get("cited_by_count"),
+            "hIndex": ss.get("h_index"),
+            "homepage": None,
+            "orcid": orcid if isinstance(orcid, str) else None,
+            "papers": [],
+        }
+    except Exception:
+        return {}
+
+
 @app.get("/api/references/seen")
 async def list_seen_references(
     limit: int = 200,
@@ -6537,12 +8942,187 @@ async def list_seen_references(
     }
 
 
+class _AddSeenReferenceRequest(BaseModel):
+    reference: Dict[str, Any]
+    check_id: Optional[int] = None
+    paper_title: Optional[str] = None
+
+
+@app.post("/api/references/seen")
+async def add_seen_reference(req: _AddSeenReferenceRequest,
+                             current_user: UserInfo = Depends(require_user)):
+    """'Add to Library' — persist a single reference (with its enrichment blob)
+    into the global identity-keyed Seen-References cache. Idempotent: repeated
+    adds bump times_seen. Returns {added, times_seen}; added=False when the ref
+    has no safe identity key (DOI/arXiv/normalized title) so nothing is stored."""
+    try:
+        ref = req.reference if isinstance(req.reference, dict) else {}
+        ident = await db.upsert_verified_reference(ref, check_id=req.check_id, paper_title=req.paper_title)
+        if not ident:
+            return {"added": False, "times_seen": 0, "reason": "no identity key"}
+        row = await db.lookup_verified_reference(ref)
+        return {"added": True, "times_seen": (row or {}).get("times_seen") or 1}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding seen reference: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/references/seen")
 async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     """Wipe the entire Seen References cache. Powers the 'Clear cache'
     button on the Seen Refs tab."""
     removed = await db.clear_verified_references()
     return {"removed": removed}
+
+
+class _RemoveSeenReferenceRequest(BaseModel):
+    # Optional: pass the full reference and let the server resolve the same
+    # identity key the upsert/add path uses. Mirrors _AddSeenReferenceRequest
+    # so the FE can post the exact ref it rendered.
+    reference: Optional[Dict[str, Any]] = None
+
+
+@app.delete("/api/references/seen/{identity_key:path}")
+async def remove_seen_reference(identity_key: str,
+                                current_user: UserInfo = Depends(require_user)):
+    """'Remove from Library' — drop a single reference from the global
+    Seen-References cache by its identity key (DOI / arXiv / normalized
+    title — the same key the add/upsert path computes). Counterpart to the
+    whole-cache wipe above. Idempotent: returns {removed: False} when no
+    matching row exists. Same auth gating as the other /references/seen
+    endpoints."""
+    removed = await db.delete_verified_reference((identity_key or "").strip())
+    return {"removed": removed}
+
+
+@app.post("/api/references/seen/remove")
+async def remove_seen_reference_by_body(req: _RemoveSeenReferenceRequest,
+                                        current_user: UserInfo = Depends(require_user)):
+    """Body-based variant of the per-reference removal: accepts a full
+    reference dict, resolves its identity key exactly like the add/upsert
+    path (Database.reference_identity_key), and deletes that one row.
+    Returns {removed: bool}; removed=False when the ref yields no safe
+    identity key or no matching row exists. Same auth gating as the other
+    /references/seen endpoints."""
+    ref = req.reference if isinstance(req.reference, dict) else {}
+    ident = db.reference_identity_key(ref)
+    if not ident:
+        return {"removed": False, "reason": "no identity key"}
+    removed = await db.delete_verified_reference(ident)
+    return {"removed": removed, "identity_key": ident}
+
+
+class _VenueProfileRequest(BaseModel):
+    venue_id: Optional[str] = None    # OpenAlex source id (S…)
+    issn: Optional[str] = None
+    venue_name: Optional[str] = None
+
+
+_VENUE_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+@app.post("/api/venues/profile")
+async def get_venue_profile(req: _VenueProfileRequest,
+                            current_user: UserInfo = Depends(require_user)):
+    """Resolve a journal/venue to REAL metadata for the venue-name hover:
+    publisher, ISSN, open-access/DOAJ status, homepage, and (when DOAJ lists it)
+    an author-guidelines link. Source: OpenAlex /sources + DOAJ. Soft-fails to
+    {available: false}; never fabricates metadata or guidelines."""
+    cache_key = (req.venue_id or req.issn or req.venue_name or "").strip().lower()
+    if cache_key and cache_key in _VENUE_PROFILE_CACHE:
+        return _VENUE_PROFILE_CACHE[cache_key]
+    import httpx
+    try:
+        src = None
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if req.venue_id:
+                vid = req.venue_id if req.venue_id.startswith("S") else str(req.venue_id).rsplit("/", 1)[-1]
+                r = await client.get(f"https://api.openalex.org/sources/{vid}")
+                if r.status_code == 200:
+                    src = r.json()
+            if not src and req.issn:
+                r = await client.get("https://api.openalex.org/sources",
+                                     params={"filter": f"issn:{req.issn}", "per_page": 1})
+                if r.status_code == 200:
+                    res = (r.json() or {}).get("results") or []
+                    src = res[0] if res else None
+            if not src and req.venue_name:
+                r = await client.get("https://api.openalex.org/sources",
+                                     params={"search": req.venue_name, "per_page": 1})
+                if r.status_code == 200:
+                    res = (r.json() or {}).get("results") or []
+                    src = res[0] if res else None
+            if not isinstance(src, dict) or not src.get("display_name"):
+                out = {"available": False}
+                if cache_key:
+                    _VENUE_PROFILE_CACHE[cache_key] = out
+                return out
+
+            issns = src.get("issn") or []
+            if isinstance(issns, str):
+                issns = [issns]
+            out: Dict[str, Any] = {
+                "available": True,
+                "display_name": src.get("display_name"),
+                "publisher": src.get("host_organization_name"),
+                "issn_l": src.get("issn_l"),
+                "issn": issns,
+                "is_oa": src.get("is_oa"),
+                "is_in_doaj": src.get("is_in_doaj"),
+                "homepage_url": src.get("homepage_url"),
+                "works_count": src.get("works_count"),
+                "cited_by_count": src.get("cited_by_count"),
+            }
+            if isinstance(src.get("id"), str):
+                out["openalex_id"] = str(src["id"]).rsplit("/", 1)[-1]
+            if isinstance(src.get("apc_usd"), int):
+                out["apc_usd"] = src["apc_usd"]
+
+            # DOAJ author guidelines — only when an ISSN is known AND DOAJ lists it.
+            issn_for_doaj = out.get("issn_l") or (issns[0] if issns else None)
+            if issn_for_doaj:
+                try:
+                    dr = await client.get(f"https://doaj.org/api/search/journals/issn:{issn_for_doaj}")
+                    if dr.status_code == 200:
+                        results = (dr.json() or {}).get("results") or []
+                        if results:
+                            bj = (results[0] or {}).get("bibjson") or {}
+                            ref = bj.get("ref") or {}
+                            gl = ref.get("author_instructions")
+                            if isinstance(gl, str) and gl.startswith("http"):
+                                out["author_guidelines_url"] = gl
+                            lic = bj.get("license")
+                            if isinstance(lic, list) and lic and isinstance(lic[0], dict):
+                                out["license"] = lic[0].get("type")
+                except Exception as _de:
+                    logger.debug("DOAJ lookup failed: %s", _de)
+
+            if cache_key:
+                _VENUE_PROFILE_CACHE[cache_key] = out
+            return out
+    except Exception as e:
+        logger.debug("venue profile failed: %s", e)
+        return {"available": False}
+
+
+@app.get("/api/references/library/graph")
+async def references_library_graph(
+    limit: int = 400,
+    min_times_seen: int = 1,
+    edge_strategy: str = "shared-authors",
+    current_user: UserInfo = Depends(require_user),
+):
+    """Nodes + edges for the Obsidian-style 3D Seen-References graph. Bounded
+    (node cap + edge cull) so a large library stays renderable."""
+    try:
+        return await db.build_reference_graph_data(
+            limit=limit, min_times_seen=min_times_seen, edge_strategy=edge_strategy
+        )
+    except Exception as e:
+        logger.error(f"Error building reference graph: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/references/seen/backfill")
@@ -6828,6 +9408,19 @@ async def ai_detection_model_status(current_user: UserInfo = Depends(require_use
     return model_manager.model_status()
 
 
+@app.get("/api/ai-detection/model/update-check")
+async def ai_detection_model_update_check(current_user: UserInfo = Depends(require_user)):
+    """Is a newer revision of the local model available on Hugging Face?
+
+    Deliberately a SEPARATE endpoint from /status (which the UI polls during
+    downloads) — this makes a network round-trip to HF, run off the hot path and
+    only when the Settings panel asks. Degrades to update_available=false on any
+    failure. The HF call can take a couple of seconds, so run it off-thread.
+    """
+    from refchecker.ai_detection import model_manager
+    return await asyncio.to_thread(model_manager.query_update_available)
+
+
 @app.post("/api/ai-detection/model/download")
 async def ai_detection_model_download(current_user: UserInfo = Depends(require_user)):
     """Start (or report) the background download of the local model.
@@ -6843,10 +9436,9 @@ async def ai_detection_model_download(current_user: UserInfo = Depends(require_u
         raise HTTPException(
             status_code=400,
             detail=(
-                "Local detection runtime not installed. Install the optional "
-                "dependencies (onnxruntime + transformers, or torch + "
-                "transformers) to use the local model, or pick the LLM-judge "
-                "or API backend in Settings."
+                "Local detection runtime not installed. Use “Install runtime” "
+                "in Settings → AI Detection (installs torch + transformers), or "
+                "pick the LLM-judge or API backend instead."
             ),
         )
     return model_manager.start_download()
@@ -6863,6 +9455,110 @@ async def ai_detection_model_delete(current_user: UserInfo = Depends(require_use
         _require_admin(current_user)
     from refchecker.ai_detection import model_manager
     return model_manager.delete_model()
+
+
+@app.get("/api/ai-detection/detectors")
+async def ai_detection_list_detectors(current_user: UserInfo = Depends(require_user)):
+    """Multi-detector registry + per-detector install status (R61).
+
+    Returns the full registry (Tier-1 runnable + Tier-2 heavy/opt-in) with real
+    size/license/RAID-note metadata and each detector's install state. Tier-2
+    detectors report ``installable: false`` so the UI shows them as unavailable
+    and never offers to run them (honesty: never a fabricated number).
+    """
+    from refchecker.ai_detection import model_manager
+    return model_manager.registry_status()
+
+
+@app.post("/api/ai-detection/install/{key}")
+async def ai_detection_install_detector(
+    key: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Start (or report) the background download of a specific detector (R61).
+
+    Refuses unknown / non-installable (heavy Tier-2) keys honestly. The model
+    lives at a single shared filesystem path, so admin-gated in multi-user mode.
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    entry = model_manager.get_detector(key)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Unknown detector: {key}")
+    if not entry.get("installable"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Detector '{key}' is a heavy Tier-2 detector that is not "
+                "runnable in this build, so it cannot be installed."
+            ),
+        )
+    if not model_manager.deps_available():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Local detection runtime not installed. Use “Install runtime” "
+                "in Settings → AI Detection (installs torch + transformers)."
+            ),
+        )
+    return model_manager.start_detector_download(key)
+
+
+@app.delete("/api/ai-detection/model/{key}")
+async def ai_detection_delete_detector(
+    key: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Remove a specific installed detector's weights from disk (R61).
+
+    Per-key counterpart of ``DELETE /api/ai-detection/model``. Admin-gated in
+    multi-user mode (detectors are shared across users).
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    if not model_manager.get_detector(key):
+        raise HTTPException(status_code=404, detail=f"Unknown detector: {key}")
+    return model_manager.delete_detector(key)
+
+
+@app.get("/api/ai-detection/runtime/status")
+async def ai_detection_runtime_status(current_user: UserInfo = Depends(require_user)):
+    """Status of the optional local-detector inference runtime (torch/onnx)."""
+    from refchecker.ai_detection import runtime_manager
+    return runtime_manager.runtime_status()
+
+
+@app.post("/api/ai-detection/runtime/install")
+async def ai_detection_runtime_install(
+    variant: str = "torch",
+    current_user: UserInfo = Depends(require_user),
+):
+    """Install the optional inference runtime from the app (pip --target).
+
+    ``variant`` is 'torch' (default; required by the bundled desklib model,
+    which ships safetensors only) or 'onnx' (smaller; needs an ONNX export).
+    Installed into a per-user dir and added to sys.path — no restart needed.
+    Admin-gated in multi-user mode (it mutates a shared on-disk runtime).
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import runtime_manager
+    return runtime_manager.start_install(variant)
+
+
+@app.get("/api/ai-detection/diagnostics")
+async def ai_detection_diagnostics(current_user: UserInfo = Depends(require_user)):
+    """Debugger payload for Settings → AI Detection: the runtime install
+    status + live install log, plus recent (text-free) detection-run events
+    so users can see why detection produced a given band / no band."""
+    from refchecker.ai_detection import runtime_manager, model_manager, diagnostics
+    return {
+        "runtime": runtime_manager.runtime_status(),
+        "model": model_manager.model_status(),
+        "events": diagnostics.events(),
+    }
 
 
 # Mount static files for bundled frontend (if available)

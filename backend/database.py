@@ -256,12 +256,26 @@ def _get_effective_reference_status(ref: Dict[str, Any], is_complete: bool) -> s
     return "verified"
 
 
-def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
+def _compute_reference_buckets_from_results(
+    results: List[Dict[str, Any]],
+    is_complete: bool,
+    stored_total_refs: Optional[int] = None,
+) -> Dict[str, int]:
     """Compute summary counters from stored check results.
 
     This mirrors ``web-ui/src/utils/referenceStatus.js`` so history cards and
     the selected-check Summary render the same numbers even if persisted
     aggregate columns are stale from an older run.
+
+    ``processed_refs`` is the count of distinct, non-pending reference results
+    actually present in ``results``. The persisted ``total_refs`` column is an
+    EARLY estimate (taken right after the first extraction); de-dup / merge /
+    re-extraction can land MORE references than that estimate, which made
+    ``processed_refs`` exceed ``total_refs`` and the UI render >100% ("28/23 ·
+    122%"). We therefore also return a reconciled ``total_refs`` that is never
+    below ``processed_refs`` — the real final count — so progress can never
+    overshoot. When ``stored_total_refs`` is None we fall back to
+    ``processed_refs`` as the total.
     """
     errors_count = 0
     warnings_count = 0
@@ -323,8 +337,19 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
         if effective_status in {"verified", "suggestion"}:
             refs_verified += 1
 
+    processed_refs = len(latest_results_by_index)
+    # Reconcile the total against the REAL processed count so progress never
+    # exceeds 100%. The stored total is an early extraction estimate; the
+    # actual reference set can be larger after de-dup/merge/re-extraction.
+    try:
+        _stored_total = int(stored_total_refs) if stored_total_refs is not None else 0
+    except (TypeError, ValueError):
+        _stored_total = 0
+    reconciled_total_refs = max(_stored_total, processed_refs)
+
     return {
-        "processed_refs": len(latest_results_by_index),
+        "processed_refs": processed_refs,
+        "total_refs": reconciled_total_refs,
         "errors_count": errors_count,
         "warnings_count": warnings_count,
         "suggestions_count": suggestions_count,
@@ -399,7 +424,8 @@ class Database:
                     hallucination_provider TEXT,
                     hallucination_model TEXT,
                     extraction_method TEXT,
-                    status TEXT DEFAULT 'completed'
+                    status TEXT DEFAULT 'completed',
+                    team_id INTEGER REFERENCES teams(id)
                 )
             """)
 
@@ -513,6 +539,53 @@ class Database:
                 )
             """)
 
+            # Teams (issue #66). A team is owned by one user and groups any
+            # number of member users. Owner-gated mutations live in main.py;
+            # the schema is idempotent (CREATE TABLE IF NOT EXISTS) and mirrors
+            # the migration style used by users/oauth_accounts above.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS teams (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS team_members (
+                    team_id INTEGER NOT NULL REFERENCES teams(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    role TEXT NOT NULL DEFAULT 'member',
+                    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (team_id, user_id)
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_user_id)"
+            )
+            # Per-team audit log: who added/removed whom (and other team changes),
+            # so the team view can show an activity feed. actor/target emails are
+            # denormalised so the log stays readable even if a user later leaves.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS team_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    team_id INTEGER NOT NULL REFERENCES teams(id),
+                    actor_user_id INTEGER REFERENCES users(id),
+                    actor_email TEXT,
+                    action TEXT NOT NULL,
+                    target_user_id INTEGER,
+                    target_email TEXT,
+                    detail TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_team_activity_team ON team_activity(team_id, id)"
+            )
+
             # Tiny key/value store for one-time migrations. Keeps the
             # bump-schema-and-clean-stale-rows logic out of the column
             # additions in `_ensure_columns` so each migration is a
@@ -551,6 +624,12 @@ class Database:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_check_history_user_timestamp
                 ON check_history(user_id, timestamp DESC)
+            """)
+            # R26: index team-shared checks so get_team_checks /
+            # team-member batch reads don't scan the whole table.
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_team_id
+                ON check_history(team_id)
             """)
             await db.commit()
 
@@ -632,6 +711,12 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_score REAL")
         if "ai_detection_band" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_band TEXT")
+        # Team-scoped sharing (issue #66 / R26). A check (and therefore its
+        # batch) can be shared with one team; non-null means members of that
+        # team may read it in addition to the owner. Nullable so single-user
+        # mode and unshared checks behave exactly as before.
+        if "team_id" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN team_id INTEGER REFERENCES teams(id)")
 
         await db.execute(
             "UPDATE check_history SET started_at = COALESCE(started_at, timestamp) WHERE started_at IS NULL"
@@ -662,12 +747,12 @@ class Database:
         their stored ``results_json``.
         """
         async with db.execute(
-            "SELECT id, status, results_json FROM check_history WHERE results_json IS NOT NULL AND results_json != ''"
+            "SELECT id, status, total_refs, results_json FROM check_history WHERE results_json IS NOT NULL AND results_json != ''"
         ) as cursor:
             rows = await cursor.fetchall()
 
         for row in rows:
-            check_id, status, raw_results = row
+            check_id, status, stored_total, raw_results = row
             if not raw_results:
                 continue
             try:
@@ -679,11 +764,13 @@ class Database:
             buckets = _compute_reference_buckets_from_results(
                 parsed,
                 is_complete=status in {"completed", "cancelled", "error"},
+                stored_total_refs=stored_total,
             )
             await db.execute(
                 """
                 UPDATE check_history
-                   SET errors_count = ?,
+                   SET total_refs = ?,
+                       errors_count = ?,
                        warnings_count = ?,
                        suggestions_count = ?,
                        unverified_count = ?,
@@ -695,6 +782,7 @@ class Database:
                  WHERE id = ?
                 """,
                 (
+                    buckets["total_refs"],
                     buckets["errors_count"],
                     buckets["warnings_count"],
                     buckets["suggestions_count"],
@@ -1003,19 +1091,41 @@ class Database:
                             buckets = _compute_reference_buckets_from_results(
                                 parsed_results,
                                 is_complete=item.get('status') in {'completed', 'cancelled', 'error'},
+                                stored_total_refs=item.get('total_refs'),
                             )
+                            # buckets carries a reconciled total_refs (>= processed_refs)
+                            # so the sidebar card never renders "59/43".
                             item.update(buckets)
                     history.append(item)
                 return history
 
-    async def get_check_by_id(self, check_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Get specific check result by ID, optionally enforcing user ownership."""
+    async def get_check_by_id(
+        self,
+        check_id: int,
+        user_id: Optional[int] = None,
+        team_ids: Optional[List[int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get specific check result by ID, optionally enforcing user ownership.
+
+        When ``team_ids`` is provided alongside ``user_id``, a check is also
+        visible if it is shared with one of those teams (``team_id`` in
+        ``team_ids``) — the single-check counterpart of the team-aware batch
+        reads, so a team member can open a check shared with them (R26). With
+        ``user_id`` None there is no scoping (single-user mode)."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
             if user_id is not None:
-                query = "SELECT * FROM check_history WHERE id = ? AND user_id = ?"
-                params = (check_id, user_id)
+                clauses = ["user_id = ?"]
+                params = [check_id, user_id]
+                for tid in (team_ids or []):
+                    clauses.append("team_id = ?")
+                    params.append(tid)
+                query = (
+                    "SELECT * FROM check_history WHERE id = ? AND ("
+                    + " OR ".join(clauses) + ")"
+                )
+                params = tuple(params)
             else:
                 query = "SELECT * FROM check_history WHERE id = ?"
                 params = (check_id,)
@@ -1027,9 +1137,13 @@ class Database:
                     if result['results_json']:
                         result['results'] = json.loads(result['results_json'])
                         if isinstance(result['results'], list) and result['results']:
+                            # Pass the stored total so the recompute reconciles it
+                            # up to the real processed count (never < processed_refs),
+                            # keeping the selected-check Summary <= 100%.
                             result.update(_compute_reference_buckets_from_results(
                                 result['results'],
                                 is_complete=result.get('status') in {'completed', 'cancelled', 'error'},
+                                stored_total_refs=result.get('total_refs'),
                             ))
                     if result.get('issue_type_counts_json'):
                         result['issue_type_counts'] = json.loads(result['issue_type_counts_json'])
@@ -1410,6 +1524,228 @@ class Database:
             await db.commit()
             return cursor.rowcount
 
+    @staticmethod
+    def _is_check_stale(
+        results: List[Dict[str, Any]],
+        total_refs: int,
+        last_activity: Optional[str],
+        stale_after_seconds: float,
+    ) -> bool:
+        """Decide whether an orphaned in_progress row is safe to finalize.
+
+        A row is stale when either:
+          • its references are all in (processed >= total_refs > 0) — the run
+            finished the work but never wrote the terminal status (the classic
+            "59/43 stuck forever" symptom, where the AI-detection await or a
+            server restart killed run_check between the last ref and the
+            'completed' emit); OR
+          • its last-activity timestamp is older than ``stale_after_seconds``
+            — covers checks that died mid-extraction with no usable refs.
+
+        Time is the *fallback*, never the only signal, so a finished-but-stuck
+        check unsticks immediately on the next poll instead of waiting out the
+        clock. Callers MUST already have excluded rows present in the live
+        active_checks map — those are genuinely running and must be left alone.
+        """
+        processed = 0
+        if isinstance(results, list):
+            for fallback_index, ref in enumerate(results):
+                status = str((ref or {}).get("status") or "").strip().lower()
+                if not status or status in {
+                    "pending", "checking", "in_progress", "queued", "processing", "started"
+                }:
+                    continue
+                processed += 1
+        if total_refs and processed >= total_refs:
+            return True
+
+        if not last_activity:
+            # No timestamp to reason about — only the processed-count signal
+            # above can finalize it; otherwise leave it alone.
+            return False
+        from datetime import timezone as _tz
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                ts = datetime.strptime(str(last_activity)[:26], fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return False
+        now = datetime.now(_tz.utc).replace(tzinfo=None)
+        return (now - ts).total_seconds() >= stale_after_seconds
+
+    async def find_stale_in_progress_checks(
+        self,
+        active_check_ids: Optional[set] = None,
+        stale_after_seconds: float = 180.0,
+    ) -> List[Dict[str, Any]]:
+        """Find orphaned in_progress checks that are safe to finalize.
+
+        Returns rows whose status is ``in_progress``, whose id is NOT in the
+        live ``active_check_ids`` set (so a genuinely-running check is never
+        returned), and that are stale per :meth:`_is_check_stale`. Used by the
+        reconciler at startup (sweep all) and on the /history/{id} GET path
+        (unstick a single polling check on demand)."""
+        active = {int(cid) for cid in (active_check_ids or set())}
+        candidates: List[Dict[str, Any]] = []
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, total_refs, results_json, ai_detection_json, "
+                "COALESCE(completed_at, started_at, timestamp) AS last_activity "
+                "FROM check_history WHERE status = 'in_progress'"
+            ) as cursor:
+                rows = [dict(r) async for r in cursor]
+
+        for row in rows:
+            if int(row["id"]) in active:
+                continue
+            try:
+                results = json.loads(row.get("results_json") or "[]")
+            except (ValueError, TypeError):
+                results = []
+            if not isinstance(results, list):
+                results = []
+            if self._is_check_stale(
+                results,
+                int(row.get("total_refs") or 0),
+                row.get("last_activity"),
+                stale_after_seconds,
+            ):
+                candidates.append(row)
+        return candidates
+
+    async def finalize_stale_check(
+        self,
+        check_id: int,
+        reason: str = "reconciled (orphaned session)",
+    ) -> Optional[str]:
+        """Finalize a single orphaned in_progress check to a terminal status.
+
+        Computes the terminal status from the stored references (reusing the
+        same bucket logic the live path uses): ``completed`` when there is at
+        least one processed reference, ``error`` when there are none (the run
+        died before producing any usable result). Writes ``completed_at``, a
+        ``cancel_reason`` of ``reason``, and the recomputed aggregate count
+        columns so history cards/Summary render correct numbers. If
+        AI-detection was never attached, marks it ``unavailable`` so the FE
+        stops waiting for an analysis that will never arrive.
+
+        Idempotent and race-safe: returns ``None`` (no-op) if the row is not
+        (or no longer) ``in_progress`` — so it can never clobber a check that
+        a concurrent live run just finalized, or downgrade an already-terminal
+        row. Returns the terminal status string on success."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT status, total_refs, results_json, ai_detection_json "
+                "FROM check_history WHERE id = ?",
+                (check_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return None
+            if str(row["status"] or "").strip().lower() != "in_progress":
+                # Already terminal (or a live run finalized it first) — never
+                # overwrite a genuine terminal status.
+                return None
+
+            try:
+                results = json.loads(row["results_json"] or "[]")
+            except (ValueError, TypeError):
+                results = []
+            if not isinstance(results, list):
+                results = []
+
+            buckets = _compute_reference_buckets_from_results(
+                results, is_complete=True, stored_total_refs=row["total_refs"],
+            )
+            terminal_status = "completed" if buckets["processed_refs"] > 0 else "error"
+            # Reconciled total never sits below the real processed count, so a
+            # finalized orphan can't persist "processed > total" (>100% progress).
+            total_refs = buckets["total_refs"]
+
+            from datetime import timezone as _tz
+            completed_at = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            updates = [
+                "status = ?",
+                "completed_at = ?",
+                "cancel_reason = ?",
+                "total_refs = ?",
+                "errors_count = ?",
+                "warnings_count = ?",
+                "suggestions_count = ?",
+                "unverified_count = ?",
+                "hallucination_count = ?",
+                "refs_with_errors = ?",
+                "refs_with_warnings_only = ?",
+                "refs_with_suggestions_only = ?",
+                "refs_verified = ?",
+            ]
+            params: List[Any] = [
+                terminal_status,
+                completed_at,
+                reason,
+                total_refs,
+                buckets["errors_count"],
+                buckets["warnings_count"],
+                buckets["suggestions_count"],
+                buckets["unverified_count"],
+                buckets["hallucination_count"],
+                buckets["refs_with_errors"],
+                buckets["refs_with_warnings_only"],
+                buckets["refs_with_suggestions_only"],
+                buckets["refs_verified"],
+            ]
+
+            # AI detection never attached → record an honest 'unavailable' so a
+            # polling FE stops waiting for an analysis the dead run never made.
+            if not (row["ai_detection_json"] or "").strip():
+                try:
+                    from refchecker.ai_detection.base import make_unavailable
+                    ai_payload = make_unavailable("reconciled", "local").to_dict()
+                except Exception:  # noqa: BLE001 — ai_detection is optional
+                    ai_payload = {"status": "unavailable", "reason": "reconciled"}
+                updates.append("ai_detection_json = ?")
+                params.append(json.dumps(ai_payload))
+                updates.append("ai_detection_band = ?")
+                params.append(ai_payload.get("band"))
+
+            params.append(check_id)
+            await db.execute(
+                f"UPDATE check_history SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            await db.commit()
+            return terminal_status
+
+    async def reconcile_stale_in_progress(
+        self,
+        active_check_ids: Optional[set] = None,
+        stale_after_seconds: float = 180.0,
+        reason: str = "reconciled (orphaned session)",
+    ) -> int:
+        """Sweep all orphaned in_progress checks and finalize each.
+
+        Returns the number of rows actually finalized. Safe to call repeatedly
+        (each finalize is idempotent and guards on still being in_progress)."""
+        stale = await self.find_stale_in_progress_checks(
+            active_check_ids=active_check_ids,
+            stale_after_seconds=stale_after_seconds,
+        )
+        finalized = 0
+        for row in stale:
+            try:
+                if await self.finalize_stale_check(int(row["id"]), reason=reason):
+                    finalized += 1
+            except Exception as e:  # noqa: BLE001 — one bad row mustn't abort the sweep
+                logger.warning("Failed to finalize stale check %s: %s", row.get("id"), e)
+        return finalized
+
     # LLM Configuration methods
 
     async def get_llm_configs(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -1734,6 +2070,198 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get a user by email (case-insensitive). Used to add members by email."""
+        if not email:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, provider, provider_id, email, name, avatar_url, is_admin, created_at "
+                "FROM users WHERE email IS NOT NULL AND LOWER(email) = LOWER(?)",
+                (email.strip(),)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Teams (issue #66)
+    # ------------------------------------------------------------------
+
+    async def create_team(self, name: str, owner_user_id: int) -> Dict[str, Any]:
+        """Create a team owned by ``owner_user_id`` and add the owner as a member.
+
+        Returns the created team row (with id, name, owner_user_id, created_at).
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "INSERT INTO teams (name, owner_user_id) VALUES (?, ?)",
+                (name, owner_user_id),
+            )
+            team_id = cursor.lastrowid
+            # Owner is always a member with the 'owner' role.
+            await db.execute(
+                "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
+                (team_id, owner_user_id),
+            )
+            await db.commit()
+            async with db.execute(
+                "SELECT id, name, owner_user_id, created_at FROM teams WHERE id = ?",
+                (team_id,),
+            ) as c:
+                row = await c.fetchone()
+                return dict(row)
+
+    async def get_team(self, team_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single team by id, or None."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, name, owner_user_id, created_at FROM teams WHERE id = ?",
+                (team_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_teams_for_user(self, user_id: int) -> List[Dict[str, Any]]:
+        """List teams the user owns or is a member of, with member counts."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT t.id, t.name, t.owner_user_id, t.created_at,
+                       tm.role AS my_role,
+                       (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+                FROM teams t
+                JOIN team_members tm ON tm.team_id = t.id
+                WHERE tm.user_id = ?
+                ORDER BY t.created_at DESC, t.id DESC
+                """,
+                (user_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def is_team_member(self, team_id: int, user_id: int) -> bool:
+        """Return whether the user belongs to the team."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?",
+                (team_id, user_id),
+            ) as cursor:
+                return await cursor.fetchone() is not None
+
+    async def get_user_team_ids(self, user_id: int) -> List[int]:
+        """Return the ids of every team the user belongs to.
+
+        Used to widen batch/check visibility so a team member can read a check
+        shared with a team they belong to (R26). Returns [] for users in no
+        team (and for the single-user pseudo-user, which has no rows)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT team_id FROM team_members WHERE user_id = ?",
+                (user_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [int(row[0]) for row in rows]
+
+    async def get_team_members(self, team_id: int) -> List[Dict[str, Any]]:
+        """List members of a team joined with their user profile fields."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT tm.user_id, tm.role, tm.joined_at,
+                       u.email, u.name, u.avatar_url
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE tm.team_id = ?
+                ORDER BY tm.joined_at ASC, tm.user_id ASC
+                """,
+                (team_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def add_team_member(self, team_id: int, user_id: int, role: str = "member") -> bool:
+        """Add a user to a team. Idempotent: returns True if a new row was added."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)",
+                (team_id, user_id, role),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def remove_team_member(self, team_id: int, user_id: int) -> bool:
+        """Remove a user from a team. Returns True if a membership row was deleted."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
+                (team_id, user_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def count_team_members(self, team_id: int) -> int:
+        """Return the number of members in a team."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM team_members WHERE team_id = ?",
+                (team_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return int(row[0]) if row else 0
+
+    async def log_team_activity(
+        self,
+        team_id: int,
+        actor_user_id: Optional[int],
+        actor_email: Optional[str],
+        action: str,
+        target_user_id: Optional[int] = None,
+        target_email: Optional[str] = None,
+        detail: Optional[str] = None,
+    ) -> None:
+        """Append one entry to a team's activity/audit log.
+
+        Best-effort: never raises (an audit-log failure must not break the
+        underlying team operation)."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("PRAGMA busy_timeout=5000")
+                await db.execute(
+                    """INSERT INTO team_activity
+                       (team_id, actor_user_id, actor_email, action,
+                        target_user_id, target_email, detail)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (team_id, actor_user_id, actor_email, action,
+                     target_user_id, target_email, detail),
+                )
+                await db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("log_team_activity failed: %s", e)
+
+    async def get_team_activity(self, team_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return a team's activity log, newest first."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT id, team_id, actor_user_id, actor_email, action,
+                          target_user_id, target_email, detail, created_at
+                   FROM team_activity
+                   WHERE team_id = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (team_id, int(limit)),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
@@ -2128,7 +2656,7 @@ class Database:
         # Seen Refs library doubles as a curation log. The status column
         # records the verdict; the UI can filter by status to hide
         # unverified ones when desired.
-        result = json.dumps(ref, default=str)
+        result_json = json.dumps(ref, default=str)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             await db.execute(
@@ -2467,6 +2995,143 @@ class Database:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
 
+    async def build_reference_graph_data(
+        self,
+        limit: int = 400,
+        min_times_seen: int = 1,
+        edge_strategy: str = "shared-authors",
+        max_edges: int = 4000,
+    ) -> Dict[str, Any]:
+        """Build {nodes, links, meta} for the 3D Seen-References library graph.
+
+        Nodes are the deduped verified references (size ∝ times_seen, colour by
+        status). Edges connect references that share a derivation signal:
+          - 'shared-authors'  : ≥1 normalized surname in common
+          - 'shared-venue'    : same normalized venue
+        Cliques per author/venue are capped and the lowest-weight edges culled
+        past ``max_edges`` so a huge library can't produce an unrenderable hairball.
+        """
+        import json as _json
+        import re as _re
+
+        limit = max(1, min(2000, int(limit or 400)))
+        min_times_seen = max(1, int(min_times_seen or 1))
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT identity_key, title, authors, year, venue, status,
+                       times_seen, doi, arxiv_id
+                FROM verified_reference_identity
+                WHERE times_seen >= ?
+                ORDER BY times_seen DESC, last_seen DESC
+                LIMIT ?
+                """,
+                (min_times_seen, limit),
+            )
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        def _surnames(raw):
+            if not raw:
+                return []
+            names = []
+            parsed = None
+            if isinstance(raw, str):
+                s = raw.strip()
+                if s.startswith("[") or s.startswith("{"):
+                    try:
+                        parsed = _json.loads(s)
+                    except Exception:
+                        parsed = None
+                if parsed is None:
+                    parsed = _re.split(r";|,| and | & ", s)
+            elif isinstance(raw, list):
+                parsed = raw
+            out = []
+            for a in (parsed or []):
+                name = a.get("name") if isinstance(a, dict) else str(a)
+                if not name:
+                    continue
+                toks = _re.sub(r"[^a-z\s\-]", "", name.lower()).split()
+                toks = [t for t in toks if len(t) > 1]
+                if toks:
+                    out.append(toks[-1])  # surname = last token
+            return out
+
+        def _norm_venue(v):
+            if not v:
+                return ""
+            return _re.sub(r"[^a-z0-9]", "", str(v).lower())
+
+        nodes = []
+        author_index: Dict[str, list] = {}
+        venue_index: Dict[str, list] = {}
+        for i, r in enumerate(rows):
+            nid = r["identity_key"] or f"ref-{i}"
+            nodes.append({
+                "id": nid,
+                "label": (r.get("title") or "(untitled)")[:120],
+                "times_seen": int(r.get("times_seen") or 1),
+                "status": r.get("status") or "unverified",
+                "year": r.get("year"),
+                "venue": r.get("venue"),
+                "doi": r.get("doi"),
+                "arxiv_id": r.get("arxiv_id"),
+            })
+            for sn in set(_surnames(r.get("authors"))):
+                author_index.setdefault(sn, []).append(nid)
+            nv = _norm_venue(r.get("venue"))
+            if nv:
+                venue_index.setdefault(nv, []).append(nid)
+
+        # Accumulate edge weights between node pairs.
+        weights: Dict[tuple, float] = {}
+
+        def _add_clique(members, w, cap=40):
+            members = members[:cap]
+            for a in range(len(members)):
+                for b in range(a + 1, len(members)):
+                    key = (members[a], members[b]) if members[a] < members[b] else (members[b], members[a])
+                    if key[0] == key[1]:
+                        continue
+                    weights[key] = weights.get(key, 0.0) + w
+
+        want_authors = edge_strategy in ("shared-authors", "both", "all")
+        want_venue = edge_strategy in ("shared-venue", "both", "all")
+        if want_authors:
+            for members in author_index.values():
+                if len(members) > 1:
+                    _add_clique(members, 1.0)
+        if want_venue:
+            for members in venue_index.values():
+                if len(members) > 1:
+                    _add_clique(members, 0.4)
+
+        links = [
+            {"source": k[0], "target": k[1], "weight": round(w, 2)}
+            for k, w in weights.items()
+        ]
+        culled = 0
+        if len(links) > max_edges:
+            links.sort(key=lambda e: e["weight"], reverse=True)
+            culled = len(links) - max_edges
+            links = links[:max_edges]
+
+        total = await self.count_verified_references()
+        return {
+            "nodes": nodes,
+            "links": links,
+            "meta": {
+                "total_refs": total,
+                "shown_refs": len(nodes),
+                "total_edges": len(links),
+                "culled_edges": culled,
+                "edge_strategy": edge_strategy,
+                "min_times_seen": min_times_seen,
+            },
+        }
+
     async def verified_references_recent_growth(self) -> Dict[str, int]:
         """Return how many NEW Seen-Refs rows landed in the last 24h / 7d.
 
@@ -2506,6 +3171,29 @@ class Database:
             await db.execute("DELETE FROM verified_reference_identity")
             await db.commit()
         return before
+
+    async def delete_verified_reference(self, identity_key: str) -> bool:
+        """Remove a single reference from the global identity-keyed cache.
+
+        Counterpart to :meth:`upsert_verified_reference` — deletes just the
+        one row whose ``identity_key`` matches (the same column the upsert
+        keys on via ``ON CONFLICT(identity_key)``). Powers the per-reference
+        'Remove from Library' control, complementing the whole-library
+        :meth:`clear_verified_references` wipe.
+
+        Idempotent / no-op safe: returns ``False`` when ``identity_key`` is
+        blank or no matching row exists, ``True`` when a row was removed.
+        """
+        if not identity_key:
+            return False
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "DELETE FROM verified_reference_identity WHERE identity_key = ?",
+                (identity_key,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def backfill_seen_references(self) -> Dict[str, Any]:
         """Manually re-run the Seen-Refs backfill on demand.
@@ -2680,6 +3368,162 @@ class Database:
                 if row:
                     return dict(row)
                 return None
+
+    @staticmethod
+    def _batch_access_clause(user_id: Optional[int], team_ids: Optional[List[int]]) -> tuple[str, list]:
+        """Build the WHERE fragment + params for an access-scoped batch read.
+
+        When ``user_id`` is None (single-user mode) there is no scoping. When it
+        is set, a row is visible if the requester owns it OR it is shared with a
+        team the requester belongs to (``team_id`` in ``team_ids``). Mirrors the
+        owner-only ``user_id = ?`` filter used by the non-team variants (R26)."""
+        if user_id is None:
+            return "", []
+        clauses = ["user_id = ?"]
+        params: list = [user_id]
+        for tid in (team_ids or []):
+            clauses.append("team_id = ?")
+            params.append(tid)
+        return " AND (" + " OR ".join(clauses) + ")", params
+
+    async def get_batch_checks_accessible(
+        self, batch_id: str, user_id: Optional[int], team_ids: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """Like ``get_batch_checks`` but also returns rows shared with one of the
+        requester's teams (R26). Owner rows + team-shared rows, deduped by id."""
+        access_sql, access_params = self._batch_access_clause(user_id, team_ids)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            query = (
+                """
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       hallucination_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
+                      llm_provider, llm_model, hallucination_provider, hallucination_model,
+                      status, source_type, batch_id, batch_label, team_id,
+                      bibliography_source_kind, original_filename,
+                      ai_detection_score, ai_detection_band
+                FROM check_history
+                WHERE batch_id = ?
+                """
+                + access_sql
+                + " ORDER BY timestamp ASC"
+            )
+            async with db.execute(query, (batch_id, *access_params)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_batch_summary_accessible(
+        self, batch_id: str, user_id: Optional[int], team_ids: Optional[List[int]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Like ``get_batch_summary`` but also returns a batch shared with one of
+        the requester's teams (R26)."""
+        access_sql, access_params = self._batch_access_clause(user_id, team_ids)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            query = (
+                """
+                SELECT
+                    batch_id,
+                    batch_label,
+                    MAX(team_id) as team_id,
+                    COUNT(*) as total_papers,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_papers,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_papers,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_papers,
+                    SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_papers,
+                    SUM(total_refs) as total_refs,
+                    SUM(errors_count) as total_errors,
+                    SUM(warnings_count) as total_warnings,
+                    SUM(suggestions_count) as total_suggestions,
+                    SUM(unverified_count) as total_unverified,
+                    SUM(hallucination_count) as total_hallucinated,
+                    SUM(CASE WHEN ai_detection_band = 'high' THEN 1 ELSE 0 END) as ai_detection_high,
+                    SUM(CASE WHEN ai_detection_band = 'medium' THEN 1 ELSE 0 END) as ai_detection_medium,
+                    SUM(CASE WHEN ai_detection_band = 'low' THEN 1 ELSE 0 END) as ai_detection_low,
+                    MIN(timestamp) as started_at
+                FROM check_history
+                WHERE batch_id = ?
+                """
+                + access_sql
+                + " GROUP BY batch_id"
+            )
+            async with db.execute(query, (batch_id, *access_params)) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def set_check_team(self, check_id: int, team_id: Optional[int]) -> bool:
+        """Share (or unshare with ``None``) a check with a team. Returns True if
+        a row was updated. The caller is responsible for verifying that the
+        requester owns the check and belongs to the team (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "UPDATE check_history SET team_id = ? WHERE id = ?",
+                (team_id, check_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def set_batch_team(
+        self, batch_id: str, team_id: Optional[int], user_id: Optional[int] = None
+    ) -> int:
+        """Share every check in a batch with a team (or unshare with ``None``).
+
+        Owner-scoped when ``user_id`` is set so a member can't reassign a batch
+        they only have read access to. Returns the number of rows updated (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            if user_id is not None:
+                cursor = await db.execute(
+                    "UPDATE check_history SET team_id = ? WHERE batch_id = ? AND user_id = ?",
+                    (team_id, batch_id, user_id),
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE check_history SET team_id = ? WHERE batch_id = ?",
+                    (team_id, batch_id),
+                )
+            await db.commit()
+            return cursor.rowcount
+
+    async def get_team_checks(self, team_id: int) -> List[Dict[str, Any]]:
+        """List checks shared with a team, newest first (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       hallucination_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
+                       status, source_type, batch_id, batch_label, team_id, user_id,
+                       ai_detection_score, ai_detection_band
+                FROM check_history
+                WHERE team_id = ?
+                ORDER BY timestamp DESC
+                """,
+                (team_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_check_batch_team(self, check_id: int) -> Optional[Dict[str, Any]]:
+        """Return ``{batch_id, team_id}`` for a check, or None if it doesn't
+        exist. Used by the realtime layer to fan a per-check result out to the
+        batch's presence room (R26)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT batch_id, team_id FROM check_history WHERE id = ?",
+                (check_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
     async def cancel_batch(self, batch_id: str, user_id: Optional[int] = None) -> int:
         """Cancel every non-terminal check in a batch (in_progress, pending,
