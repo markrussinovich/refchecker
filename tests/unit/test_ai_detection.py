@@ -29,6 +29,46 @@ def test_abstain_too_short():
     assert base.should_abstain("only a few words here") == "too_short"
 
 
+def test_strip_nonbody_removes_journal_boilerplate():
+    body = ("This systematic review examined the prevalence of hip and knee "
+            "osteoarthritis across European populations using pooled random "
+            "effects meta analysis of observational studies. ") * 40
+    text = (
+        "RESEARCH Open Access © The Author(s) 2026. This article is licensed "
+        "under a Creative Commons Attribution-NonCommercial license.\n"
+        "https://creativecommons.org/licenses/by-nc-nd/4.0/. "
+        "https://doi.org/10.1186/s12891-026-09493-7\n"
+        "*Correspondence: Ioannis Christofides i.christofides@umcg.nl Full list "
+        "of author information is available at the end of the article\n"
+        "Abstract\nIntroduction Osteoarthritis is a leading cause of disability. "
+        + body +
+        "\nKeywords Osteoarthritis, Hip, Knee, Prevalence, Europe\n"
+        "References\n1. Smith J. Prevalence of OA. J Bone Joint Surg. 2020;12:33.\n"
+    )
+    cleaned = base.strip_nonbody(text)
+    low = cleaned.lower()
+    assert "creative commons" not in low and "creativecommons" not in low
+    assert "correspondence" not in low and "@umcg" not in low
+    assert "doi.org" not in low
+    assert "keywords" not in low
+    assert "j bone joint surg" not in cleaned  # reference list dropped
+    assert "©" not in cleaned             # copyright dropped
+    assert "systematic review examined the prevalence" in cleaned  # body kept
+
+
+def test_strip_nonbody_keeps_short_or_odd_text_intact():
+    # No abstract/refs/boilerplate and below the body floor -> never gutted.
+    note = "A brief methodological note on the sampling frame. " * 6
+    assert base.strip_nonbody(note).strip() == note.strip()
+
+
+def test_abstain_no_body_text_distinct_from_too_short():
+    # Empty body (e.g. refs read from a .bbl/.bib) is reported distinctly so the
+    # UI doesn't claim the text is merely "too short".
+    assert base.should_abstain("") == "no_body_text"
+    assert base.should_abstain("   ") == "no_body_text"
+
+
 def test_abstain_technical_section():
     math_heavy = "x = 3.14 + alpha^2 / beta - gamma * 2 == 0 ; " * 80
     assert base.should_abstain(math_heavy) == "technical_section"
@@ -43,6 +83,23 @@ def test_windows_clear_reliability_floor():
     windows = base.iter_windows(LONG_PROSE)
     assert windows
     assert all(base.count_words(w) >= base.MIN_WORDS for w in windows)
+
+
+def test_suspect_span_carries_model_score():
+    # Spans must surface the per-window model score + neighbour agreement so the
+    # UI can show "model score 0.97" per passage (additive, never a guilt prob).
+    from refchecker.ai_detection.local_backend import _agreeing_spans
+    probs = [0.97, 0.99, 0.95]
+    windows = ['window one ' * 40, 'window two ' * 40, 'window three ' * 40]
+    spans = _agreeing_spans(windows, probs, [0, 1, 2])
+    assert spans, 'three adjacent high windows should yield corroborated spans'
+    d = spans[1].to_dict()
+    assert d['model_score'] == 0.99
+    assert d['neighbour_agreement_count'] == 2   # both neighbours agree
+    assert d['confidence_method'] == 'multi_window_agreement'
+    assert '0.99' in d['reason']
+    # Back-compat: the dict always carries the keys (None when not set).
+    assert 'model_score' in base.SuspectSpan(quote='x').to_dict()
 
 
 def test_combine_bands_is_conservative():
@@ -63,7 +120,13 @@ def test_clamp_only_lowers_severity():
     assert base.clamp_not_above("low", "medium") == "low"
 
 
-def test_local_backend_unavailable_without_model():
+def test_local_backend_unavailable_without_model(monkeypatch):
+    # Force the "no model" precondition so this tests the graceful-degradation
+    # contract on every host — including dev machines that happen to have the
+    # desklib weights cached under ~/.cache/refchecker (otherwise the backend
+    # would actually score the text and return a real band).
+    from refchecker.ai_detection import model_manager
+    monkeypatch.setattr(model_manager, "is_model_installed", lambda: False)
     r = run_detection(LONG_PROSE, title="t", backend="local")
     assert r.band == base.BAND_UNAVAILABLE
     assert r.abstain_reason in ("model_not_installed", "deps_not_installed")
@@ -240,3 +303,235 @@ def test_record_detection_usage_attributes_to_check_and_flow():
     assert "ai_detection" in snap["by_flow"]
     assert snap["by_flow"]["ai_detection"]["input_tokens"] == 2500
     assert round(snap["cost_usd"], 4) == 0.1
+
+
+# ── runtime_manager: optional inference-runtime install (no network) ────────
+
+import sys as _sys
+import sys
+import importlib
+
+from refchecker.ai_detection import runtime_manager as _rt
+
+
+def test_runtime_dir_prefers_explicit_then_data_then_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path / "rt"))
+    monkeypatch.setenv("REFCHECKER_DATA_DIR", str(tmp_path / "data"))
+    assert _rt.runtime_dir() == tmp_path / "rt"
+    monkeypatch.delenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", raising=False)
+    assert _rt.runtime_dir() == tmp_path / "data" / "ai-detection-runtime"
+    monkeypatch.delenv("REFCHECKER_DATA_DIR", raising=False)
+    monkeypatch.setenv("REFCHECKER_CACHE_DIR", str(tmp_path / "cache"))
+    assert _rt.runtime_dir() == tmp_path / "cache" / "ai-detection-runtime"
+
+
+def test_pip_argv_torch_targets_runtime_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    argv = _rt._pip_argv("torch")
+    assert argv[0] == "install"
+    assert "--no-input" in argv and "--target" in argv
+    assert argv[argv.index("--target") + 1] == str(tmp_path)
+    assert "torch" in argv and "transformers" in argv
+
+
+def test_pip_argv_cpu_torch_index_off_mac(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt.sys, "platform", "linux")
+    assert "https://download.pytorch.org/whl/cpu" in _rt._pip_argv("torch")
+    # the onnx variant never pulls the torch index
+    assert "https://download.pytorch.org/whl/cpu" not in _rt._pip_argv("onnx")
+
+
+def test_pip_argv_frozen_forces_binary_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt, "is_frozen", lambda: True)
+    assert "--only-binary=:all:" in _rt._pip_argv("torch")
+
+
+def test_ensure_on_path_noop_when_missing_then_adds_once(monkeypatch, tmp_path):
+    target = tmp_path / "rt"
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(target))
+    s = str(target)
+    assert s not in _sys.path
+    _rt.ensure_on_path()              # dir absent → no-op
+    assert s not in _sys.path
+    target.mkdir()
+    try:
+        _rt.ensure_on_path()
+        assert _sys.path[0] == s
+        _rt.ensure_on_path()          # idempotent
+        assert _sys.path.count(s) == 1
+    finally:
+        while s in _sys.path:
+            _sys.path.remove(s)
+
+
+def test_runtime_status_shape(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    st = _rt.runtime_status()
+    for k in ("deps_available", "installed_variant", "default_variant",
+              "variants", "is_frozen", "target"):
+        assert k in st
+    assert st["default_variant"] == "torch"
+    assert set(st["variants"]) == {"torch", "onnx"}
+
+
+def test_start_install_short_circuits_when_runtime_present(monkeypatch, tmp_path):
+    # When deps are already importable, start_install must NOT spawn pip — it
+    # normalizes a bogus variant and returns status without side effects.
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt, "deps_available", lambda: True)
+    res = _rt.start_install("bogus")
+    assert res["deps_available"] is True
+
+
+def test_runtime_status_includes_live_log(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    _rt._log_reset()
+    _rt._log_line("hello-debug-line")
+    st = _rt.runtime_status()
+    assert isinstance(st.get("log"), list)
+    assert any("hello-debug-line" in line for line in st["log"])
+
+
+def test_log_writer_streams_into_buffer():
+    _rt._log_reset()
+    w = _rt._LogWriter()
+    w.write("downloading torch...\n")
+    assert any("downloading torch" in line for line in _rt.get_log())
+
+
+def test_diagnostics_ring_buffer_newest_first():
+    from refchecker.ai_detection import diagnostics
+    diagnostics.clear()
+    diagnostics.record({"backend": "local", "outcome": "low"})
+    diagnostics.record({"backend": "api", "outcome": "high"})
+    evs = diagnostics.events()
+    assert evs[0]["backend"] == "api" and evs[1]["backend"] == "local"
+    assert all("ts" in e for e in evs)
+
+
+def test_clean_target_wipes_but_keeps_pip_pyz(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    (tmp_path / "torch").mkdir()
+    (tmp_path / "junk.txt").write_text("x")
+    (tmp_path / "pip.pyz").write_bytes(b"PK")
+    _rt._clean_target()
+    assert not (tmp_path / "torch").exists()
+    assert not (tmp_path / "junk.txt").exists()
+    assert (tmp_path / "pip.pyz").exists()  # the downloaded pip is preserved
+
+
+def test_pip_argv_has_upgrade_and_cli_entry_exists(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    assert "--upgrade" in _rt._pip_argv("torch")  # re-install replaces, not skips
+    assert callable(_rt.run_pip_cli)               # bundle --pip-install entry
+
+
+def test_runtime_finder_overrides_partial_shadow(tmp_path):
+    """Reproduce the PyInstaller partial-shadow (a `pkg` with no `pkg/auto.py`
+    pre-cached, mimicking the frozen bundle) and prove the finder + sys.modules
+    eviction make the complete runtime copy win so `pkg.auto` resolves."""
+    pkg = "_rcshadowpkg"
+    bundle, runtime = tmp_path / "bundle", tmp_path / "runtime"
+    (bundle / pkg).mkdir(parents=True)
+    (bundle / pkg / "__init__.py").write_text("VER = 'bundle'\n")        # partial: no auto.py
+    (runtime / pkg).mkdir(parents=True)
+    (runtime / pkg / "__init__.py").write_text("VER = 'runtime'\n")
+    (runtime / pkg / "auto.py").write_text("X = 1\n")                    # complete
+
+    finder = None
+    orig_path = list(sys.path)
+    try:
+        # mimic server startup importing the PARTIAL copy first (caches it)
+        sys.path.insert(0, str(bundle))
+        importlib.invalidate_caches()
+        assert importlib.import_module(pkg).VER == "bundle"
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(pkg + ".auto")  # the shadow bug, reproduced
+
+        # apply the fix exactly as runtime_manager does
+        finder = _rt._RuntimeTargetFinder(str(runtime), frozenset({pkg}))
+        sys.meta_path.insert(0, finder)
+        sys.path.append(str(runtime))               # append, not insert(0)
+        for n in [k for k in list(sys.modules) if k == pkg or k.startswith(pkg + ".")]:
+            del sys.modules[n]
+        importlib.invalidate_caches()
+
+        assert importlib.import_module(pkg).VER == "runtime"   # finder won over the partial
+        importlib.import_module(pkg + ".auto")                 # previously-missing submodule resolves
+    finally:
+        if finder in sys.meta_path:
+            sys.meta_path.remove(finder)
+        for n in [k for k in list(sys.modules) if k == pkg or k.startswith(pkg + ".")]:
+            del sys.modules[n]
+        sys.path[:] = orig_path
+        importlib.invalidate_caches()
+
+
+def test_model_status_includes_log(monkeypatch, tmp_path):
+    from refchecker.ai_detection import model_manager as _mm
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_MODEL_DIR", str(tmp_path))
+    _mm._log_reset()
+    _mm._log_line("hello-model-log")
+    st = _mm.model_status()
+    assert isinstance(st.get("log"), list)
+    assert any("hello-model-log" in line for line in st["log"])
+
+
+def test_model_download_drops_removed_symlinks_kwarg():
+    # local_dir_use_symlinks was REMOVED in huggingface_hub 1.x → it must not be
+    # passed (it raised TypeError and made the download fail silently), and the
+    # worker must make the pip-installed runtime importable first.
+    import inspect
+    from refchecker.ai_detection import model_manager as _mm
+    src = inspect.getsource(_mm._download_worker)
+    assert "local_dir_use_symlinks=" not in src  # the removed kwarg is not passed
+    assert "ensure_on_path" in src
+
+
+def test_model_download_subprocess_and_xet_off():
+    # The desktop download runs in a clean subprocess (xet truly off, set before
+    # huggingface_hub import); the supervisor resumes via re-run rather than
+    # SIGKILLing hf_hub mid-stream (which corrupts resume).
+    import inspect
+    from refchecker.ai_detection import model_manager as _mm
+    assert callable(_mm.run_hf_download_cli)
+    cli = inspect.getsource(_mm.run_hf_download_cli)
+    assert 'HF_HUB_DISABLE_XET' in cli and 'hf_xet' in cli  # xet disabled + blocked
+    sup = inspect.getsource(_mm._download_supervised)
+    assert '--hf-download' in sup and 'resuming' in sup
+
+
+def test_model_installed_requires_completion_marker(monkeypatch, tmp_path):
+    # A weight file that merely EXISTS must not count as installed — only after
+    # the verified-complete marker is written (guards against truncated partials).
+    from refchecker.ai_detection import model_manager as _mm
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_MODEL_DIR", str(tmp_path))
+    d = _mm.model_path()
+    d.mkdir(parents=True)
+    (d / "config.json").write_text("{}")
+    (d / "model.safetensors").write_bytes(b"x" * (60 * 1024 * 1024))  # 60 MB "weight"
+    assert _mm.is_model_installed() is False          # no marker → not installed
+    assert _mm._model_complete(0) is True             # 60 MB passes the no-expected floor
+    assert _mm._model_complete(200 * 1024 * 1024) is False  # but not vs a 200 MB expected
+    _mm._write_ok_marker()
+    assert _mm.is_model_installed() is True            # marker present → installed
+
+
+def test_runtime_finder_default_deny(tmp_path):
+    # non-allowlisted names and submodules are never claimed (server untouched)
+    f = _rt._RuntimeTargetFinder(str(tmp_path), frozenset({"torch"}))
+    assert f.find_spec("httpx") is None      # not allowlisted → server keeps its copy
+    assert f.find_spec("torch.nn") is None    # submodule → follows parent __path__
+    assert "tqdm" in _rt._ML_ALLOWLIST and "httpx" not in _rt._ML_ALLOWLIST
+
+
+def test_run_detection_records_a_diagnostic_event():
+    from refchecker.ai_detection import diagnostics
+    diagnostics.clear()
+    # unknown backend → graceful unavailable, and still recorded
+    run_detection("some text", backend="nope-not-real")
+    evs = diagnostics.events()
+    assert evs and evs[0]["backend"] == "nope-not-real"
+    assert evs[0]["outcome"] in ("unavailable", "error")
