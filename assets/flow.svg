@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="120" viewBox="0 0 860 120" role="img" aria-label="RefChecker pipeline: extract, verify, detect, share">
+  <defs>
+    <linearGradient id="track" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c9cff"/><stop offset="0.5" stop-color="#22d3ee"/><stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <clipPath id="round"><rect width="860" height="120" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif">
+    <rect width="860" height="120" fill="#0b1020"/>
+
+    <!-- connecting track -->
+    <line x1="120" y1="50" x2="740" y2="50" stroke="#1e2a45" stroke-width="3"/>
+    <line x1="120" y1="50" x2="740" y2="50" stroke="url(#track)" stroke-width="3" stroke-dasharray="10 8">
+      <animate attributeName="stroke-dashoffset" values="36;0" dur="1.2s" repeatCount="indefinite"/>
+    </line>
+
+    <!-- traveling pulse -->
+    <circle r="6" cy="50" fill="#22d3ee" filter="url(#glow)">
+      <animate attributeName="cx" values="120;740;120" dur="5s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- stages -->
+    <g text-anchor="middle">
+      <g>
+        <circle cx="120" cy="50" r="11" fill="#0b1020" stroke="#7c9cff" stroke-width="2.5">
+          <animate attributeName="r" values="11;14;11" dur="5s" begin="0s" repeatCount="indefinite"/>
+        </circle>
+        <text x="120" y="86" font-size="13" fill="#cbd5e1">Extract</text>
+        <text x="120" y="102" font-size="10" fill="#64748b">PDF · .bib · LaTeX</text>
+      </g>
+      <g>
+        <circle cx="327" cy="50" r="11" fill="#0b1020" stroke="#22d3ee" stroke-width="2.5">
+          <animate attributeName="r" values="11;14;11" dur="5s" begin="1.25s" repeatCount="indefinite"/>
+        </circle>
+        <text x="327" y="86" font-size="13" fill="#cbd5e1">Verify</text>
+        <text x="327" y="102" font-size="10" fill="#64748b">S2 · OpenAlex · Crossref</text>
+      </g>
+      <g>
+        <circle cx="533" cy="50" r="11" fill="#0b1020" stroke="#22d3ee" stroke-width="2.5">
+          <animate attributeName="r" values="11;14;11" dur="5s" begin="2.5s" repeatCount="indefinite"/>
+        </circle>
+        <text x="533" y="86" font-size="13" fill="#cbd5e1">Detect</text>
+        <text x="533" y="102" font-size="10" fill="#64748b">AI-text · hallucinations</text>
+      </g>
+      <g>
+        <circle cx="740" cy="50" r="11" fill="#0b1020" stroke="#34d399" stroke-width="2.5">
+          <animate attributeName="r" values="11;14;11" dur="5s" begin="3.75s" repeatCount="indefinite"/>
+        </circle>
+        <text x="740" y="86" font-size="13" fill="#cbd5e1">Share</text>
+        <text x="740" y="102" font-size="10" fill="#64748b">HTML · link · video</text>
+      </g>
+    </g>
+
+    <rect width="859" height="119" rx="14" fill="none" stroke="#22304f" stroke-width="1"/>
+  </g>
+</svg>

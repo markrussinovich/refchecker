@@ -242,8 +242,26 @@ jobs:
           # by the previous step ONLY when the key parses, so a malformed
           # or missing secret doesn't block the build.
           CI: "true"
+          # Run linuxdeploy/AppImage tools by extracting them instead of
+          # mounting via FUSE — GitHub runners lack FUSE, which intermittently
+          # fails AppImage bundling with "failed to run linuxdeploy" / 504s.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         shell: bash
         run: |
+          # Fork PRs (e.g. into the upstream repo) don't receive repository
+          # secrets, so the Apple signing cert is empty. Tauri's macOS bundler
+          # still tries to `security import` the empty APPLE_CERTIFICATE and
+          # fails ("failed to import keychain certificate"), failing the PR
+          # check even though the app compiled fine on every platform. When no
+          # cert is present, build UNSIGNED (validation only) by unsetting the
+          # Apple vars so Tauri skips codesigning (signingIdentity is null in
+          # tauri.conf.json). Real `desktop-v*` tag releases keep their secrets
+          # and sign + notarize as before.
+          if [[ -z "${APPLE_CERTIFICATE:-}" || -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            echo "No Apple signing certificate in this run (fork PR / no secrets) — building unsigned."
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
           # If no valid updater key is available, disable updater-artifact
           # generation for this build (Tauri refuses to build otherwise).
           EXTRA_CONFIG=""
@@ -251,7 +269,25 @@ jobs:
             EXTRA_CONFIG='--config {"bundle":{"createUpdaterArtifacts":false}}'
             echo "Updater signing disabled this run — passing --config to skip updater artifacts."
           fi
-          npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG
+          # Retry the bundle: the Tauri bundler downloads wix (Windows) /
+          # linuxdeploy + AppImage (Linux) tools from GitHub's release CDN,
+          # which returns transient `http status: 504`s (blocked v0.9.4/5/7).
+          # cargo caches the compile, so a retry only re-attempts the cheap
+          # bundling/download step.
+          n=0
+          until [ "$n" -ge 3 ]; do
+            # --locked: build against the committed Cargo.lock exactly, never
+            # silently re-resolve a newer (possibly broken) transitive crate.
+            # This is the guard that prevents another `time 0.3.48` style drift.
+            npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG -- --locked && break
+            n=$((n+1))
+            echo "::warning::tauri build attempt $n failed (likely a transient tool-download 504); retrying in 45s…"
+            sleep 45
+          done
+          if [ "$n" -ge 3 ]; then
+            echo "::error::tauri build failed after 3 attempts"
+            exit 1
+          fi
 
       - name: Collect artifacts
         id: collect

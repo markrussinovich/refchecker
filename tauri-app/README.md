@@ -4,6 +4,32 @@ A native desktop wrapper around the [RefChecker](https://github.com/ArioMoniri/r
 
 The Python FastAPI backend is bundled as a [PyInstaller](https://pyinstaller.org/) sidecar binary so end users don't need Python installed. The Tauri shell spawns the sidecar on an OS-assigned port, waits for `/api/health`, and loads the served SPA in the app window.
 
+## What the desktop app adds
+
+The desktop build wraps the same verification engine in a native shell and layers
+on the full review workspace — see the top-level [feature matrix](../README.md#feature-matrix-web--desktop--cli--api)
+and [docs/FEATURES.md](../docs/FEATURES.md) for the canonical, code-verified list.
+Desktop-specific surfaces include:
+
+- **Native PDF viewers** — real PDF rendering with status **color coding**,
+  in-document **find** (⌘F), **in-PDF citation links** (reference ↔ document), and
+  trackpad **pinch-zoom** (non-PDF sources are converted to a self-contained PDF).
+- **Seen-library graphs** — a radial graph (clickable DOIs) and an Obsidian-style
+  **3D** force-directed graph of every reference you've ever verified.
+- **Similar papers + "Cites & Refs"** with a common-works (shared-references) view,
+  and **add-to-reference-list** with dedup + a tracked before→after renumber diff.
+- **Per-reference chat + Summarize** grounded in the article text (separate model
+  selection per feature, with an honest TL;DR/abstain fallback).
+- **AI-generated-text detection** (opt-in, advisory) with GPTZero-style visuals.
+- **Share / export** — self-contained HTML, publish link, Markdown / PDF / DOCX,
+  RIS, and an animated video walkthrough; a **live token / $ telemetry** meter; a
+  **Support** menu; and opt-in **Accounts · Teams · presence**
+  ([enable from the app with hot-reload](../docs/MULTIUSER.md)).
+- **Auto-updating, signed installers** for macOS / Windows / Linux.
+
+All of the above stay **single-user/local by default** and never fabricate —
+detection is opt-in and advisory only.
+
 ## Layout
 
 ```

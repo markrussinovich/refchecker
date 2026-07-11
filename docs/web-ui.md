@@ -175,6 +175,30 @@ academic-refchecker --database-dir /path/to/local-db-folder --update-databases -
 
 The Web UI refreshes databases it already finds in that directory on startup. The CLI updater remains the canonical way to do the initial population of a new local database directory.
 
+## `refchecker-webui check` — single-paper checker (web-parity flags)
+
+`refchecker-webui` has two subcommands. With no subcommand it serves the Web UI / API (the default behaviour above). The `check` subcommand runs the **same** pipeline the web app uses (`ProgressRefChecker`) against one paper from the terminal, reusing the real backend implementations rather than forking them. It exposes the web/API feature flags:
+
+```bash
+refchecker-webui check --paper 2406.01234
+refchecker-webui check --paper ./paper.pdf --json
+refchecker-webui check --paper ./refs.bib --check-retractions --suggest-missing
+refchecker-webui check --paper 2406.01234 --check-hallucinations \
+    --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
+refchecker-webui check --paper ./paper.pdf --ai-detection api \
+    --ai-detection-consent --ai-detection-key $PANGRAM_KEY
+```
+
+- `--check-hallucinations` — LLM deep hallucination check (needs a hallucination-capable provider/model/key).
+- `--check-citation-order` — audit inline-citation numbering/ordering (abstains when unclear).
+- `--check-retractions` — flag references OpenAlex reports as retracted (real signal only).
+- `--suggest-missing` — gap-finder co-citation suggestions (OpenAlex-resolved real works only).
+- Cross-source enrichment backfill is **on by default**; pass `--no-enrich` to opt out.
+- `--ai-detection {local,api}` — opt-in, advisory-only AI-text detection; **requires** `--ai-detection-consent`.
+- `--json` — print one JSON document to **stdout** (progress goes to **stderr**) with `paper_title`, `paper_source`, `source_type`, `summary`, `references`, plus `citation_order` / `retractions` / `suggestions` / `ai_detection` when their flags are set.
+
+Interactive surfaces (native PDF viewers + in-PDF links, 3D library / similar-papers graphs, the shareable per-check video, author hover cards) are **web/desktop-only** and are not exposed on the command line. Run `refchecker-webui check --help` for the authoritative flag list. The top-level [README.md](../README.md#feature-matrix-web--desktop--cli--api) carries the full Web / Desktop / CLI / API feature matrix.
+
 ## API Surface
 
 ### REST Endpoints
