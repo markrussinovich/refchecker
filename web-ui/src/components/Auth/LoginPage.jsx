@@ -35,14 +35,14 @@ export default function LoginPage() {
     >
       {/* Card */}
       <div
-        className="w-full max-w-lg rounded-2xl shadow-xl p-8 flex flex-col items-center gap-6"
+        className="w-full max-w-lg rounded-2xl shadow-xl p-8 flex flex-col items-stretch gap-6"
         style={{
           backgroundColor: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
         }}
       >
-        {/* Logo + title */}
-        <div className="flex flex-col items-center gap-3">
+        {/* Logo + title — brand header stays centered; body text below is left-aligned. */}
+        <div className="flex flex-col items-center gap-3 self-center">
           <svg className="w-14 h-14" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
             <rect width="100" height="100" rx="15" fill="#3b82f6" />
             <path d="M25 30h50M25 50h40M25 70h30" stroke="white" strokeWidth="8" strokeLinecap="round" />
@@ -70,7 +70,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="w-full space-y-3 text-center">
+        <div className="w-full space-y-3 text-left">
           <h2
             className="text-lg font-semibold"
             style={{ color: 'var(--color-text-primary)' }}
@@ -121,7 +121,7 @@ export default function LoginPage() {
         {/* Sign-in buttons */}
         <div className="w-full flex flex-col gap-3">
           {providers.length === 0 ? (
-            <p className="text-sm text-center" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="text-sm text-left" style={{ color: 'var(--color-text-secondary)' }}>
               No OAuth providers are configured. Contact your administrator.
             </p>
           ) : (
@@ -157,15 +157,27 @@ export default function LoginPage() {
           )}
         </div>
 
+        {/* Sign-up affordance: OAuth first-login creates the account, so there
+            is no separate form — make that explicit instead of leaving "Sign in"
+            looking like an existing-account-only flow (R26). */}
+        {providers.length > 0 && (
+          <p
+            className="w-full text-xs text-left"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            New here? Continue with any provider above — your account is created automatically on first sign-in.
+          </p>
+        )}
+
         <p
-          className="text-xs text-center"
+          className="w-full text-xs text-left"
           style={{ color: 'var(--color-text-tertiary, #9ca3af)' }}
         >
           By signing in you agree to use this service for research purposes.
         </p>
 
         <p
-          className="w-full text-xs text-center italic leading-5"
+          className="w-full text-xs text-left italic leading-5"
           style={{ color: 'var(--color-text-muted)' }}
         >
           Note: any LLM keys you enter are retrieved from the encrypted browser cache and only kept in

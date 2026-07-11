@@ -83,6 +83,12 @@ export default function GraphView({ references, paperTitle }) {
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
   const [hasUserNavigated, setHasUserNavigated] = useState(false)
+  // When on, 2nd-degree expansion also asks the backend for an AI-generated
+  // -text likelihood band per expanded article (computed locally from the
+  // abstract, free/offline). Declared up here (not near the auto-expand
+  // controls) so the citation-graph fetch effect can re-run when it toggles,
+  // letting first-degree nodes pick up their AI ring too.
+  const [aiGenMode, setAiGenMode] = useState(false)
   const [graphTheme, setGraphTheme] = useState(() => ({
     background: '#f7f7f8',
     text: '#0d0d0d',
@@ -135,7 +141,7 @@ export default function GraphView({ references, paperTitle }) {
       doi: r.doi,
       arxiv_id: r.arxiv_id,
     }))
-    fetchCitationGraph({ references: payload, paper_title: paperTitle })
+    fetchCitationGraph({ references: payload, paper_title: paperTitle, ai_detection: aiGenMode })
       .then(res => {
         if (cancelled) return
         const byId = {}
@@ -147,7 +153,7 @@ export default function GraphView({ references, paperTitle }) {
       .catch(() => { if (!cancelled) setServerGraph(null) })
       .finally(() => { if (!cancelled) setLoadingGraph(false) })
     return () => { cancelled = true }
-  }, [references, paperTitle])
+  }, [references, paperTitle, aiGenMode])
 
   const graphData = useMemo(() => {
     const refs = (references || []).filter(Boolean)
@@ -201,12 +207,20 @@ export default function GraphView({ references, paperTitle }) {
       const fallbackPaperId = r.doi ? `DOI:${r.doi}`
         : r.arxiv_id ? `arXiv:${r.arxiv_id}`
         : null
+      // First-degree AI-gen band (when the AI-gen toggle re-fetched the
+      // graph with ai_detection=true and the local model is installed). This
+      // is what lets the ring render on the bibliography nodes, not only on
+      // expanded ones. Mirror the score onto ref for the detail panel.
+      const aiBand = serverNode?.ai_detection_band || null
+      const refWithAi = (typeof serverNode?.ai_detection_score === 'number' && r && typeof r === 'object')
+        ? { ...r, ai_detection_score: serverNode.ai_detection_score }
+        : r
       const node = {
         id,
         label: (r.title || '(no title)').slice(0, 80),
         type: 'reference',
         status,
-        ref: r,
+        ref: refWithAi,
         paperId: serverNode?.paperId || fallbackPaperId,
         citationCount,
         inDegree,
@@ -214,6 +228,7 @@ export default function GraphView({ references, paperTitle }) {
         isOrphan,
         val,
         color: STATUS_COLOR[status] || STATUS_COLOR.pending,
+        aiBand,
       }
       nodes.push(node)
       localById[id] = node
@@ -345,7 +360,7 @@ export default function GraphView({ references, paperTitle }) {
         const seen = new Set(prev.map(p => p.id))
         return [...prev, ...additions.filter(a => !seen.has(a.id))]
       })
-    } catch (e) {
+    } catch {
       // swallow — graph is best-effort
     } finally {
       setExpanding(null)
@@ -371,10 +386,8 @@ export default function GraphView({ references, paperTitle }) {
   // an explicit toggle.
   const [autoExpanding, setAutoExpanding] = useState(false)
   const [autoExpanded, setAutoExpanded] = useState(false)
-  // When on, 2nd-degree expansion also asks the backend for an AI-generated
-  // -text likelihood band per expanded article (computed locally from the
-  // abstract, free/offline — advisory only, usually inconclusive).
-  const [aiGenMode, setAiGenMode] = useState(false)
+  // (aiGenMode is declared near the top so the citation-graph fetch effect
+  // can depend on it — toggling it re-fetches first-degree AI bands.)
   // Eligible-for-expansion: prefer serverGraph nodes (already paperId-
   // keyed) but fall back to any ref with a DOI / arxiv id so the
   // 2nd-degree toggle still shows up for bibliographies where the S2

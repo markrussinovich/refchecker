@@ -321,11 +321,22 @@ export default function CorrectionsView({ references, isCheckComplete = false })
       useHistoryStore.getState().optimisticApplyCorrection?.(refIdStr)
       useCheckStore.getState().applyCorrectionInStore?.(refIdStr)
       try {
+        // Persist the correction server-side, but DO NOT force-reload the check:
+        // selectCheck({force}) replaces selectedCheck and WIPES the
+        // `_pre_correction` snapshots the optimistic update just set, which left
+        // Reset/Restore unable to roll the badge back. The optimistic update is
+        // the displayed source of truth; the authoritative state loads on the
+        // next natural navigation.
         await verifyReferenceInCheck(selectedCheckId, refIdStr, { apply_correction: true })
-        await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
-      } catch (_e) {
+        // NOTE (merge with upstream "Persist citation style preferences"):
+        // upstream added selectCheck({force:true}) here, but that wipes the
+        // _pre_correction optimistic snapshots and breaks Reset/Restore — kept
+        // our optimistic-update-as-source-of-truth behaviour instead.
+      } catch {
         /* re-verify is best-effort; the optimistic update stands */
       }
+      // The re-verify may have spent tokens — refresh the usage badge now.
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
 
@@ -336,6 +347,13 @@ export default function CorrectionsView({ references, isCheckComplete = false })
   // accepting, or the snapshot map was cleared on tab unmount).
   const restoreOriginal = async (ref, i) => {
     const k = keyFor(ref, i)
+    // Roll the optimistic store mutation back NOW so the HealthBadge / list move
+    // immediately. Revert BOTH stores: useCheckStore drives the current-check
+    // view, useHistoryStore.selectedCheck drives the historical view — without
+    // the second call the badge stayed frozen on Restore for history checks.
+    const refIdForRevert = String(ref.id ?? ref.index ?? i)
+    useCheckStore.getState().revertCorrectionInStore?.(refIdForRevert)
+    useHistoryStore.getState().optimisticRevertCorrection?.(refIdForRevert)
     const snap = originalSnapshots[k]
     if (!snap) {
       // No snapshot — best we can do is drop the local decision so the
@@ -348,9 +366,12 @@ export default function CorrectionsView({ references, isCheckComplete = false })
     if (!selectedCheckId) return
     const refIdStr = String(ref.id ?? ref.index ?? i)
     try {
+      // Persist the revert server-side; no force-reload (it would wipe the
+      // optimistic snapshots — see applyAndReverify).
       await verifyReferenceInCheck(selectedCheckId, refIdStr, { overrides: snap })
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
-    } catch (_e) {
+      // (see applyAndReverify) keep our no-force-reload behaviour so the
+      // optimistic Reset/Restore snapshots survive.
+    } catch {
       /* best-effort — the local decision flip already happened */
     }
     // Drop the snapshot so a subsequent Apply Fix captures a fresh one.
@@ -361,24 +382,40 @@ export default function CorrectionsView({ references, isCheckComplete = false })
     })
   }
 
+  // "Don't apply": if this row was already optimistically applied/edited, roll
+  // the correction back in BOTH stores so the HealthBadge drops again — then
+  // mark it rejected. Without the rollback the badge stayed inflated after the
+  // user changed their mind.
+  const rejectCorrection = (ref, i, k) => {
+    const prevStatus = decisions[k]?.status
+    if (prevStatus === 'applied' || prevStatus === 'edited') {
+      const refIdForRevert = String(ref.id ?? ref.index ?? i)
+      useCheckStore.getState().revertCorrectionInStore?.(refIdForRevert)
+      useHistoryStore.getState().optimisticRevertCorrection?.(refIdForRevert)
+    }
+    setDecision(k, { status: 'rejected' })
+  }
+
   const applyAllVisible = async () => {
+    // Compute the target set SYNCHRONOUSLY from the current decisions —
+    // do NOT derive it as a side-effect inside the setDecisions updater,
+    // because React defers that updater to the render phase, leaving
+    // `targets` empty when the optimistic/re-verify block below runs. That
+    // timing bug is why the badge moved on single-fix but never on
+    // "apply all". Skip user-edited rows (their text is authoritative).
     const targets = []
+    filtered.forEach(({ ref }, i) => {
+      const k = keyFor(ref, i)
+      if (decisions[k]?.status === 'edited') return
+      targets.push({ ref, i, k })
+    })
     // Snapshot every targeted ref BEFORE marking decisions, so Restore
     // can roll back any of them. The map is keyed by row key so
     // per-row restore stays independent even after a bulk apply.
-    filtered.forEach(({ ref }, i) => {
-      const k = keyFor(ref, i)
-      snapshotIfMissing(k, ref)
-    })
+    for (const { ref, k } of targets) snapshotIfMissing(k, ref)
     setDecisions(prev => {
       const next = { ...prev }
-      filtered.forEach(({ ref }, i) => {
-        const k = keyFor(ref, i)
-        // Don't clobber a user-edited entry — but do mark pending/rejected as applied.
-        if (next[k]?.status === 'edited') return
-        next[k] = { status: 'applied' }
-        targets.push({ ref, i })
-      })
+      for (const { k } of targets) next[k] = { status: 'applied' }
       return next
     })
     if (selectedCheckId && targets.length) {
@@ -402,10 +439,21 @@ export default function CorrectionsView({ references, isCheckComplete = false })
         }
       }
       await Promise.all([worker(), worker(), worker(), worker()])
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
+      // No force-reload: it would wipe the optimistic `_pre_correction`
+      // snapshots and leave "Reset" unable to roll the badge back. The
+      // optimistic updates already drove the badge to its applied state.
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
-  const resetDecisions = () => setDecisions({})
+  const resetDecisions = () => {
+    // Reset the undo list AND roll back every optimistic correction so the
+    // HealthBadge returns to the pre-apply value. Revert BOTH stores so the
+    // chip moves for the historical view too (it reads selectedCheck.results),
+    // not just the current-check view (useCheckStore.references).
+    useCheckStore.getState().revertAllCorrections?.()
+    useHistoryStore.getState().revertAllOptimisticCorrections?.()
+    setDecisions({})
+  }
 
   const startEditing = (k, currentText) => {
     setEditingKey(k); setEditBuffer(currentText)
@@ -837,7 +885,7 @@ export default function CorrectionsView({ references, isCheckComplete = false })
                              border: '1px solid var(--color-border)' }}
                     type="button"
                   >Apply fix</button>
-                  <button onClick={() => setDecision(key, { status: 'rejected' })}
+                  <button onClick={() => rejectCorrection(ref, i, key)}
                     className="px-2 py-0.5 rounded text-xs"
                     style={{ backgroundColor: decision?.status === 'rejected' ? 'var(--color-text-muted, #94a3b8)' : 'var(--color-bg-primary)',
                              color: decision?.status === 'rejected' ? 'white' : 'var(--color-text-primary)',

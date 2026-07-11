@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import ErrorBoundary from './components/common/ErrorBoundary.jsx'
 import { logger } from './utils/logger'
 import { installLinkHandler, isTauri } from './utils/tauriBridge'
 import { installDiagnosticsRecorder } from './utils/diagnostics'
@@ -18,6 +19,8 @@ installDiagnosticsRecorder()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

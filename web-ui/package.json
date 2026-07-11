@@ -18,10 +18,13 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
-    "axios": "^1.15.2",
+    "animejs": "^3.2.2",
+    "axios": "^1.17.0",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-force-graph-2d": "^1.29.1",
+    "react-force-graph-3d": "^1.29.1",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -44,5 +47,8 @@
     "tailwindcss": "^4.2.4",
     "vite": "^8.0.10",
     "vitest": "^4.1.5"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.6"
   }
 }
