@@ -255,7 +255,132 @@ def is_acceptable_abbreviation(
     return False
 
 
-_STOPWORDS = {'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with'}
+_STOPWORDS = {
+    'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with',
+    # Non-English connectives/articles so abbreviations of foreign-language
+    # venues align token-for-token, e.g. 'Zentralblatt für Neurochirurgie'.
+    'fur', 'für', 'und', 'der', 'die', 'das', 'zur', 'zum', 'im',
+    'de', 'del', 'du', 'des', 'da', 'di', 'la', 'le', 'el', 'et',
+}
+
+
+def _token_abbrev_match(c_tok: str, f_tok: str) -> bool:
+    """Does cited token ``c_tok`` abbreviate full token ``f_tok``?
+
+    Accepts a prefix ('neurochir' → 'neurochirurgie') OR a same-initial
+    subsequence for compound/consonant abbreviations ('zbl' → 'zentralblatt',
+    i.e. Z-entral-B-L-att) OR a first+last-letter 2-char abbreviation common in
+    medical NLM titles ('jt' → 'joint', 'st' → 'saint', 'mt' → 'mount').
+    Each rule is gated (shorter, same first letter) to stay conservative."""
+    c, f = c_tok.lower(), f_tok.lower()
+    if f.startswith(c):
+        return True
+    if len(c) >= 3 and len(c) < len(f) and c[0] == f[0]:
+        i = 0
+        for ch in f:
+            if i < len(c) and ch == c[i]:
+                i += 1
+        return i == len(c)
+    # First+last-letter abbreviation: 'jt'->'joint', 'st'->'saint'/'street'.
+    if len(c) == 2 and len(f) >= 4 and c[0] == f[0] and c[-1] == f[-1]:
+        return True
+    return False
+
+
+# Connector tokens that carry no matching weight; dropped before token
+# alignment so 'Bone & Joint' aligns with 'Bone Joint'.
+_VENUE_CONNECTORS = {'&', '+'}
+
+# Structural words that an NLM abbreviation routinely omits while keeping the
+# distinguishing letter/number, e.g. 'Am J Med Genet A' ↔ 'American Journal of
+# Medical Genetics Part A'. Dropping the word (not the 'A') keeps Part A vs
+# Part B distinct.
+_VENUE_STRUCTURAL = {
+    'part', 'pt', 'section', 'sect', 'series', 'ser',
+    'supplement', 'suppl', 'volume', 'vol',
+}
+
+
+def _venue_core(venue: Optional[str]) -> str:
+    """The journal's core name: the part before a ':' subtitle (the
+    '… : official publication of …' boilerplate that publishers append),
+    normalised."""
+    if not venue:
+        return ''
+    head = str(venue).split(':', 1)[0]
+    return _normalize_venue(head)
+
+
+# Reporting guidelines that were SIMULTANEOUSLY co-published across several
+# journals (PRISMA 2020 appeared in BMJ, PLoS Medicine, J Clin Epidemiol, Int J
+# Surg, Systematic Reviews …). Citing one journal's copy is correct even when
+# the matched database record is a different journal's copy — so a 'cited BMJ /
+# found PLoS Medicine' difference for such a paper is NOT a real venue mismatch.
+_REPORTING_GUIDELINE_MARKERS = (
+    "prisma", "consort", "strobe", "moose", "spirit", "stard", "arrive",
+    "squire", "tripod", "agree", "preferred reporting items",
+    "strengthening the reporting", "consolidated standards of reporting",
+    "standards for reporting", "enhancing the quality and transparency",
+)
+_COPUB_VENUE_GROUP = (
+    "bmj", "british medical journal",
+    "plos medicine", "plos med",
+    "annals of internal medicine", "ann intern med",
+    "journal of clinical epidemiology", "j clin epidemiol",
+    "systematic reviews", "syst rev",
+    "international journal of surgery", "int j surg",
+    "bmc medicine", "lancet", "jama", "epidemiology", "trials",
+    "cmaj", "canadian medical association journal",
+    "bulletin of the world health organization", "phlebology",
+    "physical therapy", "open medicine", "research methods in medicine",
+)
+
+
+def is_copublication_venue_pair(title: Optional[str], venue1: Optional[str], venue2: Optional[str]) -> bool:
+    """True when the paper is a known multi-journal reporting guideline and BOTH
+    venues are among its co-publication journals — so the venue difference is a
+    co-publication, not a citation error. Bounded to that guideline allowlist."""
+    if not title or not venue1 or not venue2:
+        return False
+    t = str(title).lower()
+    if not any(mk in t for mk in _REPORTING_GUIDELINE_MARKERS):
+        return False
+    n1, n2 = _normalize_venue(venue1), _normalize_venue(venue2)
+    if not n1 or not n2:
+        return False
+
+    def _in_group(n: str) -> bool:
+        return any(g == n or g in n or n in g for g in _COPUB_VENUE_GROUP)
+
+    return _in_group(n1) and _in_group(n2)
+
+
+def venues_core_match(venue1: Optional[str], venue2: Optional[str]) -> bool:
+    """Style-independent: do two venue strings name the same journal, allowing
+    a ':' subtitle on either side and NLM-style word abbreviations?
+
+    Examples that must match (no "Venue mismatch" warning):
+        'European spine journal: official publication of …' ↔ 'European spine journal'
+        'Eur Spine Journal: Official Publication Eur Spine Soc …' ↔ 'European spine journal'
+        'Arch Bone Jt Surg' ↔ 'Archives of Bone & Joint Surgery'
+    Returns False when it cannot confidently align the cores (caller then runs
+    the standard mismatch check), so it only ever SUPPRESSES false positives.
+    """
+    c1, c2 = _venue_core(venue1), _venue_core(venue2)
+    if not c1 or not c2:
+        return False
+    if c1 == c2:
+        return True
+
+    def _strip_connectors(s: str) -> str:
+        return ' '.join(t for t in s.split() if t not in _VENUE_CONNECTORS)
+
+    c1s, c2s = _strip_connectors(c1), _strip_connectors(c2)
+    if c1s == c2s:
+        return True
+    # Token-by-token abbreviation match in EITHER direction (either side may be
+    # the abbreviated form). _looks_like_word_abbreviation drops stopwords.
+    return _looks_like_word_abbreviation(c1s, c2s) or _looks_like_word_abbreviation(c2s, c1s)
 
 
 def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
@@ -267,10 +392,31 @@ def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
     for c_tok in cited_tokens:
         if f_idx >= len(full_tokens):
             return False
-        if not full_tokens[f_idx].lower().startswith(c_tok.lower()):
+        if not _token_abbrev_match(c_tok, full_tokens[f_idx]):
             return False
         f_idx += 1
     return True
+
+
+def _filter_venue_tokens(raw: str, drop_stopwords: bool):
+    """Tokenise a venue and drop stopwords/structural words for alignment —
+    but NEVER the final token. A journal's trailing single-letter/number part
+    designator ('… Part A', '… Series B') collides with the article stopword
+    'a'; a real title never ends in an article, so keeping the last token
+    preserves the A/B/1/2 distinction that separates Part A from Part B.
+    """
+    toks = [t.rstrip('.') for t in raw.split() if t.rstrip('.')]
+    out = []
+    last = len(toks) - 1
+    for i, t in enumerate(toks):
+        low = t.lower()
+        if i != last:
+            if low in _VENUE_STRUCTURAL:
+                continue
+            if drop_stopwords and low in _STOPWORDS:
+                continue
+        out.append(t)
+    return out
 
 
 def _is_plausible_acronym_of(acr: str, full_tokens) -> bool:
@@ -308,8 +454,8 @@ def _looks_like_word_abbreviation(cited: str, full: str) -> bool:
     "AJNR Am J Neuroradiol": strip the leading token if it plausibly
     derives from the full title's letters, then retry the prefix match.
     """
-    cited_tokens = [t.rstrip('.') for t in cited.split() if t]
-    full_tokens = [t for t in full.split() if t and t.lower() not in _STOPWORDS]
+    cited_tokens = _filter_venue_tokens(cited, drop_stopwords=False)
+    full_tokens = _filter_venue_tokens(full, drop_stopwords=True)
 
     if _tokens_prefix_match(cited_tokens, full_tokens):
         return True

@@ -196,7 +196,19 @@ def validate_year(cited_year: Optional[int], paper_year: Optional[int],
     if not paper_year:
         # Can't validate without a known correct year
         return None
-    
+
+    # DOI-year corroboration: if the reference's own DOI embeds the CITED year
+    # as a delimited token (e.g. Elsevier '10.1016/j.ijsu.2014.07.014' for a
+    # 2014 citation), the citation is self-consistent and a differing database
+    # year is the outlier (Semantic Scholar / OpenAlex metadata is sometimes
+    # wrong). Suppress the mismatch in that case to avoid a false warning.
+    if cited_year and paper_year and abs(int(cited_year) - int(paper_year)) > year_tolerance:
+        _cited_doi = (context or {}).get('cited_doi') or (context or {}).get('doi')
+        if _cited_doi:
+            import re as _re
+            if _re.search(r'(?<!\d)%d(?!\d)' % int(cited_year), str(_cited_doi)):
+                return None
+
     if cited_year and paper_year:
         if use_flexible_validation:
             # Use the more sophisticated validation from text_utils
