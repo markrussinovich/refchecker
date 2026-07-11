@@ -137,7 +137,7 @@
       "active": true,
       "dialog": true,
       "endpoints": [
-        "https://github.com/ArioMoniri/refchecker/releases/latest/download/latest.json"
+        "https://github.com/markrussinovich/refchecker/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhCMkQzMTI4Qjc5QjBGRUUKUldUdUQ1dTNLREV0aStZWGZMcG9QZmxtYjN5U2NkVjRUem5Nd3d0T1VOOGpvMXVTZ3VtS2s0SFgK"
     }

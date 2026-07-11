@@ -23,20 +23,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
+  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
     <img alt="Download for macOS" src="assets/download-macos.svg" height="56">
   </a>
   &nbsp;
-  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
+  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
     <img alt="Download for Windows" src="assets/download-windows.svg" height="56">
   </a>
 </p>
 
 <p align="center">
   <sub>
-    Linux: <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
-    <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
-    <a href="https://github.com/ArioMoniri/refchecker/releases/latest">all builds</a>
+    Linux: <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/latest">all builds</a>
   </sub>
 </p>
 
@@ -163,7 +163,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 - **v0.7.98** — **AI-detection visualizations** (confidence donut, AI/Mixed/Human pills, page-by-page bands, Top AI/Human sentences) · **Share this document** (self-contained HTML, publish link, video) · **3D Seen-References library graph** · document-viewer **zoom + find** · richer **author hover** cards · inline-**cited ✓ badge** · title-typo & "unknown mismatch" fixes.
 - **v0.7.96** — Upstream sync with [markrussinovich/refchecker](https://github.com/markrussinovich/refchecker) · sidebar **expand/collapse-all** for batches.
 
-See the [full release list](https://github.com/ArioMoniri/refchecker/releases) for every build.
+See the [full release list](https://github.com/markrussinovich/refchecker/releases) for every build.
 
 </details>
 
