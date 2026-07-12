@@ -88,9 +88,25 @@ class SuspectSpan:
     quote: str
     reason: str = ""
     confidence: str = "medium"
+    # The richest signal the desklib detector exposes: this window's own model
+    # score (sigmoid prob in [0,1]). NOT a probability of guilt — surfaced only
+    # so the user can see WHICH passages drove the band and by how much.
+    model_score: Optional[float] = None
+    # How many physically-adjacent overlapping windows also cleared the high
+    # threshold (0, 1, or 2) — corroboration strength behind this passage.
+    neighbour_agreement_count: Optional[int] = None
+    # How the passage was validated ("multi_window_agreement").
+    confidence_method: Optional[str] = None
 
     def to_dict(self) -> Dict:
-        return {"quote": self.quote, "reason": self.reason, "confidence": self.confidence}
+        return {
+            "quote": self.quote,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "model_score": self.model_score,
+            "neighbour_agreement_count": self.neighbour_agreement_count,
+            "confidence_method": self.confidence_method,
+        }
 
 
 @dataclass
@@ -111,8 +127,24 @@ class AIDetectionResult:
     model_version: Optional[str] = None
     operating_point: Optional[str] = None
     abstain_reason: Optional[str] = None
+    # Human-readable detail for an abstention/failure (e.g. the underlying
+    # exception when the local model fails to load). Surfaced to the UI so the
+    # user can act on the REAL cause instead of a generic "failed to load".
+    abstain_detail: Optional[str] = None
     word_count: int = 0
     disclaimer: str = DISCLAIMER
+    # ── Optional richer visualisation payloads (populated by the local
+    # windowed backend; None/empty for backends that don't compute them). All
+    # are DESCRIPTIVE summaries of the model's windowed outputs — never a
+    # posterior probability of authorship. ──────────────────────────────────
+    # {"AI": frac, "Mixed": frac, "Human": frac} — fraction of scored windows
+    # whose score is high / medium / low. NOT P(AI-written).
+    probability_distribution: Optional[Dict[str, float]] = None
+    # Per heuristic ~page chunk: {page, start_word, end_word, score, span_count}.
+    per_page_scores: Optional[List[Dict]] = None
+    # Most/least AI-like sentences: {text, score, is_flagged}. Capped + advisory.
+    top_ai_sentences: Optional[List[Dict]] = None
+    top_human_sentences: Optional[List[Dict]] = None
 
     def to_dict(self) -> Dict:
         return {
@@ -125,21 +157,32 @@ class AIDetectionResult:
             "model_version": self.model_version,
             "operating_point": self.operating_point,
             "abstain_reason": self.abstain_reason,
+            "abstain_detail": self.abstain_detail,
             "word_count": self.word_count,
             "disclaimer": self.disclaimer,
+            "probability_distribution": self.probability_distribution,
+            "per_page_scores": self.per_page_scores,
+            "top_ai_sentences": self.top_ai_sentences,
+            "top_human_sentences": self.top_human_sentences,
         }
 
 
 # ── Convenience constructors ──────────────────────────────────────────────
 
 def make_unavailable(reason: str, backend: Optional[str] = None,
-                     word_count: int = 0) -> AIDetectionResult:
-    """No body text / missing deps / model-not-installed / timeout."""
+                     word_count: int = 0,
+                     detail: Optional[str] = None) -> AIDetectionResult:
+    """No body text / missing deps / model-not-installed / timeout.
+
+    ``detail`` carries the real underlying error (e.g. the load exception) so
+    the UI can show WHY it failed rather than a generic message.
+    """
     return AIDetectionResult(
         band=BAND_UNAVAILABLE,
         summary="AI-text detection could not run for this article.",
         backend_used=backend,
         abstain_reason=reason,
+        abstain_detail=detail,
         word_count=word_count,
     )
 
@@ -192,6 +235,12 @@ def should_abstain(text: str) -> Optional[str]:
     the most actionable reason.
     """
     wc = count_words(text)
+    if wc == 0:
+        # No manuscript body at all (e.g. references read from a .bbl/.bib file
+        # or a DOI lookup, so the full text was never extracted) — distinct from
+        # a genuinely short body, so the UI can explain it honestly rather than
+        # claim the text is "too short".
+        return "no_body_text"
     if wc < MIN_WORDS:
         return "too_short"
     if nonprose_fraction(text) > NONPROSE_FRACTION_ABSTAIN:
@@ -321,9 +370,69 @@ class DetectionBackend(ABC):
         """
 
 
+# ── Body-text cleanup (feed the detector authored prose, not boilerplate) ──
+
+# Start of the reference list / bibliography — everything after is citations.
+_REFS_HEADER_RE = re.compile(
+    r"(?im)^[^\S\n]*(?:references|bibliography|works\s+cited|literature\s+cited|"
+    r"reference\s+list)[^\S\n]*$"
+)
+
+# Journal front-matter / boilerplate the detector must NOT score: open-access /
+# Creative-Commons license blurbs, copyright lines, correspondence, affiliations,
+# DOIs, emails, received/accepted dates, keyword lines. These are templated and
+# score as "AI-like" but are not authored manuscript prose.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"(?im)^(?:"
+    r".*(?:creative\s+commons|open\s+access|this\s+article\s+is\s+licensed|"
+    r"licensed\s+under|creativecommons\.org|all\s+rights\s+reserved|"
+    r"the\s+author\(s\)\s*\d{4}|©|correspondence|full\s+list\s+of\s+author|"
+    r"received\s*:.*accepted|https?://doi\.org|doi\.org/10\.|keywords).*"
+    r"|.*[\w.+-]+@[\w-]+\.[\w.-]+.*"
+    r")$"
+)
+
+
+def strip_nonbody(text: str) -> str:
+    """Remove journal boilerplate so the AI-detector scores authored prose, not
+    templated front-matter / references.
+
+    Drops, in order: the reference list, the title/author/affiliation/license
+    front-matter (by starting at the Abstract or Introduction), then residual
+    license / copyright / correspondence / email / DOI / keyword lines. Every
+    step is conservative — it only applies when >= MIN_WORDS of body survives,
+    so a short or unusually-formatted paper is never gutted.
+    """
+    if not text:
+        return text or ""
+    t = text
+
+    # 1) Cut the reference list tail.
+    m = None
+    for m in _REFS_HEADER_RE.finditer(t):
+        pass  # keep the LAST heading match (avoids "references" inside the intro)
+    if m and count_words(t[: m.start()]) >= MIN_WORDS:
+        t = t[: m.start()]
+
+    # 2) Start at the Abstract / Introduction to drop the leading front matter
+    #    (title, authors, affiliations, open-access license, correspondence).
+    for kw in (r"\bAbstract\b", r"\bIntroduction\b"):
+        am = re.search(kw, t, re.IGNORECASE)
+        if am and am.start() < len(t) * 0.4 and count_words(t[am.start():]) >= MIN_WORDS:
+            t = t[am.start():]
+            break
+
+    # 3) Scrub residual boilerplate lines wherever they sit in the body.
+    scrubbed = _BOILERPLATE_LINE_RE.sub("", t)
+    if count_words(scrubbed) >= MIN_WORDS:
+        t = scrubbed
+
+    return re.sub(r"[^\S\n]{2,}", " ", re.sub(r"\n{2,}", "\n", t)).strip()
+
+
 def prepared_text(text: str) -> Tuple[str, int]:
-    """Normalize whitespace and return ``(clean_text, word_count)``."""
-    clean = (text or "").strip()
+    """Clean boilerplate, normalize whitespace, return ``(clean_text, word_count)``."""
+    clean = strip_nonbody((text or "").strip())
     return clean, count_words(clean)
 
 
