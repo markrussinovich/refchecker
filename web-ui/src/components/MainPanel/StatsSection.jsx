@@ -689,7 +689,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                 // jumps under the cursor. The 1px border is always present.
                 className="group flex items-center gap-1 px-2 py-0.5 transition-colors cursor-pointer border rc-control"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   lineHeight: '1rem',
                   borderRadius: 'var(--control-radius)',
                   backgroundColor: isSelected ? filter.bgColor : 'transparent',
