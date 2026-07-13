@@ -35,28 +35,47 @@ def _import_auth_direct(env_overrides=None):
         else:
             os.environ[k] = v
 
-    # Stub out backend.database so auth.py's `from .database import db` works
-    stub_db = MagicMock()
-    sys.modules.setdefault("backend", MagicMock(__path__=[str(_BACKEND_DIR)]))
-    sys.modules["backend.database"] = MagicMock(db=stub_db)
+    # Stub out backend.database so auth.py's `from .database import db` works.
+    # We MUST restore sys.modules afterwards: leaving a MagicMock behind for
+    # "backend.database" (or a stub "backend"/"backend.auth") leaks into any
+    # module imported later in the same session. In particular, backend.main
+    # binds `db` at import time via `from .database import db`, so a lingering
+    # mock makes its DB helpers (e.g. get_user_team_ids) non-awaitable and
+    # breaks unrelated tests (test_gap_finder) purely based on collection order.
+    _MODULE_KEYS = ("backend", "backend.database", "backend.auth")
+    _sentinel = object()
+    original_modules = {k: sys.modules.get(k, _sentinel) for k in _MODULE_KEYS}
 
-    # Remove any previously cached version so env changes take effect
-    sys.modules.pop("backend.auth", None)
+    try:
+        stub_db = MagicMock()
+        sys.modules.setdefault("backend", MagicMock(__path__=[str(_BACKEND_DIR)]))
+        sys.modules["backend.database"] = MagicMock(db=stub_db)
 
-    spec = importlib.util.spec_from_file_location(
-        "backend.auth",
-        _BACKEND_DIR / "auth.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["backend.auth"] = module
-    spec.loader.exec_module(module)
+        # Remove any previously cached version so env changes take effect
+        sys.modules.pop("backend.auth", None)
 
-    # Restore env
-    for k, orig in original_env.items():
-        if orig is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = orig
+        spec = importlib.util.spec_from_file_location(
+            "backend.auth",
+            _BACKEND_DIR / "auth.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["backend.auth"] = module
+        spec.loader.exec_module(module)
+    finally:
+        # Restore env
+        for k, orig in original_env.items():
+            if orig is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = orig
+
+        # Restore sys.modules so the isolated import doesn't pollute other
+        # tests. The returned `module` reference stays valid for this caller.
+        for k, orig in original_modules.items():
+            if orig is _sentinel:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = orig
 
     return module
 
