@@ -453,4 +453,35 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(screen.getByText(/Used 2× in this paper/)).toBeTruthy()
     expect(screen.queryByText(/citations/)).toBeNull()
   })
+
+  it('renders a warning that only carries warning_type/warning_details (not "Unknown mismatch")', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Paper with a recheck-style warning',
+      authors: ['Jane Smith'],
+      year: 2021,
+      errors: [],
+      // Recheck/core variant field names — the render must read these too.
+      warnings: [{ warning_type: 'venue', warning_details: 'Venue abbreviation differs from canonical form' }],
+      suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} isCheckComplete />)
+    expect(screen.getByText(/Venue abbreviation differs from canonical form/)).toBeTruthy()
+    expect(screen.queryByText(/Unknown mismatch/)).toBeNull()
+  })
+
+  it('labels a typed-but-detail-less warning by its field, never "Unknown mismatch"', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Paper with a bare typed warning',
+      authors: ['Jane Smith'],
+      year: 2021,
+      errors: [],
+      warnings: [{ warning_type: 'year' }],
+      suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} isCheckComplete />)
+    expect(screen.getByText(/Year mismatch/)).toBeTruthy()
+    expect(screen.queryByText(/Unknown mismatch/)).toBeNull()
+  })
 })

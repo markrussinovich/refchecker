@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { getPaperPdf } from '../../utils/api'
@@ -26,8 +26,28 @@ const FIND_CURRENT_COLORS = { fill: 'rgba(59,130,246,0.55)', stroke: 'rgba(37,99
 const ESC = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const norm = (s) => (s || '').replace(/\s+/g, ' ').trim()
 
+// Collapse text to lowercase alphanumerics, remembering each kept char's index in
+// the original string. Lets us match across PDF-extraction artifacts that plain
+// whitespace-tolerance can't bridge — hyphenation ("de- veloped" vs "developed")
+// and dropped/merged spaces ("on statistical" vs "onstatistical") — because both
+// sides reduce to the same letter stream, then we map the hit back to real offsets.
+function alnumIndex(text) {
+  const chars = []
+  const idx = []
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+      chars.push(c.toLowerCase())
+      idx.push(i)
+    }
+  }
+  return { compact: chars.join(''), idx }
+}
+
 // [start,end] char range of a quote within page text: exact (case-insensitive)
-// first, then a whitespace-tolerant leading-words regex (PDF extraction spacing).
+// first, then a whitespace-tolerant leading-words regex, then an alphanumeric-only
+// match that ignores hyphenation and spacing differences (PDF extraction spacing).
+// Exported for unit testing of the quote-matching fallbacks.
 function locate(pageText, rawQuote) {
   const quote = norm(rawQuote).replace(/[……]+$/, '').replace(/\.{3,}$/, '').trim()
   if (quote.length < 8) return null
@@ -40,7 +60,59 @@ function locate(pageText, rawQuote) {
     const m = new RegExp(words.join('\\s+'), 'i').exec(pageText)
     if (m) return [m.index, Math.min(pageText.length, m.index + Math.max(m[0].length, quote.length))]
   } catch { /* bad regex — ignore */ }
+  // Alphanumeric-only fallback: bridges hyphenation + missing/merged spaces that
+  // the whitespace regex can't. Match the full compact quote when present, else a
+  // leading probe, then map the compact hit back to real page-text offsets.
+  const compactQuote = quote.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (compactQuote.length >= 12) {
+    const { compact, idx } = alnumIndex(pageText)
+    let at2 = compact.indexOf(compactQuote)
+    let matchLen = compactQuote.length
+    if (at2 < 0) {
+      const probe = compactQuote.slice(0, 60)
+      at2 = compact.indexOf(probe)
+      matchLen = probe.length
+    }
+    if (at2 >= 0) {
+      const startOrig = idx[at2]
+      const endOrig = idx[Math.min(idx.length - 1, at2 + matchLen - 1)] + 1
+      return [startOrig, endOrig]
+    }
+  }
   return null
+}
+
+// Match every span to the page items it covers → highlight rects, in the page's
+// UNSCALED (scale=1) coordinate space. Pure/derived from the raw extracted page
+// geometry + the current spans, so it can be recomputed cheaply whenever `spans`
+// changes WITHOUT refetching or re-parsing the PDF (which caused the viewer to
+// flip between "Rendering PDF…" and the page). Returns { highlights, located }.
+function computeHighlights(rawPage, spans) {
+  const { pageNumber: n, pageText, items } = rawPage
+  const highlights = []
+  let located = 0
+  ;(spans || []).forEach((sp, si) => {
+    const range = locate(pageText, sp?.quote || '')
+    if (!range) return
+    const [qs, qe] = range
+    const boxes = items.filter((it) => it.end > qs && it.start < qe && it.w > 0)
+    if (!boxes.length) return
+    located += 1
+    // Status-bearing spans use the shared R14 map; the reference-list entry gets
+    // the distinct blue (R28); status-less AI spans keep the dedicated red.
+    const colors = sp.kind === 'ref-entry'
+      ? REF_ENTRY_COLORS
+      : (sp.status
+        ? getStatusColors(sp.status)
+        : (sp.kind === 'ai' ? AI_COLORS : getStatusColors('default')))
+    boxes.forEach((b, bi) => highlights.push({
+      spanIndex: si, key: `${n}-${si}-${bi}`,
+      x: b.x, y: b.y, w: b.w, h: b.h,
+      fill: colors.fill, stroke: colors.stroke,
+      span: sp,
+    }))
+  })
+  return { highlights, located }
 }
 
 /**
@@ -62,12 +134,22 @@ const FIT_MIN = 0.5, FIT_MAX = 3
 // first open. The ResizeObserver/measure effect replaces this immediately.
 const FIT_FALLBACK = 0.85
 
+// Exported for unit tests of the quote-matching fallbacks. Co-located per the
+// project's existing pattern (see StatusSection's buildCitationViewerSpans).
+// eslint-disable-next-line react-refresh/only-export-components
+export { locate }
+
 export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = null, zoom = 1, onJumpToReference, onUnavailable, onLocated, onFindController }) {
-  const [pages, setPages] = useState([])      // [{ pageNumber, width, height, highlights, items, pageText }]
+  // Raw per-page geometry extracted ONCE from the PDF: { pageNumber, width,
+  // height, items, pageText }. Highlight rects are derived from this + `spans`
+  // separately (see `pages` memo) so a new `spans` array identity never triggers
+  // a PDF refetch / status reset.
+  const [rawPages, setRawPages] = useState([])
   const [status, setStatus] = useState('loading') // loading | ready | error
   const docRef = useRef(null)
   const canvasRefs = useRef({})               // pageNumber -> canvas el
-  const renderedRef = useRef(new Set())       // pages already painted at current scale
+  const paintedScaleRef = useRef({})          // pageNumber -> scale it was last painted at
+  const renderTasksRef = useRef({})           // pageNumber -> in-flight pdf.js RenderTask
   const containerRef = useRef(null)
   // Base scale that makes a page fit the modal width at zoom=1. Measured from
   // the scroll container once mounted; falls back to a SMALL scale until then
@@ -79,6 +161,36 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   // page wrapper. Null when nothing is hovered. Rendered as a solid opaque card
   // (not the browser's native, easy-to-miss title tooltip).
   const [hover, setHover] = useState(null)
+
+  // Stable content signature of `spans` so highlight recomputation is keyed to
+  // what actually affects geometry/colour — not the array's identity (the caller
+  // rebuilds the array on every render). Prevents needless highlight recompute.
+  const spansKey = useMemo(() => JSON.stringify(
+    (spans || []).map((s) => [s?.quote, s?.status, s?.kind, s?.refId, s?.refIndex, s?.refEntryIndex, s?._i])
+  ), [spans])
+
+  // Derived pages: raw geometry + highlight rects for the current spans. Recomputed
+  // only when the document (rawPages) or the spans' content (spansKey) changes —
+  // never resets `status`, never refetches the PDF.
+  const pages = useMemo(
+    () => rawPages.map((rp) => ({ ...rp, highlights: computeHighlights(rp, spans).highlights })),
+    [rawPages, spansKey] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+  // Report how many *distinct* spans located to a highlight (drives the caller's
+  // "found N in document" affordance). A span whose quote matches on multiple
+  // pages must count once — summing per-page `located` produced impossible tallies
+  // (e.g. "3 of 2 located"). Count unique spanIndexes that produced a highlight.
+  const totalLocated = useMemo(() => {
+    const located = new Set()
+    rawPages.forEach((rp) => {
+      computeHighlights(rp, spans).highlights.forEach((h) => located.add(h.spanIndex))
+    })
+    return located.size
+  }, [rawPages, spansKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (status === 'ready') onLocated?.(totalLocated)
+  }, [status, totalLocated]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // R42: find-in-PDF controller over the rendered text-layer geometry. The query
   // + current-match index live here (where the geometry is); the FindBar UI lives
@@ -172,11 +284,18 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
     } catch { /* no-op */ }
   }, [onJumpToReference, flashSpanInDoc])
 
-  // Load the PDF + compute highlight geometry (independent of paint scale).
+  // Load the PDF + extract raw per-page geometry ONCE, in unscaled (scale=1)
+  // coordinates. Depends ONLY on `checkId` — never on `spans` (whose array
+  // identity changes on every parent render) or on the paint scale. This is what
+  // stops the viewer flip-flopping between "Rendering PDF…" and the page:
+  // highlight rects are derived separately from `rawPages` + `spans` (see the
+  // `pages` memo), and SCALE is applied at paint/render time only.
   useEffect(() => {
     let cancelled = false
     let task = null
-    setStatus('loading'); setPages([]); renderedRef.current = new Set()
+    setStatus('loading'); setRawPages([]); paintedScaleRef.current = {}
+    Object.values(renderTasksRef.current).forEach((t) => { try { t?.cancel() } catch { /* ignore */ } })
+    renderTasksRef.current = {}
     ;(async () => {
       let buf
       try {
@@ -195,11 +314,10 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
         if (cancelled) { pdf.destroy?.(); return }
         docRef.current = pdf
         const out = []
-        let totalLocated = 0
         for (let n = 1; n <= pdf.numPages; n++) {
           const page = await pdf.getPage(n)
           if (cancelled) return
-          const vp = page.getViewport({ scale: SCALE })
+          const vp = page.getViewport({ scale: 1 })
           const tc = await page.getTextContent()
           // Concatenate item strings, tracking each item's char span + bbox.
           let pageText = ''
@@ -209,49 +327,24 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
             const start = pageText.length
             pageText += str
             const end = pageText.length
-            // device-space transform of the item origin
+            // unscaled-space transform of the item origin
             const tx = pdfjsLib.Util.transform(vp.transform, it.transform)
             const fontH = Math.hypot(tx[2], tx[3]) || Math.abs(tx[3]) || 10
             items.push({
               start, end,
               x: tx[4], y: tx[5] - fontH,
-              w: (it.width || 0) * SCALE, h: fontH,
+              w: (it.width || 0), h: fontH,
             })
             if (it.hasEOL) pageText += ' '
           }
-          // Match each span to the items it covers → highlight rects.
-          const highlights = []
-          spans.forEach((sp, si) => {
-            const range = locate(pageText, sp?.quote || '')
-            if (!range) return
-            const [qs, qe] = range
-            const boxes = items.filter((it) => it.end > qs && it.start < qe && it.w > 0)
-            if (!boxes.length) return
-            totalLocated += 1
-            // Status-bearing spans use the shared R14 map; the reference-list
-            // entry gets the distinct blue (R28); status-less AI spans keep the
-            // dedicated red highlight.
-            const colors = sp.kind === 'ref-entry'
-              ? REF_ENTRY_COLORS
-              : (sp.status
-                ? getStatusColors(sp.status)
-                : (sp.kind === 'ai' ? AI_COLORS : getStatusColors('default')))
-            boxes.forEach((b, bi) => highlights.push({
-              spanIndex: si, key: `${n}-${si}-${bi}`,
-              x: b.x, y: b.y, w: b.w, h: b.h,
-              fill: colors.fill, stroke: colors.stroke,
-              span: sp,
-            }))
-          })
-          // Keep the per-item geometry + concatenated page text so the find
-          // controller (usePdfFind) can reuse the EXACT same coordinates the
-          // highlight overlays use — no second text extraction, no drift.
-          out.push({ pageNumber: n, width: vp.width, height: vp.height, highlights, items, pageText })
+          // Keep the per-item geometry + concatenated page text so both the
+          // highlight overlays and the find controller (usePdfFind) reuse the
+          // EXACT same coordinates — no second text extraction, no drift.
+          out.push({ pageNumber: n, width: vp.width, height: vp.height, items, pageText })
         }
         if (cancelled) return
-        setPages(out)
+        setRawPages(out)
         setStatus('ready')
-        onLocated?.(totalLocated)
       } catch (e) {
         if (cancelled) return
         logger.error?.('NativePdfViewer', 'PDF render failed', e?.message || e)
@@ -265,30 +358,52 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
       try { docRef.current?.destroy?.() } catch { /* ignore */ }
       docRef.current = null
     }
-  }, [checkId, spans, SCALE]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [checkId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Paint each page canvas once it's in the list (and on scale change).
+  // Paint a page's canvas at the current SCALE. Re-renders when SCALE changes so
+  // zoomed text stays crisp, but guards against pdf.js render races: a fit-width
+  // measurement (or a zoom) changes SCALE right after the first paint, which would
+  // otherwise start a second `render()` on the same canvas while the first is still
+  // in flight — pdf.js then blanks/tears the canvas (blank page with floating
+  // highlights, or upside-down content). We cancel any in-flight task for the page
+  // before starting a new one, and skip repaint when already crisp at this scale.
   const paintPage = useCallback(async (pageNumber) => {
     const pdf = docRef.current
     const canvas = canvasRefs.current[pageNumber]
-    if (!pdf || !canvas || renderedRef.current.has(pageNumber)) return
-    renderedRef.current.add(pageNumber)
+    if (!pdf || !canvas) return
+    if (paintedScaleRef.current[pageNumber] === SCALE) return
+    try { renderTasksRef.current[pageNumber]?.cancel() } catch { /* ignore */ }
+    let task = null
     try {
       const page = await pdf.getPage(pageNumber)
       const vp = page.getViewport({ scale: SCALE })
       const ctx = canvas.getContext('2d')
       canvas.width = vp.width
       canvas.height = vp.height
-      await page.render({ canvasContext: ctx, viewport: vp }).promise
+      task = page.render({ canvasContext: ctx, viewport: vp })
+      renderTasksRef.current[pageNumber] = task
+      await task.promise
+      paintedScaleRef.current[pageNumber] = SCALE
     } catch (e) {
-      logger.debug?.('NativePdfViewer', 'page paint failed', pageNumber, e?.message)
+      // RenderingCancelledException is expected when a newer scale supersedes this
+      // paint; only surface genuine failures.
+      if (e?.name !== 'RenderingCancelledException') {
+        logger.debug?.('NativePdfViewer', 'page paint failed', pageNumber, e?.message)
+      }
+    } finally {
+      if (renderTasksRef.current[pageNumber] === task) delete renderTasksRef.current[pageNumber]
     }
   }, [SCALE])
 
   useEffect(() => {
     if (status !== 'ready') return
-    pages.forEach((p) => paintPage(p.pageNumber))
-  }, [status, pages, paintPage])
+    // SCALE changes swap `paintPage`'s identity, re-running this effect. `paintPage`
+    // itself no-ops pages already crisp at the current scale and cancels in-flight
+    // renders, so repainting on scale change is race-safe. Keyed to `rawPages` (the
+    // document) — NOT the highlight-bearing `pages` — so a spans change never
+    // repaints the canvases.
+    rawPages.forEach((p) => paintPage(p.pageNumber))
+  }, [status, rawPages, paintPage])
 
   // R12: deterministically scroll to + flash the focused passage's highlight,
   // reliably centered. The highlight's geometry depends on the page canvas
@@ -304,7 +419,14 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
     let raf2 = 0
     let clearFlash = 0
     const center = (smooth) => {
-      const el = containerRef.current?.querySelector(`[data-span="${focusSpanIndex}"]`)
+      const root = containerRef.current
+      if (!root) return null
+      // Prefer the explicitly-focused span; if it didn't locate in the PDF
+      // (e.g. the citation quote isn't found but its reference-list entry is),
+      // fall back to the FIRST located highlight so "View in document" always
+      // lands on a highlighted passage instead of dumping the user at page 1.
+      const el = root.querySelector(`[data-span="${focusSpanIndex}"]`)
+        || root.querySelector('[data-span]')
       if (!el) return null
       el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' })
       return el
@@ -364,10 +486,10 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
       {pages.map((p) => (
-        <div key={p.pageNumber} style={{ position: 'relative', width: p.width, height: p.height,
+        <div key={p.pageNumber} style={{ position: 'relative', width: p.width * SCALE, height: p.height * SCALE,
           boxShadow: '0 1px 3px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.12)', background: '#fff', borderRadius: 2 }}>
           <canvas ref={(el) => { canvasRefs.current[p.pageNumber] = el }}
-            style={{ display: 'block', width: p.width, height: p.height }} />
+            style={{ display: 'block', width: p.width * SCALE, height: p.height * SCALE }} />
           {p.highlights.map((h) => {
             const refId = h.span.refId != null ? h.span.refId : h.span.refIndex
             // The reference-list entry is a jump TARGET, not itself clickable.
@@ -387,7 +509,7 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
                 onMouseEnter={() => setHover({ pageNumber: p.pageNumber, x: h.x, y: h.y, h: h.h, span: h.span, stroke: h.stroke, clickable, isAiRef, canJumpInPdf })}
                 onMouseLeave={() => setHover((cur) => (cur && cur.span === h.span && cur.x === h.x ? null : cur))}
                 style={{
-                  position: 'absolute', left: h.x, top: h.y, width: h.w, height: h.h,
+                  position: 'absolute', left: h.x * SCALE, top: h.y * SCALE, width: h.w * SCALE, height: h.h * SCALE,
                   background: h.fill, border: `1px solid ${h.stroke}`, borderRadius: 2,
                   cursor: clickable ? 'pointer' : 'default', mixBlendMode: 'multiply',
                   transition: 'box-shadow 120ms ease',
@@ -409,7 +531,7 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
                 key={`find-${m.matchIndex}-${ri}`}
                 data-find={ri === 0 ? m.matchIndex : undefined}
                 style={{
-                  position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h,
+                  position: 'absolute', left: r.x * SCALE, top: r.y * SCALE, width: r.w * SCALE, height: r.h * SCALE,
                   background: c.fill, border: `1px solid ${c.stroke}`, borderRadius: 2,
                   pointerEvents: 'none', mixBlendMode: 'multiply',
                   boxShadow: active ? '0 0 0 2px rgba(37,99,235,0.55)' : 'none',
@@ -427,9 +549,9 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
               role="tooltip"
               style={{
                 position: 'absolute', zIndex: 30, pointerEvents: 'none',
-                left: Math.max(4, Math.min(hover.x, p.width - 304)),
-                top: hover.y > 76 ? hover.y - 8 : hover.y + hover.h + 8,
-                transform: hover.y > 76 ? 'translateY(-100%)' : 'none',
+                left: Math.max(4, Math.min(hover.x * SCALE, p.width * SCALE - 304)),
+                top: hover.y * SCALE > 76 ? hover.y * SCALE - 8 : hover.y * SCALE + hover.h * SCALE + 8,
+                transform: hover.y * SCALE > 76 ? 'translateY(-100%)' : 'none',
                 maxWidth: 300, padding: '8px 11px', borderRadius: 8,
                 background: 'var(--color-bg-secondary, #1f2430)',
                 color: 'var(--color-text-primary, #f3f4f6)',

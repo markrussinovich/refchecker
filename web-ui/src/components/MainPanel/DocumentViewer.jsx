@@ -91,7 +91,7 @@ function mergeRanges(ranges) {
 // (a clear, readable "zoomed in to the cited sentence" level on top of the
 // fit-width base scale) — never inheriting a stale prior zoom. When the viewer
 // is opened with no focus target it opens at fit-width (1).
-const CITE_FOCUS_ZOOM = 1.5
+const CITE_FOCUS_ZOOM = 1
 
 export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose, onJumpToReference }) {
   // Native PDF first; fall back to the extracted-text view when there's no
@@ -459,5 +459,4 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
 
 // R12: exported for unit tests — the deterministic focus zoom a citation/passage
 // view opens (and re-targets) at. Co-located per the project's existing pattern.
-// eslint-disable-next-line react-refresh/only-export-components
 export { CITE_FOCUS_ZOOM }

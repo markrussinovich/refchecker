@@ -686,38 +686,6 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               style={{ color: 'var(--color-text-primary)' }}
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
-              {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (() => {
-                // R37: co-locate the two distinct citation signals.
-                //  - "Used N× in this paper": how many times THIS paper cites
-                //    the reference inline (local, from the body text).
-                //  - "· N citations": how many times the reference is cited
-                //    across the LITERATURE (from enrichment.cited_by_count).
-                // The literature pill is real-data gated — it only renders when
-                // a real count resolved, so nothing is fabricated.
-                const inlineUses = reference.citation_count || reference.citation_contexts?.length || 0
-                const litCount = reference.enrichment?.cited_by_count
-                const hasLitCount = typeof litCount === 'number'
-                return (
-                  <span
-                    title={`Used ${inlineUses || 1}× in this paper — mentioned inline in this paper's body text`}
-                    className="inline-flex items-center gap-1 align-middle ml-1.5 px-1.5 py-0.5 rounded text-xs font-medium"
-                    style={{ color: 'var(--color-accent, #3b82f6)', background: 'rgba(59,130,246,0.14)', verticalAlign: 'middle' }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
-                    </svg>
-                    Used {inlineUses > 0 ? inlineUses : 1}× in this paper
-                    {hasLitCount && (
-                      <span
-                        title="Times cited across the literature (OpenAlex/S2)"
-                        style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}
-                      >
-                        {' · '}{litCount.toLocaleString()} citations
-                      </span>
-                    )}
-                  </span>
-                )
-              })()}
             </div>
 
             {/* Export button */}
@@ -764,6 +732,42 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               )}
             </div>
           </div>
+
+          {/* Citation-signal pill — always on its own line below the title.
+              R37: co-locates the two distinct citation signals.
+               - "Used N× in this paper": how many times THIS paper cites
+                 the reference inline (local, from the body text).
+               - "· N citations": how many times the reference is cited
+                 across the LITERATURE (from enrichment.cited_by_count).
+              The literature count is real-data gated — it only renders when
+              a real count resolved, so nothing is fabricated. */}
+          {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (() => {
+            const inlineUses = reference.citation_count || reference.citation_contexts?.length || 0
+            const litCount = reference.enrichment?.cited_by_count
+            const hasLitCount = typeof litCount === 'number'
+            return (
+              <div className="mt-1">
+                <span
+                  title={`Used ${inlineUses || 1}× in this paper — mentioned inline in this paper's body text`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium"
+                  style={{ color: 'var(--color-accent, #3b82f6)', background: 'rgba(59,130,246,0.14)' }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
+                  </svg>
+                  Used {inlineUses > 0 ? inlineUses : 1}× in this paper
+                  {hasLitCount && (
+                    <span
+                      title="Times cited across the literature (OpenAlex/S2)"
+                      style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}
+                    >
+                      {' · '}{litCount.toLocaleString()} citations
+                    </span>
+                  )}
+                </span>
+              </div>
+            )
+          })()}
 
           {/* When a non-default citation style is picked, render the
               reference once in that style and hide the duplicated
@@ -812,7 +816,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               text (ACM). With APA / IEEE / BibTeX / etc. picked, the
               styled preview block above already contains all this. */}
           {(activeFormat === 'plaintext' || !activeFormat) && (
-            <>
+            <div className="mt-1 space-y-1">
               {/* Authors — per-name hover surfaces ORCID + OpenAlex
                   profile links when the enrichment payload has them.
                   Falls back to a plain comma-joined string when no
@@ -871,7 +875,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   </a>
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {/* Divider before verification results */}
@@ -1219,22 +1223,30 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
           {/* Warnings */}
           {displayWarnings.map((warning, i) => {
-            const parsedDetails = parseErrorDetails(warning.error_details)
+            // Warnings reach us under two field-name conventions: the verifier's
+            // native {error_type, error_details} and the recheck/core variant
+            // {warning_type, warning_details}. The suppression filter above reads
+            // BOTH, so a warning carrying only the warning_* names slips through
+            // here and — if we only read error_* — renders as a meaningless
+            // "Unknown mismatch" that hides its real text. Normalize both.
+            const wType = warning.error_type || warning.warning_type
+            const wDetails = warning.error_details || warning.warning_details
+            const parsedDetails = parseErrorDetails(wDetails)
             const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
 
-            // Extract version annotation from error_type if present
+            // Extract version annotation from the type if present
             const extractVersionAnnotation = (type) => {
               if (!type) return null
               const match = type.match(/\(v\d+\s+vs\s+v\d+\s+update\)/i)
               return match ? match[0] : null
             }
 
-            const versionAnnotation = extractVersionAnnotation(warning.error_type)
+            const versionAnnotation = extractVersionAnnotation(wType)
 
-            // Use prefix from error_details and append version annotation if present
+            // Use prefix from details and append version annotation if present
             const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string')
               ? parsedDetails.prefix.replace(/:$/, '')
-              : (warning.error_details || `${formatWarningType(warning.error_type)} mismatch`)
+              : (wDetails || (wType ? `${formatWarningType(wType)} mismatch` : 'Mismatch'))
 
             const warningText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
               ? `${baseText} ${versionAnnotation}`

@@ -29,9 +29,12 @@ describe('DocumentViewer focus zoom (R12)', () => {
     { quote: 'The method outperforms the baseline by a wide margin in every run.', status: 'verified', refId: '4' },
   ]
 
-  it('opens a focused citation at CITE_FOCUS_ZOOM, not fit-width (1)', () => {
+  it('opens a focused citation at fit-width (CITE_FOCUS_ZOOM = 1) so the page is not over-zoomed', () => {
     render(<DocumentViewer checkId={1} spans={spans} focusSpanIndex={0} onClose={vi.fn()} />)
-    expect(CITE_FOCUS_ZOOM).toBeGreaterThan(1)
+    // A focused citation must fit the modal width — centering on the highlight
+    // handles focus, so we never open zoomed past fit-width (which clipped the
+    // page horizontally in a two-column paper).
+    expect(CITE_FOCUS_ZOOM).toBe(1)
     expect(zoomShown()).toBe(CITE_FOCUS_ZOOM)
   })
 

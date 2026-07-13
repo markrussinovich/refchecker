@@ -477,12 +477,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {/* Verified */}
         <button
           onClick={() => handleFilterClick('verified')}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
-            isVerifiedSelected ? 'ring-1 shadow-sm' : ''
-          }`}
+          className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
           style={{ 
             backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
-            ringColor: 'var(--color-success)',
+            borderColor: isVerifiedSelected ? 'var(--color-success)' : 'transparent',
           }}
           onMouseEnter={(e) => {
             if (!isVerifiedSelected) {
@@ -507,12 +505,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <button
           onClick={() => handleFilterClick('error')}
           disabled={refsWithErrors === 0}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
-            refsWithErrors > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : 'cursor-default opacity-50'
-          } ${isErrorSelected ? 'ring-1 shadow-sm' : ''}`}
+          className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
+            refsWithErrors > 0 ? 'cursor-pointer' : 'cursor-default opacity-50'
+          }`}
           style={{ 
             backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
-            ringColor: 'var(--color-error)',
+            borderColor: isErrorSelected ? 'var(--color-error)' : 'transparent',
           }}
           onMouseEnter={(e) => {
             if (refsWithErrors > 0 && !isErrorSelected) {
@@ -538,12 +536,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <button
           onClick={() => handleFilterClick('warning')}
           disabled={refsWithWarningsOnly === 0}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
-            refsWithWarningsOnly > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : 'cursor-default opacity-50'
-          } ${isWarningSelected ? 'ring-1 shadow-sm' : ''}`}
+          className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
+            refsWithWarningsOnly > 0 ? 'cursor-pointer' : 'cursor-default opacity-50'
+          }`}
           style={{ 
             backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
-            ringColor: 'var(--color-warning)',
+            borderColor: isWarningSelected ? 'var(--color-warning)' : 'transparent',
           }}
           onMouseEnter={(e) => {
             if (refsWithWarningsOnly > 0 && !isWarningSelected) {
@@ -569,12 +567,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {refsWithSuggestionsOnly > 0 && (
           <button
             onClick={() => handleFilterClick('suggestion')}
-            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
-              isSuggestionSelected ? 'ring-1 shadow-sm' : ''
-            }`}
+            className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{
               backgroundColor: isSuggestionSelected ? 'var(--color-suggestion-bg)' : 'transparent',
-              ringColor: 'var(--color-suggestion)',
+              borderColor: isSuggestionSelected ? 'var(--color-suggestion)' : 'transparent',
             }}
             onMouseEnter={(e) => {
               if (!isSuggestionSelected) {
@@ -599,12 +595,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {refsUnverified > 0 && (
           <button
             onClick={() => handleFilterClick('unverified')}
-            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
-              isUnverifiedSelected ? 'ring-1 shadow-sm' : ''
-            }`}
+            className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{ 
               backgroundColor: isUnverifiedSelected ? 'var(--color-bg-tertiary)' : 'transparent',
-              ringColor: 'var(--color-text-muted)',
+              borderColor: isUnverifiedSelected ? 'var(--color-text-muted)' : 'transparent',
             }}
             onMouseEnter={(e) => {
               if (!isUnverifiedSelected) {
@@ -630,12 +624,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {refsHallucinated > 0 && (
           <button
             onClick={() => handleFilterClick('hallucination')}
-            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
-              isHallucinationSelected ? 'ring-1 shadow-sm' : ''
-            }`}
+            className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{ 
               backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
-              ringColor: 'var(--color-hallucination)',
+              borderColor: isHallucinationSelected ? 'var(--color-hallucination)' : 'transparent',
             }}
             onMouseEnter={(e) => {
               if (!isHallucinationSelected) {

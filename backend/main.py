@@ -90,7 +90,7 @@ from .usage_tracking import (
     infer_source_host,
     utcnow_sqlite,
 )
-from refchecker.utils.url_utils import validate_remote_fetch_url
+from refchecker.utils.url_utils import validate_remote_fetch_url, extract_arxiv_id_from_url
 
 # Configure logging
 logging.basicConfig(
@@ -2070,12 +2070,24 @@ async def start_check(
             paper_title = "Pasted Text"
             input_bytes = len(normalized_text.encode("utf-8"))
         elif source_type == "url":
-            parsed_source = urlparse(source_value or "")
-            if parsed_source.scheme or parsed_source.netloc:
+            raw_source = (source_value or "").strip()
+            parsed_source = urlparse(raw_source)
+            scheme = (parsed_source.scheme or "").lower()
+            if scheme in ("http", "https"):
+                # Genuine remote URL — enforce SSRF protections before the
+                # core fetches it.
                 try:
-                    validate_remote_fetch_url(source_value)
+                    validate_remote_fetch_url(raw_source)
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
+            elif scheme and extract_arxiv_id_from_url(raw_source) is None:
+                # A non-empty, non-HTTP(S) URL scheme that isn't a recognized
+                # arXiv identifier. urlparse reads "arXiv:2303.18223" as
+                # scheme="arxiv", so bare/prefixed arXiv IDs must be allowed
+                # through to the core resolver (which the CLI/bulk paths also
+                # accept). Genuine unsupported schemes (file:, ftp:, gopher:, …)
+                # are still refused to preserve SSRF/LFI protection.
+                raise HTTPException(status_code=400, detail="Only HTTP(S) URLs are supported")
             paper_title = source_value
             input_bytes = len((source_value or "").encode("utf-8"))
 
