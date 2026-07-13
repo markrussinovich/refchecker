@@ -22,6 +22,17 @@ from refchecker.llm.google_retry import call_google_with_retry, extract_google_r
 
 logger = logging.getLogger(__name__)
 
+# R04: soft wall-clock budget (seconds) for a single hallucination LLM
+# assessment. When a web-search variant fails, we only chain the
+# full-length chat fallback if we are still inside this budget — keeping
+# the worst case under the backend wrapper's outer wait_for budget (~90s)
+# rather than allowing two back-to-back long calls. Overridable via env so
+# operators can tune without a code change.
+try:
+    _CALL_DEADLINE_S = float(os.environ.get('REFCHECKER_HALLUCINATION_CALL_BUDGET_S', '80'))
+except (TypeError, ValueError):
+    _CALL_DEADLINE_S = 80.0
+
 
 def _record_hallucination_usage(provider: str, model: str, response) -> None:
     """Best-effort usage tracking for hallucination-verifier LLM calls.
@@ -419,6 +430,17 @@ class LLMHallucinationVerifier:
                 if base.endswith(suffix):
                     base = base[: -len(suffix)]
             kwargs['base_url'] = base
+        # R04: enforce explicit request timeouts so a hung connection can
+        # never wedge the UI. A 60s read budget (10s to connect) bounds the
+        # ordinary chat-completions path; the slower Responses/web-search
+        # path gets its own per-call budget via .with_options() below.
+        try:
+            import httpx
+            kwargs['timeout'] = httpx.Timeout(60.0, connect=10.0)
+        except Exception:
+            # Fall back to a plain float if httpx isn't importable for any
+            # reason — the OpenAI client accepts a scalar seconds value too.
+            kwargs['timeout'] = 60.0
         self.client = openai.OpenAI(**kwargs)
         # Use Responses API (with web_search_preview) only for vanilla OpenAI
         if not self.endpoint and self.provider == 'openai':
@@ -441,7 +463,18 @@ class LLMHallucinationVerifier:
 
     def _init_google(self) -> None:
         from google import genai
-        self.client = genai.Client(api_key=self.api_key)
+        # R04: explicit request timeout (60s, expressed in ms) so a hung
+        # Gemini call cannot wedge the UI.
+        try:
+            self.client = genai.Client(
+                api_key=self.api_key,
+                http_options={'timeout': 60000},
+            )
+        except TypeError:
+            # Older google-genai builds may not accept http_options on the
+            # Client constructor — degrade to the untimed client rather than
+            # failing to initialise the verifier at all.
+            self.client = genai.Client(api_key=self.api_key)
         logger.debug(
             'Hallucination verifier initialized (provider=google, model=%s)',
             self.model,
@@ -457,7 +490,11 @@ class LLMHallucinationVerifier:
 
     def _call_openai_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
         """OpenAI Responses API with web_search_preview tool."""
-        resp = self.client.responses.create(
+        # R04: the web-search Responses call can be slow — give it a longer
+        # per-call budget (90s) than the client default, but still bounded so
+        # it cannot hang indefinitely.
+        client = self.client.with_options(timeout=90.0)
+        resp = client.responses.create(
             model=self.model,
             instructions=system_prompt,
             tools=[{'type': 'web_search_preview'}],
@@ -695,11 +732,29 @@ class LLMHallucinationVerifier:
         return text, urls
 
     def _call_uncached(self, system_prompt: str, user_prompt: str) -> tuple:
-        """Actually call the LLM (no caching)."""
+        """Actually call the LLM (no caching).
+
+        R04: each web-search path can fall back to a second, full-length
+        chat call when the search variant fails. Two back-to-back calls,
+        each near the client timeout, could blow past the wrapper's outer
+        wall-clock budget. We thread a soft deadline (``_CALL_DEADLINE_S``)
+        so the chat fallback is skipped once the budget is exhausted — the
+        original web-search error is re-raised instead, surfacing within
+        budget rather than chaining a second long call.
+        """
+        import time
+        deadline = time.monotonic() + _CALL_DEADLINE_S
+
+        def _fallback_allowed() -> bool:
+            return time.monotonic() < deadline
+
         if self.provider == 'anthropic':
             try:
                 return self._call_anthropic_with_web_search(system_prompt, user_prompt)
             except Exception as exc:
+                if not _fallback_allowed():
+                    logger.debug('Anthropic web search failed and call budget exhausted; not chaining chat fallback: %s', exc)
+                    raise
                 logger.debug('Anthropic web search failed, falling back to chat: %s', exc)
                 return self._call_anthropic_chat(system_prompt, user_prompt)
 
@@ -707,6 +762,9 @@ class LLMHallucinationVerifier:
             try:
                 return self._call_google_with_web_search(system_prompt, user_prompt)
             except Exception as exc:
+                if not _fallback_allowed():
+                    logger.debug('Google web search failed and call budget exhausted; not chaining chat fallback: %s', exc)
+                    raise
                 logger.debug('Google web search failed, falling back to chat: %s', exc)
                 return self._call_google_chat(system_prompt, user_prompt)
 
@@ -715,8 +773,11 @@ class LLMHallucinationVerifier:
             try:
                 return self._call_openai_with_web_search(system_prompt, user_prompt)
             except Exception as exc:
-                logger.debug('Responses API failed, falling back to chat: %s', exc)
                 self._use_responses_api = False
+                if not _fallback_allowed():
+                    logger.debug('Responses API failed and call budget exhausted; not chaining chat fallback: %s', exc)
+                    raise
+                logger.debug('Responses API failed, falling back to chat: %s', exc)
         return self._call_openai_chat(system_prompt, user_prompt)
 
     def assess(
