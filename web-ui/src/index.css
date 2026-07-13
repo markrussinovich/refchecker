@@ -404,7 +404,6 @@ a[href^="mailto:"]:hover {
   grid-template-columns: 1fr 1fr;
   gap: var(--control-row-gap);
   align-items: start;          /* a tall trigger never stretches its row-mate */
-  max-width: 760px;
 }
 /* Whatever trigger a panel drops into its cell (a pill Button or a SplitButton)
    fills the column so the 2×2 reads as four even buttons. */
@@ -413,7 +412,6 @@ a[href^="mailto:"]:hover {
 .rc-grid-trigger { width: 100%; justify-content: flex-start; }
 /* The shared full-width details region below the grid. Collapses to nothing
    when no panel is open (the open panel portals exactly one child in). */
-.rc-action-grid-content { max-width: 760px; }
 .rc-action-grid-content:empty { display: none; }
 .rc-action-grid-content > .rc-action-details { margin-top: var(--control-row-gap); }
 /* On a narrow window fall back to a single column (still never shifts). */
