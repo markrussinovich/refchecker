@@ -23,8 +23,66 @@ const SIMILAR_INFLIGHT = new Map()
  * /api/check pipeline. Disabled until a check has actually produced
  * references.
  */
-export default function SimilarPapersPanel({ references, paperTitle, onCheckPaper }) {
-  const cacheKey = paperTitle || ''
+// Discovery modes. Three CLEARLY-SCOPED, real-OpenAlex bibliography-overlap
+// modes:
+//   'references' — papers that SHARE REFERENCES with this paper (their
+//                  bibliographies overlap this paper's references).
+//   'citations'  — papers that SHARE CITATIONS with this paper (co-cited
+//                  works: what the papers citing this one also cite).
+//   'both'       — the union of the two.
+const MODES = [
+  { id: 'references', label: 'References' },
+  { id: 'citations', label: 'Citations' },
+  { id: 'both', label: 'Both' },
+]
+
+// Map any persisted/legacy mode value onto the current vocabulary so an
+// older saved preference ('similar' / 'cites_refs') still resolves to a
+// valid toggle instead of leaving none selected.
+const LEGACY_MODE_MAP = {
+  similar: 'both',
+  cites_refs: 'both',
+  reference: 'references',
+  citation: 'citations',
+}
+function normalizeMode(mode) {
+  if (MODES.some((m) => m.id === mode)) return mode
+  return LEGACY_MODE_MAP[mode] || 'both'
+}
+
+// Extract a DOI or arXiv id from the source string (a URL or raw id) so
+// 'cites_refs' mode can resolve the SOURCE paper on OpenAlex. Returns ''
+// when nothing recognisable is present (then title-only resolution runs).
+function deriveSourceId(paperSource) {
+  const s = String(paperSource || '').trim()
+  if (!s) return ''
+  const doi = s.match(/10\.\d{4,9}\/[^\s"<>]+/i)
+  if (doi) return doi[0]
+  const arxivAbs = s.match(/arxiv\.org\/abs\/([^\s?#]+)/i)
+  if (arxivAbs) return arxivAbs[1]
+  const arxivRaw = s.match(/^arxiv:\s*(.+)$/i)
+  if (arxivRaw) return arxivRaw[1].trim()
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(s)) return s
+  return ''
+}
+
+export default function SimilarPapersPanel({ references, paperTitle, paperSource, checkId, onCheckPaper }) {
+  const paperId = deriveSourceId(paperSource)
+  const [mode, setMode] = useState(() => normalizeMode('both'))
+  // Cache key is BOTH article-specific AND mode-aware. In a batch, several
+  // articles can share an (empty or identical) title, so keying on the title
+  // alone made one article's Similar-papers result leak onto the others — the
+  // result/inflight maps live at module scope and were shared across articles.
+  // We key on the most specific stable id available for THIS article
+  // (checkId → derived paperId → raw paperSource), falling back to the title
+  // only when nothing else identifies it. That keeps each article's inflight
+  // search and cached candidates fully independent.
+  const articleKey =
+    (checkId != null && checkId !== '' ? `check:${checkId}` : '') ||
+    (paperId ? `id:${paperId}` : '') ||
+    (paperSource ? `src:${paperSource}` : '') ||
+    `title:${paperTitle || ''}`
+  const cacheKey = `${mode}::${articleKey}`
   const cached = SIMILAR_CACHE.get(cacheKey)
   const inflight = SIMILAR_INFLIGHT.get(cacheKey)
   const [loading, setLoading] = useState(Boolean(inflight))
@@ -65,7 +123,9 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
     const promise = findSimilarPapers({
       references: refsForRequest,
       paper_title: paperTitle,
+      paper_id: paperId || undefined,
       limit: 5,
+      mode,
     }).then(res => {
       const cands = res.data?.candidates || []
       const counts = res.data?.source_counts || {}
@@ -86,12 +146,16 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
   }
 
   useEffect(() => {
-    // Reset / restore state on paperTitle change. Priority:
+    // Reset / restore state when the ARTICLE or the mode changes. Priority:
     //   1. completed cache → show those candidates
     //   2. in-flight search → attach to its promise and show loading
-    //   3. neither → empty + Find similar papers button
-    const c = SIMILAR_CACHE.get(paperTitle || '')
-    const inFly = SIMILAR_INFLIGHT.get(paperTitle || '')
+    //   3. neither → empty + Find papers button
+    // Cache key is article-specific AND mode-aware (`${mode}::${articleKey}`)
+    // so each article keeps its own per-mode results and never inherits a
+    // sibling article's similar-papers list in a batch.
+    setError(null)
+    const c = SIMILAR_CACHE.get(cacheKey)
+    const inFly = SIMILAR_INFLIGHT.get(cacheKey)
     if (c) {
       setCandidates(c.candidates)
       setSourceCounts(c.sourceCounts)
@@ -110,16 +174,19 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
     } else {
       setLoaded(false); setCandidates([]); setLoading(false); setSearchStartedAt(null)
     }
-  }, [paperTitle])
+  }, [articleKey, mode, cacheKey])
 
-  // Tick a re-render every second while a search is in flight so the
-  // elapsed-time progress label updates instead of freezing.
+  // Elapsed seconds since the search started, kept as STATE updated by an
+  // interval — so render stays pure (no Date.now() during render, which the
+  // react-hooks purity rule rightly flags) and the label still ticks live.
+  const [elapsedSec, setElapsedSec] = useState(0)
   useEffect(() => {
-    if (!loading || !searchStartedAt) return undefined
-    const t = setInterval(() => setSearchStartedAt(s => s), 1000)
+    if (!searchStartedAt) { setElapsedSec(0); return undefined }
+    const tick = () => setElapsedSec(Math.floor((Date.now() - searchStartedAt) / 1000))
+    tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [loading, searchStartedAt])
-  const elapsedSec = searchStartedAt ? Math.floor((Date.now() - searchStartedAt) / 1000) : 0
+  }, [searchStartedAt])
 
   if (!refsForRequest.length) {
     return (
@@ -134,12 +201,50 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
 
   return (
     <div className="space-y-2">
+      {/* Segmented mode toggle: References = papers sharing this paper's
+          references (bibliography overlap); Citations = papers sharing its
+          citations (co-cited); Both = the union. Switching re-runs the
+          matching OpenAlex query. */}
+      <div className="flex" role="tablist" aria-label="Discovery mode"
+        style={{
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          overflow: 'hidden',
+          width: 'fit-content',
+          background: 'var(--color-bg-secondary)',
+        }}>
+        {MODES.map((m) => {
+          const active = mode === m.id
+          return (
+            <button
+              key={m.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => { if (m.id !== mode) { setMode(m.id); setExpandedShared(null) } }}
+              className="px-3 py-1 text-xs font-medium"
+              style={{
+                background: active ? 'var(--color-accent, #3b82f6)' : 'transparent',
+                color: active ? 'white' : 'var(--color-text-secondary)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {m.label}
+            </button>
+          )
+        })}
+      </div>
       <div
         className="rounded-lg border p-3 flex items-center justify-between flex-wrap gap-2"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}
       >
         <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          Find up to 5 papers from Semantic Scholar that share the most references with this paper.
+          {mode === 'references'
+            ? 'Find papers that share the most references with this paper — overlap in their bibliographies (real OpenAlex data).'
+            : mode === 'citations'
+            ? 'Find papers that share the most citations with this paper — works co-cited alongside it (real OpenAlex data).'
+            : 'Find papers that share this paper\'s references AND its citations, merged into one list (real OpenAlex data).'}
         </div>
         <button
           onClick={load}
@@ -150,7 +255,13 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
         >
           {loading
             ? `Searching… ${elapsedSec}s`
-            : (loaded ? 'Refresh' : 'Find similar papers')}
+            : (loaded
+              ? 'Refresh'
+              : (mode === 'references'
+                ? 'Find shared references'
+                : mode === 'citations'
+                ? 'Find shared citations'
+                : 'Find shared references + citations'))}
         </button>
       </div>
 
@@ -227,12 +338,25 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
       )}
 
       <div className="space-y-2">
-        {candidates.map((c) => {
+        {candidates.map((c, idx) => {
           const url = c.semantic_scholar_url
           const arxivUrl = c.arxiv_id ? `https://arxiv.org/abs/${c.arxiv_id}` : null
           const doiUrl = c.doi ? `https://doi.org/${c.doi}` : null
+          // R20 — per-row provenance: a link to the real source record the
+          // candidate was resolved from (OpenAlex Work or its DOI). Mirrors
+          // GapFinder's "✓ OpenAlex ↗". Real data only — no provenance link
+          // is rendered when neither identifier is present.
+          const openalexUrl = c.openalex_id ? `https://openalex.org/${c.openalex_id}` : null
+          const provenanceHref = openalexUrl || doiUrl
+          const provenanceLabel = openalexUrl ? '✓ OpenAlex ↗' : 'DOI ↗'
+          // Cites/refs rows have no S2 paperId, so fall back to a stable
+          // composite key (openalex id / doi / index) to avoid React key
+          // collisions on the null paperId. (The shared-refs expand toggle
+          // only renders for similar-mode rows, which always carry a
+          // paperId, so its state key stays c.paperId below.)
+          const rowKey = c.paperId || c.openalex_id || c.doi || `row-${idx}`
           return (
-            <div key={c.paperId} className="rounded-lg border p-3"
+            <div key={rowKey} className="rounded-lg border p-3"
               style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div className="flex-1 min-w-0">
@@ -243,7 +367,11 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                     {(c.authors || []).slice(0, 3).join(', ')}
                     {(c.authors || []).length > 3 ? ', et al.' : ''}
                     {c.year ? ` · ${c.year}` : ''}
-                    {c.shared_with_source ? ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}` : ''}
+                    {c.shared_with_source
+                      ? (c.relation === 'citation'
+                        ? ` · co-cited ×${c.shared_with_source}`
+                        : ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}`)
+                      : ''}
                   </div>
                   <div className="text-xs mt-0.5 flex flex-wrap gap-1">
                     {(c.sources || []).map((s) => (
@@ -260,6 +388,72 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                         {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
                       </span>
                     ))}
+                    {/* R20 — provenance link to the real resolved source
+                        record (OpenAlex Work, falling back to DOI). Lets the
+                        user verify the candidate isn't AI-generated. Real
+                        data only: rendered only when an identifier exists. */}
+                    {provenanceHref && (
+                      <a
+                        href={provenanceHref}
+                        onClick={(e) => {
+                          if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+                            e.preventDefault()
+                            openExternal(provenanceHref)
+                          }
+                        }}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-1.5 py-0.5 rounded underline"
+                        style={{
+                          color: openalexUrl ? 'var(--color-success, #16a34a)' : 'var(--color-accent, #3b82f6)',
+                          fontSize: '0.7rem',
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-bg-primary)',
+                        }}
+                        title={openalexUrl
+                          ? 'Verified provenance: a real OpenAlex record (not AI-generated)'
+                          : 'Provenance: resolve this candidate via its DOI'}
+                      >
+                        {provenanceLabel}
+                      </a>
+                    )}
+                    {/* Relation chip: in References / Citations / Both mode each
+                        candidate is tagged by HOW it overlaps the source —
+                        sharing references (Shared refs) or sharing citations
+                        / being co-cited (Shared cites). The chip is CLICKABLE
+                        and expands the actual shared-works detail beneath the
+                        row (which references it shares, or which works it is
+                        co-cited with) — restoring the "see WHICH shared works"
+                        view that the count-only rework had dropped. */}
+                    {(c.relation === 'reference' || c.relation === 'citation') && (() => {
+                      const sharedN = c.shared_with_source || 0
+                      const expanded = expandedShared === rowKey
+                      const isRef = c.relation === 'reference'
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedShared(expanded ? null : rowKey)}
+                          className="px-1.5 py-0.5 rounded"
+                          style={{
+                            background: isRef
+                              ? 'rgba(139,92,246,0.12)' : 'rgba(234,179,8,0.14)',
+                            color: isRef
+                              ? 'var(--color-accent, #8b5cf6)' : '#a16207',
+                            fontSize: '0.7rem',
+                            border: isRef
+                              ? '1px solid rgba(139,92,246,0.35)' : '1px solid rgba(234,179,8,0.4)',
+                            cursor: 'pointer',
+                          }}
+                          title={isRef
+                            ? `Shares references with this paper — their bibliographies overlap${sharedN ? ` (${sharedN} shared)` : ''}. Click to see which works.`
+                            : `Shares citations with this paper — they are co-cited together${sharedN ? ` (×${sharedN})` : ''}. Click to see the co-citing works.`}
+                        >
+                          {isRef ? 'Shared refs' : 'Shared cites'}
+                          {' '}
+                          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                        </button>
+                      )
+                    })()}
                     {/* Reference-overlap chip — the user's primary signal.
                         Shows "85% shared refs (17/20)" when the candidate
                         cites 17 of the input's 20 references. */}
@@ -271,12 +465,16 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                           - candidate_ref_count = 0: "shared refs N/A" (couldn't fetch)
                        */}
                     {(() => {
+                      // Cites/refs candidates aren't scored for reference
+                      // overlap (that signal belongs to the Similar path),
+                      // so don't render the "shared refs N/A" noise for them.
+                      if (c.relation === 'reference' || c.relation === 'citation') return null
                       const sharedN = c.shared_refs_count || 0
                       const candRefs = c.candidate_ref_count || 0
                       if (sharedN > 0) {
                         return (
                           <button
-                            onClick={() => setExpandedShared(expandedShared === c.paperId ? null : c.paperId)}
+                            onClick={() => setExpandedShared(expandedShared === rowKey ? null : rowKey)}
                             className="px-1.5 py-0.5 rounded"
                             style={{
                               background: 'rgba(59,130,246,0.12)',
@@ -291,7 +489,7 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                           >
                             {Math.round((c.shared_refs_pct || 0) * 100)}% shared refs ({sharedN})
                             {' '}
-                            <span aria-hidden="true">{expandedShared === c.paperId ? '▾' : '▸'}</span>
+                            <span aria-hidden="true">{expandedShared === rowKey ? '▾' : '▸'}</span>
                           </button>
                         )
                       }
@@ -360,22 +558,101 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                       {c.reason}
                     </div>
                   )}
-                  {expandedShared === c.paperId && Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0 && (
+                  {/* Expanded shared-works panel. Surfaces the ACTUAL shared
+                      works behind a candidate's overlap count — restoring the
+                      "which papers/citations are shared" view for every mode.
+                      Real-data sources, in priority order:
+                        0. shared_works (R08) — the relation path's hydrated
+                           real OpenAlex records for the works actually shared
+                           with the source (shared references for 'reference'
+                           rows, co-citing works for 'citation' rows), each
+                           linked to its OpenAlex/DOI page.
+                        1. shared_refs_titles — the similar/References path's
+                           per-candidate list of which of THIS paper's
+                           references the candidate also cites.
+                        2. a relation candidate (References/Citations/Both): the
+                           candidate IS the shared work; we restate the real
+                           overlap count and explain the relationship without
+                           fabricating titles the backend didn't return.
+                      Never invents titles — when only a count is known, we say so. */}
+                  {expandedShared === rowKey && Array.isArray(c.shared_works) && c.shared_works.length > 0 && (
                     <div className="mt-2 p-2 rounded text-xs"
                       style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
                       <div className="font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                        Shared references ({c.shared_refs_count}):
+                        {c.relation === 'citation' ? 'Co-citing works' : 'Shared references'} ({c.shared_overlap_count || c.shared_with_source || c.shared_works.length}):
+                      </div>
+                      <ul className="space-y-0.5 list-disc pl-4" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.shared_works.map((w, i) => {
+                          const wHref = w.openalex_id ? `https://openalex.org/${w.openalex_id}` : (w.doi ? `https://doi.org/${w.doi}` : (w.url || null))
+                          return (
+                            <li key={w.openalex_id || w.doi || i} className="leading-snug">
+                              <span>{w.title || '(untitled work)'}</span>
+                              {w.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {w.year}</span> : null}
+                              {wHref && (
+                                <a
+                                  href={wHref}
+                                  onClick={(e) => {
+                                    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+                                      e.preventDefault()
+                                      openExternal(wHref)
+                                    }
+                                  }}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-1 underline"
+                                  style={{ color: 'var(--color-accent, #3b82f6)' }}
+                                >↗</a>
+                              )}
+                            </li>
+                          )
+                        })}
+                        {(c.shared_overlap_count || 0) > c.shared_works.length && (
+                          <li style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            …and {c.shared_overlap_count - c.shared_works.length} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  {expandedShared === rowKey && Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0 && (
+                    <div className="mt-2 p-2 rounded text-xs"
+                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      <div className="font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.relation === 'citation' ? 'Co-cited works' : 'Shared references'} ({c.shared_refs_count || c.shared_refs_titles.length}):
                       </div>
                       <ul className="space-y-0.5 list-disc pl-4" style={{ color: 'var(--color-text-secondary)' }}>
                         {c.shared_refs_titles.map((t, i) => (
                           <li key={i} className="leading-snug">{t}</li>
                         ))}
-                        {c.shared_refs_count > c.shared_refs_titles.length && (
+                        {(c.shared_refs_count || 0) > c.shared_refs_titles.length && (
                           <li style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
                             …and {c.shared_refs_count - c.shared_refs_titles.length} more
                           </li>
                         )}
                       </ul>
+                    </div>
+                  )}
+                  {expandedShared === rowKey
+                    && (c.relation === 'reference' || c.relation === 'citation')
+                    && !(Array.isArray(c.shared_works) && c.shared_works.length > 0)
+                    && !(Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0) && (
+                    <div className="mt-2 p-2 rounded text-xs"
+                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      <div className="font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.relation === 'reference'
+                          ? `Shares ${c.shared_with_source || 0} reference${(c.shared_with_source === 1) ? '' : 's'} with this paper`
+                          : `Co-cited with this paper ×${c.shared_with_source || 0}`}
+                      </div>
+                      <div className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.relation === 'reference'
+                          ? <>This paper appears in OpenAlex’s bibliography overlap: it cites {c.shared_with_source || 0} of the same work{(c.shared_with_source === 1) ? '' : 's'} that <span style={{ fontStyle: 'italic' }}>{paperTitle || 'this paper'}</span> cites. Open it to inspect its full reference list.</>
+                          : <>This work is referenced by {c.shared_with_source || 0} of the same paper{(c.shared_with_source === 1) ? '' : 's'} that cite <span style={{ fontStyle: 'italic' }}>{paperTitle || 'this paper'}</span> — i.e. it is co-cited alongside this paper that many times. Open it to inspect the work.</>}
+                      </div>
+                      {(c.openalex_id || c.doi) && (
+                        <div className="mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                          {c.doi ? `DOI: ${c.doi}` : `OpenAlex: ${c.openalex_id}`}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -48,6 +48,13 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     links = {},
   } = enrichment
 
+  // Honest publication date: a display-ready string from the backend.
+  // Guard against empty / placeholder values so a content-free date never
+  // gates an otherwise-empty strip (R01/K2). Used both for the gate below
+  // and for the Row-1 render so the two stay in lock-step.
+  const pubDateRaw = (typeof publication_date === 'string' ? publication_date.trim() : '')
+  const hasPubDate = !!pubDateRaw && !/^(n\/?a|none|null|unknown)$/i.test(pubDateRaw)
+
   const hasAnyBadge = (
     cited_by_count != null ||
     reference_count != null ||
@@ -56,13 +63,15 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     openalex_id || pubmed_id || pmc_id || mag_id ||
     publication_type ||
     venue ||
-    publication_date ||
+    hasPubDate ||
     (Array.isArray(fields_of_study) && fields_of_study.length > 0) ||
     (Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)) ||
     has_funding ||
     has_affiliation ||
     (biblio && (biblio.volume || biblio.issue || biblio.first_page)) ||
-    links.libkey || links.worldcat || links.doi
+    links.libkey || links.worldcat || links.doi ||
+    (Array.isArray(verified_by) && verified_by.length > 0) ||
+    !!source_label
   )
   if (!hasAnyBadge) return null
 
@@ -99,23 +108,57 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
   }
   const metaLine = bibBits.join(', ')
 
-  // Row-2 counters (inline text, not chips — matches the target screenshot)
+  // Row-2 counters (inline text, not chips — matches the target screenshot).
+  // R35: when an OpenAlex Work id is present the count tiles become real
+  // drill-down links (Citations → the works citing this one; Reference Count
+  // → this work's OpenAlex page). With no id they stay plain text — but EVERY
+  // tile now carries a title for parity with Citations (no inert, unexplained
+  // numbers). Citing Patents is always informational (no per-patent list).
   const counters = []
   if (typeof citing_patents_count === 'number') {
-    counters.push({ label: 'Citing Patents', value: citing_patents_count.toLocaleString() })
+    counters.push({
+      label: 'Citing Patents',
+      value: citing_patents_count.toLocaleString(),
+      title: 'Patents that cite this work (OpenAlex). Informational — not a drill-down.',
+    })
   }
   if (typeof cited_by_count === 'number') {
-    counters.push({ label: 'Citing Scholarly Works', value: cited_by_count.toLocaleString() })
+    counters.push({
+      label: 'Citations',
+      value: cited_by_count.toLocaleString(),
+      title: 'Times this work is cited by other scholarly works (OpenAlex / Semantic Scholar / Crossref)',
+      href: openalex_id
+        ? `https://openalex.org/works?filter=cites:${openalex_id}`
+        : null,
+      linkTitle: 'See the works citing this paper on OpenAlex',
+    })
   }
   if (typeof reference_count === 'number') {
-    counters.push({ label: 'Reference Count', value: reference_count.toLocaleString() })
+    counters.push({
+      label: 'Reference Count',
+      value: reference_count.toLocaleString(),
+      title: 'References this work itself cites',
+      href: openalex_id ? `https://openalex.org/${openalex_id}` : null,
+      linkTitle: 'Open this work on OpenAlex to see its reference list',
+    })
   }
 
   // DOI excluded — rendered above by the Verification block; pills row
   // shows OpenAlex / PMID / PMC / LibKey / WorldCat / ORCID instead.
-  const hasIdRow = !!(openalex_id || pubmed_id || pmc_id || mag_id || links.libkey || links.worldcat)
-  const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
+  // The authors popover and the "via <source>" attribution are independent
+  // signals: they must render whenever present even when NO external-ID
+  // pill is — otherwise a reference that resolved only an author list (or
+  // only a source label) would silently drop that real data. So the row is
+  // shown if ANY of its members has something to display, and each member
+  // self-guards below.
   const hasAuthors = Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)
+  const hasSource = !!(verified_by?.length || source_label)
+  const hasIdRow = !!(
+    openalex_id || pubmed_id || pmc_id || mag_id ||
+    links.libkey || links.worldcat ||
+    hasAuthors || hasSource
+  )
+  const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
 
   return (
     <div className="flex flex-col gap-1.5 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
@@ -123,7 +166,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           detail. The type chip used to float alone with no context; now
           it's labelled "Type:" so the user can tell what it means at
           a glance. Year is NOT repeated here — main metadata above. */}
-      {(prettyPubType || metaLine) && (
+      {(prettyPubType || metaLine || hasPubDate) && (
         <div className="flex flex-wrap items-center gap-2">
           {prettyPubType && (
             <>
@@ -134,17 +177,28 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           {metaLine && (
             <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}</span>
           )}
+          {/* Real full publication date (e.g. "Oct 1, 2021"). Rendered as
+              plain text — it is NOT a link/button (no dead-button risk) and
+              shows only when the backend supplied a real value (R01/K2). */}
+          {hasPubDate && (
+            <span style={{ color: 'var(--color-text-muted)' }}>
+              Published: <span style={{ color: 'var(--color-text-secondary)' }}>{pubDateRaw}</span>
+            </span>
+          )}
         </div>
       )}
 
-      {/* Row 2: inline counters */}
+      {/* Row 2: inline counters. Each tile carries a title (R35 parity); when
+          an OpenAlex id is present, Citations / Reference Count become real
+          drill-down links rendered via CountValue (an <a> in Tauri-safe form),
+          otherwise the value stays plain <strong> text. */}
       {counters.length > 0 && (
         <div className="flex flex-wrap items-center" style={{ color: 'var(--color-text-muted)' }}>
           {counters.map((c, i) => (
-            <span key={c.label} className="flex items-center">
+            <span key={c.label} className="flex items-center" title={c.title || undefined}>
               {i > 0 && <span className="mx-2">·</span>}
               <span>{c.label}: </span>
-              <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{c.value}</strong>
+              <CountValue value={c.value} href={c.href} linkTitle={c.linkTitle} />
             </span>
           ))}
         </div>
@@ -247,6 +301,39 @@ function PubTypeChip({ children }) {
     >
       {children}
     </span>
+  )
+}
+
+/**
+ * Row-2 count value (R35). When `href` is supplied the number is a real
+ * drill-down link to OpenAlex; otherwise it's plain bold text. The link is
+ * Tauri-safe — in the desktop shell a left-click is intercepted and routed
+ * through `openExternal` so it opens in the system browser, not the webview.
+ * No href ⇒ no <a>, so a count with no OpenAlex id is never a dead link.
+ */
+function CountValue({ value, href, linkTitle }) {
+  if (!href) {
+    return (
+      <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{value}</strong>
+    )
+  }
+  const handleClick = (e) => {
+    if (!isTauri()) return
+    e.preventDefault()
+    try { openExternal(href) } catch { /* fall through to default nav */ }
+  }
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={linkTitle || ''}
+      className="ml-1 font-semibold hover:underline"
+      style={{ color: 'var(--color-link, #3b82f6)', textDecoration: 'none' }}
+    >
+      {value}
+    </a>
   )
 }
 

@@ -5,13 +5,20 @@ import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
 import CorrectionsView from './CorrectionsView'
 import OnboardingBanner from './OnboardingBanner'
+import FieldGuide from './FieldGuide'
 import GlobalDropZone from './GlobalDropZone'
 import SeenReferencesView from './SeenReferencesView'
 import BatchSummaryView from './BatchSummaryView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
+import ExploreGraphView from './ExploreGraphView'
 import AIDetectionPanel from './AIDetectionPanel'
 import HealthBadge from './HealthBadge'
+import RetractionCheck from './RetractionCheck'
+import GapFinder from './GapFinder'
+import CitationIntegrity from './CitationIntegrity'
+import ArticleAssistant from './ArticleAssistant'
+import ActionPanelGrid from './ActionPanelGrid'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -29,9 +36,17 @@ export default function MainPanel() {
   const mainRef = useRef(null)
   const contentRef = useRef(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
-  const [buttonLeft, setButtonLeft] = useState(null)
   const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
   const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
+  const [showExplore, setShowExplore] = useState(false) // ResearchRabbit-style fullscreen Explore graph overlay (#68)
+
+  // When a citation highlight in the document links back to its reference,
+  // make sure the References tab is showing so the target card can flash.
+  useEffect(() => {
+    const onFocus = () => { setGlobalView(null); setResultsTab('references') }
+    window.addEventListener('refchecker:focus-reference', onFocus)
+    return () => window.removeEventListener('refchecker:focus-reference', onFocus)
+  }, [])
   
   const {
     status: checkStoreStatus,
@@ -68,30 +83,6 @@ export default function MainPanel() {
     return () => mainElement.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Calculate button position based on content container
-  useEffect(() => {
-    const updateButtonPosition = () => {
-      if (contentRef.current) {
-        const rect = contentRef.current.getBoundingClientRect()
-        const margin = 12
-        const buttonWidth = 44
-        const viewportWidth = window.innerWidth
-        // Preferred spot: just to the right of the content column
-        let proposedLeft = rect.right + margin
-        // Keep the button visible on narrow viewports by clamping within the viewport
-        const maxLeft = viewportWidth - buttonWidth - margin
-        if (proposedLeft > maxLeft) {
-          // If there's no room outside, overlay inside the content's right edge
-          proposedLeft = Math.max(rect.right - buttonWidth - margin, margin)
-        }
-        setButtonLeft(proposedLeft)
-      }
-    }
-
-    updateButtonPosition()
-    window.addEventListener('resize', updateButtonPosition)
-    return () => window.removeEventListener('resize', updateButtonPosition)
-  }, [])
 
   // Scroll to top handler
   const scrollToTop = useCallback(() => {
@@ -317,6 +308,7 @@ export default function MainPanel() {
             onOpenSettings={(section) => useSettingsStore.getState().openSettings(section)}
           />
         )}
+        {showInput && <FieldGuide />}
 
         {/* Input Section */}
         {showInput && <InputSection />}
@@ -334,6 +326,9 @@ export default function MainPanel() {
             references={displayRefs}
             paperTitle={displayPaperTitle}
             paperSource={displayPaperSource}
+            aiBand={displayAiDetection?.band}
+            aiScore={displayAiDetection?.overall_score}
+            videoKey={`statvid-${selectedCheckId}`}
             healthBadge={
               <>
                 <HealthBadge references={displayRefs} />
@@ -343,9 +338,50 @@ export default function MainPanel() {
           />
         )}
 
+        {/* On-demand article tools in a 2×2 button grid — each pill keeps its
+            cell and never shifts; clicking one opens its details full-width in
+            the shared region directly below the grid (ActionPanelGrid owns the
+            accordion). Capped at 760px so the pills don't stretch edge-to-edge. */}
+        {showContent && isComplete && (
+          <ActionPanelGrid>
+            {/*
+             * Per-article remount keys (#bug: cross-article result bleed).
+             * In a batch, these on-demand panels keep their fetched results
+             * in local state. Without a key tied to the selected article,
+             * React reuses the same instance when switching articles, so
+             * article A's Retraction / Gap-finder / Citation-numbering
+             * results leak onto article B. Keying each on `selectedCheckId`
+             * forces a fresh mount per article — every article gets its own
+             * clean state and never inherits a sibling's results.
+             */}
+            <RetractionCheck
+              key={`ret-${selectedCheckId}`}
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+              references={displayRefs}
+            />
+            <GapFinder
+              key={`gap-${selectedCheckId}`}
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+              references={displayRefs}
+            />
+            <CitationIntegrity
+              key={`cite-${selectedCheckId}`}
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+            />
+            <ArticleAssistant
+              key={`assist-${selectedCheckId}`}
+              checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+            />
+          </ActionPanelGrid>
+        )}
+
         {/* Document-level AI-generated-text detection (opt-in) */}
         {showContent && displayAiDetection && (
-          <AIDetectionPanel detection={displayAiDetection} />
+          <AIDetectionPanel
+            key={`ai-${selectedCheckId}`}
+            detection={displayAiDetection}
+            checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
+          />
         )}
 
         {/* References / Corrections tabs */}
@@ -448,9 +484,30 @@ export default function MainPanel() {
               <GraphView references={displayRefs} paperTitle={displayPaperTitle} />
             </div>
             <div style={{ display: resultsTab === 'similar' ? 'block' : 'none' }}>
+              {/* ResearchRabbit-style Explore graph entry (#68): opens a
+                  fullscreen overlay graphing the similar / cites&refs
+                  neighbourhood of this check's references, by year. */}
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExplore(true)}
+                  className="text-xs px-2.5 py-1 rounded inline-flex items-center gap-1"
+                  style={{
+                    color: 'var(--color-accent, #3b82f6)',
+                    background: 'var(--color-bg-secondary)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                  title="Open a fullscreen graph of similar / cited papers, positioned by year"
+                >
+                  Explore graph →
+                </button>
+              </div>
               <SimilarPapersPanel
+                key={`similar-${selectedCheckId}`}
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
+                paperSource={displayPaperSource}
+                checkId={(selectedCheckId && selectedCheckId > 0) ? selectedCheckId : currentCheckId}
                 onCheckPaper={(source) => {
                   // Switch UI to "New refcheck" so the input panel is visible,
                   // then dispatch the URL to InputSection which auto-submits.
@@ -468,17 +525,36 @@ export default function MainPanel() {
         )}
       </div>
 
-      {/* Scroll to top button - fixed position to the right of content column */}
-      {showScrollTop && buttonLeft && (
+      {/* ResearchRabbit-style Explore graph overlay (#68) — graphs the
+          similar / cites&refs neighbourhood of the current check's
+          references, positioned + coloured by year. Real data only. */}
+      {showExplore && (
+        <ExploreGraphView
+          references={displayRefs}
+          paperTitle={displayPaperTitle}
+          paperSource={displayPaperSource}
+          onClose={() => setShowExplore(false)}
+        />
+      )}
+
+      {/* Scroll to top button — pinned to the viewport's bottom-right corner,
+          but STACKED ABOVE the round debug "</>" toggle (DebugPanel.jsx, which
+          sits at bottom-4 right-4 ≈ 40px tall). We share that button's right
+          edge and push our bottom up past its height + a gap so the two never
+          overlap. Higher z so it floats above panels. */}
+      {showScrollTop && (
         <button
           onClick={scrollToTop}
-          className="fixed z-40 p-2 rounded-full shadow-lg transition-all duration-200 hover:scale-110 opacity-50 hover:opacity-100"
+          className="fixed z-50 p-2 rounded-full shadow-lg transition-all duration-200 hover:scale-110 opacity-60 hover:opacity-100"
           style={{
             backgroundColor: 'var(--color-bg-tertiary)',
             color: 'var(--color-text-secondary)',
             border: '1px solid var(--color-border)',
-            left: `${buttonLeft}px`,
-            bottom: '2rem',
+            // Align with the debug button's right edge (right-4 = 1rem) and
+            // stack above it: debug bottom (1rem) + its height (~2.5rem) +
+            // a 0.75rem gap ≈ 4.25rem, rounded to 4.5rem for clearance.
+            right: '1rem',
+            bottom: '4.5rem',
           }}
           title="Scroll to top"
           aria-label="Scroll to top"

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import StatusSection from './StatusSection'
+import StatusSection, { buildCitationViewerSpans } from './StatusSection'
 
 const historyState = vi.hoisted(() => ({
   selectedCheckId: 42,
@@ -93,5 +93,46 @@ describe('StatusSection hallucination model display', () => {
 
     const retriedImage = screen.getByAltText('Paper thumbnail')
     expect(retriedImage.getAttribute('src')).toBe('/api/thumbnail/42?phase=completed')
+  })
+})
+
+// R28 (S6) — clicking an inline citation must hyperlink to the reference list
+// INSIDE the same PDF. buildCitationViewerSpans appends the reference-list entry
+// as a second locatable span and wires the citation span's `refEntryIndex` so
+// the native viewer scrolls + flashes that entry in-document on click.
+describe('buildCitationViewerSpans in-PDF reference jump (R28)', () => {
+  it('appends the reference-list entry span and wires refEntryIndex', () => {
+    const spans = buildCitationViewerSpans({
+      text: 'The method outperforms the baseline by a wide margin [4].',
+      status: 'verified',
+      refId: '4',
+      refTitle: 'A Study of Convergence in Deep Networks',
+      label: '[4]',
+    })
+
+    expect(spans).toHaveLength(2)
+    // Span 0 is the cited sentence, pointing at span 1 as its in-PDF jump target.
+    expect(spans[0].quote).toContain('outperforms the baseline')
+    expect(spans[0].refEntryIndex).toBe(1)
+    expect(spans[0].status).toBe('verified')
+    // Span 1 is the reference-list entry, located by the reference title.
+    expect(spans[1].kind).toBe('ref-entry')
+    expect(spans[1].quote).toBe('A Study of Convergence in Deep Networks')
+    expect(spans[1].refId).toBe('4')
+  })
+
+  it('omits the entry span (and refEntryIndex) when no reference title is known', () => {
+    const spans = buildCitationViewerSpans({
+      text: 'A cited sentence with no resolvable reference title here.',
+      refId: '9',
+    })
+    expect(spans).toHaveLength(1)
+    expect(spans[0].refEntryIndex).toBeUndefined()
+    expect(spans[0].kind).toBeUndefined()
+  })
+
+  it('returns an empty array for no citation target', () => {
+    expect(buildCitationViewerSpans(null)).toEqual([])
+    expect(buildCitationViewerSpans({})).toEqual([])
   })
 })

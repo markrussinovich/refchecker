@@ -243,4 +243,24 @@ describe('referenceStatus', () => {
       hallucinated: 9,
     })
   })
+
+  it('clamps progress at 100% and reconciles total when processed exceeds an early total estimate', () => {
+    // Repro of "Checking references (28/23) · 122% complete": total_refs is the
+    // early extraction estimate (23) but processed_refs (28) is the real count
+    // after de-dup/merge/re-extraction.
+    const summary = buildReferenceSummary({
+      stats: { total_refs: 23, processed_refs: 28 },
+      references: [],
+      isComplete: true,
+    })
+
+    // Percent never exceeds 100 …
+    expect(summary.progressPercent).toBe(100)
+    expect(summary.progressPercent).toBeLessThanOrEqual(100)
+    // … and the visible "X / Y" can never read X > Y: the total is reconciled
+    // up to the real processed count instead of staying at the stale estimate.
+    expect(summary.totalRefs).toBe(28)
+    expect(summary.processedRefs).toBe(28)
+    expect(summary.processedRefs).toBeLessThanOrEqual(summary.totalRefs)
+  })
 })

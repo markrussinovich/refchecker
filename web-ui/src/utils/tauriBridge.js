@@ -50,7 +50,10 @@ export async function openExternal(url) {
       console.warn('[tauriBridge] open_external failed, falling back to window.open', err)
     }
   }
-  window.open(url, '_blank', 'noopener,noreferrer')
+  // mailto:/tel: must navigate (the OS handler opens), never window.open —
+  // inside a WebView that yields a blank popup instead of the mail/phone app.
+  if (/^(mailto:|tel:)/i.test(url)) { window.location.href = url }
+  else { window.open(url, '_blank', 'noopener,noreferrer') }
 }
 
 /**

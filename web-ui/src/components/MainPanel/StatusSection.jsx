@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { useGesturePinchZoom } from '../../utils/useGesturePinchZoom'
+import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
+import Button from '../common/Button'
+import ShareModal from '../Modals/ShareModal'
+import DocumentViewer from './DocumentViewer'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
@@ -20,11 +26,74 @@ const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight:
  *     usable overlay.
  *   - Page jump strip: top-left chip "Page N / total" plus prev/next.
  */
-function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
+// AI-band highlight fill (translucent) for native-page overlays.
+const _BAND_HL = {
+  high: 'rgba(239,68,68,0.30)', medium: 'rgba(245,158,11,0.30)', low: 'rgba(34,197,94,0.22)',
+}
+
+// R28: build the locatable spans handed to the native document viewer for the
+// "view this citation in the document" flow.
+//   - Span 0 is the cited sentence (focused + colored by `status`).
+//   - When a reference title is known, span 1 is the reference-list ENTRY, and
+//     span 0 carries `refEntryIndex: 1` so clicking the inline citation scrolls +
+//     flashes that entry INSIDE the same PDF (hyperlinking to the reference list
+//     in-document) rather than switching a React tab.
+// Returns [] for no target so callers can render nothing without branching.
+function buildCitationViewerSpans(citationTarget) {
+  if (!citationTarget?.text) return []
+  const hasRefTitle = !!citationTarget.refTitle
+  const spans = [{
+    quote: citationTarget.text,
+    status: citationTarget.status,
+    refId: citationTarget.refId,
+    refTitle: citationTarget.refTitle,
+    label: citationTarget.label,
+    refEntryIndex: hasRefTitle ? 1 : undefined,
+  }]
+  if (hasRefTitle) {
+    spans.push({
+      quote: citationTarget.refTitle,
+      refId: citationTarget.refId,
+      refTitle: citationTarget.refTitle,
+      label: 'Reference-list entry',
+      kind: 'ref-entry',
+    })
+  }
+  return spans
+}
+
+// The raster page-image overlay used for the full-page thumbnail/preview modal.
+// It locates and highlights AI-flagged passages on the native pages and supports
+// Find. The inline-citation → reference-list jump (R28/R29/R30) lives in the
+// native pdf.js stack (DocumentViewer → NativePdfViewer), NOT here.
+function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onClose }) {
   const [pageCount, setPageCount] = useState(null)
   const [activePage, setActivePage] = useState(0)
+  const [highlights, setHighlights] = useState({}) // pageIndex -> [{rects,band,score,reason,key}]
+  const [findHl, setFindHl] = useState({})         // pageIndex -> [rects] for the query
+  const [hoverHl, setHoverHl] = useState(null)
+  const [zoom, setZoom] = useState(1)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [matches, setMatches] = useState([])     // [{page}], page 0-indexed
+  const [currentMatch, setCurrentMatch] = useState(0)
+  const docTextRef = useRef('')                  // extracted body text (for find)
+  const findInputRef = useRef(null)
   const scrollRef = useRef(null)
   const pageRefs = useRef([])
+
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
+  const zoomIn = () => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
+  const zoomOut = () => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
+  // R31: trackpad/touch pinch-to-zoom on the per-ref overlay page image, via the
+  // SAME shared hook the native DocumentViewer uses (ctrl+wheel + WebKit gesture
+  // events, non-passive so the browser's own page zoom never engages).
+  useGesturePinchZoom(scrollRef, setZoom, { min: ZOOM_MIN, max: ZOOM_MAX })
+  // Image sizing: at 100% fit to viewport; when zoomed, grow past the
+  // viewport and let the (now two-axis) scroll container pan.
+  const imgStyle = zoom === 1
+    ? { maxWidth: '95vw', maxHeight: '92vh', objectFit: 'contain' }
+    : { width: `${Math.round(zoom * 90)}vw`, maxWidth: 'none', height: 'auto', objectFit: 'contain' }
 
   useEffect(() => {
     let cancelled = false
@@ -46,6 +115,101 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     })()
     return () => { cancelled = true }
   }, [checkId])
+
+  // Locate AI-flagged passages on the native pages (PyMuPDF search -> rects),
+  // so we can overlay real highlights on the page images with hover AI data.
+  useEffect(() => {
+    let alive = true
+    setHighlights({})
+    const spans = Array.isArray(aiDetection?.spans) ? aiDetection.spans : []
+    if (!checkId || checkId === -1 || !pageCount || spans.length === 0) return undefined
+    const band = aiDetection?.band
+    const targets = spans
+      .filter((s) => s && s.quote)
+      .map((s, i) => ({ text: s.quote, span_index: i, span_type: 'ai', band, model_score: s.model_score, reason: s.reason }))
+    if (!targets.length) return undefined
+    api.locatePdfSpans(checkId, targets)
+      .then((res) => {
+        if (!alive) return
+        const byPage = {}
+        for (const r of (res.data?.results || [])) {
+          if (!r.found) continue
+          ;(byPage[r.page] = byPage[r.page] || []).push({
+            rects: r.rects, band: r.band, score: r.model_score, reason: r.reason,
+            key: `ai-${r.span_index}`,
+          })
+        }
+        setHighlights(byPage)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [checkId, pageCount, aiDetection])
+
+  // Fetch the extracted body text once so Find can locate words. The pages are
+  // rasterized images (no text layer), so we search the extracted text and jump
+  // to the estimated page rather than highlight on the image.
+  useEffect(() => {
+    let alive = true
+    docTextRef.current = ''
+    if (!checkId || checkId === -1) return undefined
+    fetch(`${API_BASE}/api/paper-text/${checkId}`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive && d && d.available !== false) docTextRef.current = d.text || '' })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [checkId])
+
+  // Recompute matches when the query changes. Estimate each match's page from
+  // its character offset (chars are roughly evenly distributed across pages).
+  useEffect(() => {
+    const q = (findQuery || '').trim().toLowerCase()
+    const text = docTextRef.current
+    if (q.length < 2 || !text) { setMatches([]); setCurrentMatch(0); return }
+    const lower = text.toLowerCase()
+    const pages = Math.max(1, pageCount || 1)
+    const out = []
+    let i = 0
+    while ((i = lower.indexOf(q, i)) !== -1 && out.length < 2000) {
+      out.push({ page: Math.min(pages - 1, Math.floor((i / lower.length) * pages)) })
+      i += q.length
+    }
+    setMatches(out)
+    setCurrentMatch(0)
+  }, [findQuery, pageCount])
+
+  // Declared before the effects below that reference it (React Compiler flags
+  // use-before-declare even when the call only happens inside an async closure).
+  const jumpToPage = (n) => {
+    const el = pageRefs.current[n]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // Show WHERE the query is on the page (not just which page): locate it on the
+  // native pages via PyMuPDF search and highlight the rects (debounced).
+  useEffect(() => {
+    const q = (findQuery || '').trim()
+    setFindHl({})
+    if (!checkId || checkId === -1 || !pageCount || q.length < 3) return undefined
+    let alive = true
+    const t = setTimeout(() => {
+      api.locatePdfSpans(checkId, [{ text: q, span_index: 0, span_type: 'find' }])
+        .then((res) => {
+          if (!alive) return
+          const byPage = {}
+          let firstPage = null
+          for (const r of (res.data?.results || [])) {
+            if (r.found && Array.isArray(r.rects)) {
+              if (firstPage === null) firstPage = r.page
+              byPage[r.page] = (byPage[r.page] || []).concat(r.rects)
+            }
+          }
+          setFindHl(byPage)
+          if (firstPage !== null) setTimeout(() => jumpToPage(firstPage), 60)
+        })
+        .catch(() => { /* find-highlight is best-effort; ignore lookup errors */ })
+    }, 350)
+    return () => { alive = false; clearTimeout(t) }
+  }, [findQuery, checkId, pageCount])
 
   // Track which page is centered in the viewport so the "Page N / total"
   // chip updates as the user scrolls. Uses IntersectionObserver for
@@ -69,17 +233,24 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     return () => observer.disconnect()
   }, [pageCount])
 
-  const jumpToPage = (n) => {
-    const el = pageRefs.current[n]
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const gotoFind = (dir) => {
+    if (!matches.length) return
+    const next = (currentMatch + dir + matches.length) % matches.length
+    setCurrentMatch(next)
+    jumpToPage(matches[next].page)
   }
+  const openFind = () => { setFindOpen(true); setTimeout(() => findInputRef.current?.focus(), 0) }
 
   // Close on Esc — the parent already wires this for the legacy single
   // image case, but the multi-page list is its own component so it
   // needs its own listener.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(); return }
+      if (e.key === 'Escape') { if (findOpen) { setFindOpen(false); setFindQuery('') } else onClose() }
+      else if (e.key === '+' || e.key === '=') { zoomIn() }
+      else if (e.key === '-' || e.key === '_') { zoomOut() }
+      else if (e.key === '0') { setZoom(1) }
       else if (e.key === 'ArrowDown' || e.key === 'PageDown') {
         if (pageCount > 1) jumpToPage(Math.min(activePage + 1, pageCount - 1))
       } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
@@ -88,7 +259,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activePage, pageCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activePage, pageCount, findOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const multiPage = pageCount && pageCount > 1
 
@@ -143,10 +314,55 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
         </div>
       )}
 
+      {/* Zoom controls — vertical, on the right edge (out of the way). */}
+      <div
+        className="absolute right-4 top-1/2 z-20 flex flex-col gap-2 p-1.5 rounded-xl"
+        style={{ transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.10)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <VerticalZoomControls
+          zoom={zoom}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={() => setZoom(1)}
+          min={ZOOM_MIN}
+          max={ZOOM_MAX}
+          dark
+        />
+      </div>
+
+      {/* Find bar (top-center) — searches the extracted text and jumps to the
+          estimated page (images have no text layer, so no in-image highlight). */}
+      {findOpen ? (
+        <div className="absolute top-4 left-1/2 z-30" style={{ transform: 'translateX(-50%)' }} onClick={(e) => e.stopPropagation()}>
+          <FindBar
+            value={findQuery}
+            onChange={setFindQuery}
+            matchCount={matches.length}
+            currentMatch={currentMatch}
+            onPrev={() => gotoFind(-1)}
+            onNext={() => gotoFind(1)}
+            onClose={() => { setFindOpen(false); setFindQuery('') }}
+            inputRef={findInputRef}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); openFind() }}
+          className="absolute top-4 right-20 z-20 px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5"
+          style={{ background: 'rgba(255,255,255,0.12)' }}
+          title="Find in document (⌘F / Ctrl+F)"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+          Find
+        </button>
+      )}
+
       {/* Pages */}
       <div
         ref={scrollRef}
-        className="w-full h-full overflow-y-auto"
+        className={`w-full h-full ${zoom > 1 ? 'overflow-auto' : 'overflow-y-auto'}`}
         style={{ scrollBehavior: 'smooth' }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
@@ -156,16 +372,58 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
             onClick={(e) => e.stopPropagation()}
           >
             {Array.from({ length: pageCount }, (_, i) => (
-              <img
-                key={i}
-                ref={(el) => { pageRefs.current[i] = el }}
-                data-page-index={i}
-                src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
-                alt={`Page ${i + 1} of ${pageCount}`}
-                loading="lazy"
-                style={{ maxWidth: '95vw', maxHeight: '92vh', objectFit: 'contain' }}
-                className="rounded-lg shadow-2xl bg-white"
-              />
+              <div key={i} ref={(el) => { pageRefs.current[i] = el }} data-page-index={i}
+                style={{ position: 'relative', ...imgStyle, height: 'auto', lineHeight: 0 }}>
+                <img
+                  src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
+                  alt={`Page ${i + 1} of ${pageCount}`}
+                  loading="lazy"
+                  style={{ display: 'block', width: '100%', height: 'auto' }}
+                  className="rounded-lg shadow-2xl bg-white"
+                />
+                {/* Native-page AI highlight overlay (normalized rects -> %). */}
+                {(highlights[i] || []).flatMap((hl) =>
+                  (hl.rects || []).map(([x0, y0, x1, y1], ri) => (
+                    <div
+                      key={`${hl.key}-${ri}`}
+                      onMouseEnter={() => setHoverHl(hl)}
+                      onMouseLeave={() => setHoverHl((h) => (h === hl ? null : h))}
+                      title="AI-flagged passage"
+                      style={{
+                        position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
+                        width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+                        background: _BAND_HL[(hl.band || '').toLowerCase()] || _BAND_HL.medium,
+                        borderRadius: 2, cursor: 'help', mixBlendMode: 'multiply',
+                      }}
+                    >
+                      {hoverHl === hl && ri === 0 && (
+                        <div style={{
+                          // R30: fully opaque so the banner is always legible over
+                          // any underlying page content.
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, zIndex: 30,
+                          background: 'rgb(17,24,39)', color: '#fff', fontSize: 11,
+                          padding: '6px 8px', borderRadius: 6, width: 240, lineHeight: 1.4,
+                          pointerEvents: 'none', boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+                        }}>
+                          <strong style={{ color: '#fca5a5' }}>AI-likelihood: {hl.band || 'flagged'}</strong>
+                          {typeof hl.score === 'number' ? ` · ${Math.round(hl.score * 100)}` : ''}
+                          {hl.reason ? <div style={{ color: '#cbd5e1', marginTop: 2 }}>{hl.reason}</div> : null}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {/* Find-query highlight overlay (yellow) — shows where it is. */}
+                {(findHl[i] || []).map(([x0, y0, x1, y1], ri) => (
+                  <div key={`find-${ri}`} title="Search match"
+                    style={{
+                      position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`,
+                      width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+                      background: 'rgba(250,204,21,0.45)', borderRadius: 2,
+                      mixBlendMode: 'multiply', boxShadow: '0 0 0 1px rgba(202,138,4,0.7)',
+                    }} />
+                ))}
+              </div>
             ))}
           </div>
         ) : (
@@ -177,7 +435,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
             <img
               src={previewUrl || thumbnailUrl}
               alt="Paper preview"
-              style={{ maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain' }}
+              style={imgStyle}
               className="rounded-lg shadow-2xl"
               onError={(e) => {
                 if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
@@ -454,6 +712,7 @@ export default function StatusSection() {
     currentCheckId,
     sessionId,
     stats: checkStoreStats,
+    aiDetection: checkStoreAiDetection,
     cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore(useShallow(s => ({
@@ -466,6 +725,7 @@ export default function StatusSection() {
     currentCheckId: s.currentCheckId,
     sessionId: s.sessionId,
     stats: s.stats,
+    aiDetection: s.aiDetection,
     cancelCheck: s.cancelCheck,
     setError: s.setError,
   })))
@@ -529,9 +789,19 @@ export default function StatusSection() {
     displayStatus = selectedCheck.status || 'idle'
     displayTitle = selectedCheck.custom_label || selectedCheck.paper_title
     displaySource = selectedCheck.paper_source
-    displayTotalRefs = selectedCheck.total_refs || 0
-    displayProcessedRefs = selectedCheck.processed_refs || 0
-    displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
+    // total_refs can be an early estimate that's smaller than the real
+    // (post de-dup/merge) processed count. Reconcile the total up to processed
+    // and clamp the displayed processed + progress so the bar never exceeds
+    // 100% ("28/23 · 122%"). REAL DATA ONLY — no fabricated references.
+    {
+      const rawTotal = selectedCheck.total_refs || 0
+      const rawProcessed = selectedCheck.processed_refs || 0
+      displayTotalRefs = Math.max(rawTotal, rawProcessed)
+      displayProcessedRefs = Math.min(rawProcessed, displayTotalRefs)
+    }
+    displayProgress = displayTotalRefs > 0
+      ? Math.min((displayProcessedRefs / displayTotalRefs) * 100, 100)
+      : 0
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
     displayHallucinationProvider = selectedCheck.hallucination_provider
@@ -560,6 +830,12 @@ export default function StatusSection() {
     }
   }
 
+  // Final defensive clamp: the progress bar must never render past 100%,
+  // regardless of which path (live WebSocket stats or persisted history)
+  // produced displayProgress. Guards against a stale early total_refs estimate
+  // that lagged behind processed_refs.
+  displayProgress = Math.min(Math.max(displayProgress || 0, 0), 100)
+
   // Determine the source type - prefer selectedCheck, fall back to checkStore for current session
   const displaySourceType = selectedCheck?.source_type || (isCurrentSessionCheck ? checkStoreSourceType : null)
   const displayLlmLabel = displayLlmModel 
@@ -582,8 +858,28 @@ export default function StatusSection() {
   const [thumbnailError, setThumbnailError] = useState(false)
   const [thumbnailLoading, setThumbnailLoading] = useState(false)
   const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
+  const [showShare, setShowShare] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
-  
+  const [citationTarget, setCitationTarget] = useState(null)
+
+  // R02 (O3): a ReferenceCard can request "show this citation context in the
+  // document". Route it through the native pdf.js stack (DocumentViewer →
+  // NativePdfViewer) — NOT the raster ThumbnailOverlay — so the citation is
+  // located + flashed on the real PDF (or the converted-PDF / extracted-text
+  // fallback), color-coded by the reference's status (R14) and hyperlinked back
+  // to its reference entry via refId.
+  const citationRequest = useDocViewerStore((s) => s.citation)
+  const clearCitationRequest = useDocViewerStore((s) => s.clearCitation)
+  useEffect(() => {
+    if (citationRequest?.text) {
+      setCitationTarget(citationRequest)
+    }
+  }, [citationRequest?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The locatable spans handed to DocumentViewer for the citation view.
+  const citationSpans = buildCitationViewerSpans(citationTarget)
+  const closeCitationViewer = () => { setCitationTarget(null); clearCitationRequest() }
+
   // Close thumbnail overlay on Escape key
   useEffect(() => {
     const handleEscape = (e) => {
@@ -1033,18 +1329,37 @@ export default function StatusSection() {
         {/* Thumbnail */}
         {renderThumbnail()}
         <div className="flex-1 min-w-0">
-          {displayTitle && (
-            <h3 
-              className="font-medium"
-              style={{ 
-                color: 'var(--color-text-primary)',
-                wordBreak: 'break-word',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {displayTitle}
-            </h3>
-          )}
+          {/* Title row: title on the left, Share pinned to the far right of the
+              outline (to the right of the thumbnail/title), per request. */}
+          <div className="flex items-start justify-between gap-3">
+            {displayTitle && (
+              <h3
+                className="font-medium"
+                style={{
+                  color: 'var(--color-text-primary)',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {displayTitle}
+              </h3>
+            )}
+            {isViewingCheck && displayStatus === 'completed' && (
+              <button
+                type="button"
+                onClick={() => setShowShare(true)}
+                className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
+                style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
+                title="Share or export these results — HTML, PDF, Markdown or Word; or a public link"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                  <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+                </svg>
+                Share results
+              </button>
+            )}
+          </div>
           {/* Hide source info for pasted text since it shows the file path or text content */}
           {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 
@@ -1167,7 +1482,13 @@ export default function StatusSection() {
           </p>
         </div>
         {canCancel && (
-          <button
+          /* In-progress Cancel control — shared pill primitive (BUTTON_DESIGN
+             §4.6 contract). variant="outline" so it matches the action family;
+             error-tinted text/border keep the "cancel" affordance honest. */
+          <Button
+            size="pill"
+            variant="outline"
+            style={{ color: 'var(--color-error)', border: '1px solid var(--color-error)' }}
             onClick={async () => {
               if (!viewedCheckSessionId) return
               try {
@@ -1193,22 +1514,9 @@ export default function StatusSection() {
                 setError(error.response?.data?.detail || error.message || 'Failed to cancel')
               }
             }}
-            className="px-3 py-2 text-sm font-medium rounded transition-colors cursor-pointer hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-error-bg)',
-              color: 'var(--color-error)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-error)'
-              e.currentTarget.style.color = 'white'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
-              e.currentTarget.style.color = 'var(--color-error)'
-            }}
           >
             Cancel
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1246,9 +1554,35 @@ export default function StatusSection() {
           checkId={selectedCheckId}
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
-          onClose={() => setShowThumbnailOverlay(false)}
+          aiDetection={selectedCheck?.ai_detection || (isCurrentSessionCheck ? checkStoreAiDetection : null)}
+          onClose={() => { setShowThumbnailOverlay(false) }}
+        />
+      )}
+
+      {/* R02 (O3) — per-ref "View in document" renders the NATIVE pdf.js viewer
+          (DocumentViewer → NativePdfViewer for PDF + converted-PDF sources;
+          extracted-text highlighter as a fallback), with the citation focused,
+          color-coded by status (R14) and linked back to its reference. */}
+      {citationTarget?.text && selectedCheckId != null && selectedCheckId !== -1 && (
+        <DocumentViewer
+          checkId={selectedCheckId}
+          spans={citationSpans}
+          focusSpanIndex={0}
+          onClose={closeCitationViewer}
+        />
+      )}
+      {showShare && (
+        <ShareModal
+          checkId={selectedCheckId}
+          title={displayTitle}
+          onClose={() => setShowShare(false)}
         />
       )}
     </div>
   )
 }
+
+// Exported for unit tests (R28). Co-located with the component per the project's
+// existing pattern (see ExploreGraphView).
+// eslint-disable-next-line react-refresh/only-export-components
+export { buildCitationViewerSpans }

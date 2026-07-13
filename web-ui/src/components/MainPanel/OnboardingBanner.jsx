@@ -81,7 +81,7 @@ export default function OnboardingBanner({ onOpenSettings }) {
   void hasLlm; void dbPathSet
 
   const dismiss = () => {
-    try { localStorage.setItem(DISMISS_KEY, '1') } catch {}
+    try { localStorage.setItem(DISMISS_KEY, '1') } catch { /* storage may be blocked (private mode); dismissal is best-effort */ }
     setDismissed(true)
   }
 

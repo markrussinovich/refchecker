@@ -5,7 +5,13 @@ async function setupWebSocketMock(page) {
     const connections = {};
 
     class MockWebSocket {
-      constructor(url) {
+      constructor(url, protocols) {
+        // Only the app's /api/ws/ socket is mocked. Vite's HMR client (and any
+        // other socket) must use the real WebSocket — replacing the global
+        // outright breaks HMR and floods the page with errors, hanging the test.
+        if (typeof url !== 'string' || url.indexOf('/api/ws/') === -1) {
+          return new __RealWebSocket(url, protocols);
+        }
         this.url = url;
         this.sessionId = url.split('/').pop();
         this.readyState = 1; // OPEN
@@ -29,6 +35,7 @@ async function setupWebSocketMock(page) {
     }
 
     window.__wsConnections = connections;
+    const __RealWebSocket = window.WebSocket;
     window.WebSocket = MockWebSocket;
   });
 
@@ -172,12 +179,7 @@ test.describe('RefChecker Web UI', () => {
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
   });
 
-  // FLAKY (pre-existing, unrelated to AI detection): the mock WebSocket
-  // connection intermittently never registers for the first WS-heavy test, so
-  // the first emit() hangs (non-deterministic race in the app's WS-connect
-  // lifecycle under the harness; a 90s timeout does not help). Quarantined to
-  // keep CI green; tracked for a dedicated fix.
-  test.fixme('isolates concurrent sessions, history clicks, and per-paper references', async ({ page }) => {
+  test('isolates concurrent sessions, history clicks, and per-paper references', async ({ page }) => {
     const serverState = {
       startQueue: [
         {
@@ -253,19 +255,19 @@ test.describe('RefChecker Web UI', () => {
     // Switch to Paper Two and confirm its data
     await sidebar.getByText('Paper Two', { exact: true }).click();
     await expect(page.getByText('References (1)')).toBeVisible();
-    await expect(page.getByText('Paper Two Ref A')).toBeVisible();
-    await expect(page.getByText('Paper One Ref B')).not.toBeVisible({ timeout: 1000 });
+    await expect(page.getByText('Paper Two Ref A', { exact: true })).toBeVisible();
+    await expect(page.getByText('Paper One Ref B', { exact: true })).not.toBeVisible({ timeout: 1000 });
 
     // Switch to Paper One and confirm its data is intact
     await sidebar.getByText('Paper One', { exact: true }).click();
     await expect(page.getByText('References (2)')).toBeVisible();
-    await expect(page.getByText('Paper One Ref A')).toBeVisible();
-    await expect(page.getByText('Paper Two Ref A')).not.toBeVisible({ timeout: 1000 });
+    await expect(page.getByText('Paper One Ref A', { exact: true })).toBeVisible();
+    await expect(page.getByText('Paper Two Ref A', { exact: true })).not.toBeVisible({ timeout: 1000 });
 
     // Switch to historical completed run and ensure correct results render
     await sidebar.getByText('Historical Paper', { exact: true }).click();
     await expect(page.getByText('References (3)')).toBeVisible();
-    await expect(page.getByText('Historical Ref A')).toBeVisible();
+    await expect(page.getByText('Historical Ref A', { exact: true })).toBeVisible();
   });
 
   test('should display history sidebar', async ({ page }) => {
@@ -353,8 +355,7 @@ test.describe('RefChecker Web UI', () => {
     }
   });
 
-  // FLAKY (pre-existing): same WS-mock connection race as the isolation test.
-  test.fixme('paper-level counts are correct and suggestions display properly', async ({ page }) => {
+  test('paper-level counts are correct and suggestions display properly', async ({ page }) => {
     // Set up a check with specific issue counts to validate
     const serverState = {
       startQueue: [
@@ -452,17 +453,19 @@ test.describe('RefChecker Web UI', () => {
     // Wait for summary to be visible
     await expect(page.getByText('Summary')).toBeVisible();
     
-    // Verify the issue chips show correct counts (the rounded pill buttons with "X Errors", "X Warnings", etc.)
-    // These are the chips on the right side of the StatsSection
-    // Use getByRole with exact name to target the correct buttons
+    // Verify the issue chips show correct counts. These chips count REFERENCES
+    // per issue type (matching the References status row), NOT raw issue items —
+    // so Ref 3 (which has an error AND a warning) is an error reference, leaving
+    // exactly 1 warning-only reference (Ref 2). 1 error ref, 1 warning-only ref,
+    // 1 suggestion-only ref.
     await expect(page.getByRole('button', { name: '1 Errors', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '2 Warnings', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Warnings', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '1 Suggestions', exact: true })).toBeVisible();
     
     // Verify suggestion is displayed as "Suggestion:" not "Error:"
-    await expect(page.getByText('Suggestion Ref')).toBeVisible();
+    await expect(page.getByText('Suggestion Ref', { exact: true })).toBeVisible();
     // Click to expand if needed
-    const suggestionRef = page.getByText('Suggestion Ref');
+    const suggestionRef = page.getByText('Suggestion Ref', { exact: true });
     await suggestionRef.click();
     
     // The suggestion should show "Suggestion:" label with the arXiv URL

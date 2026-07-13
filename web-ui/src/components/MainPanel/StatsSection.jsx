@@ -10,7 +10,6 @@ import {
   exportResultsAsRIS,
   exportDiffAsMarkdown,
   exportDiffAsCsv,
-  exportCorrectedListAsStyle,
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
   filterIssuesForStyle,
@@ -154,8 +153,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   }
 
   const isFilterActive = statusFilter.length > 0
-  const activeFilterId = isFilterActive ? statusFilter[0] : null
-  const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
   // Style-aware summary counters. When the active citation style would
   // suppress an issue (style-conforming author count, NLM venue
@@ -222,10 +219,14 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const processedRefs = summaryCounts.processedRefs
   const totalRefs = summaryCounts.totalRefs
 
+  // Count REFERENCES per issue type (not raw issue items) so these chips agree
+  // with the "References" status badges above — clicking a chip filters to
+  // references, so a ref with 2 errors is 1 filterable item, not 2. (Fixes the
+  // "1 vs 2" mismatch between the two summary rows.)
   const issueFilters = [
-    { ...allFilters.error, value: summaryCounts.issues.errors },
-    { ...allFilters.warning, value: summaryCounts.issues.warnings },
-    { ...allFilters.suggestion, value: summaryCounts.issues.suggestions },
+    { ...allFilters.error, value: refsWithErrors },
+    { ...allFilters.warning, value: refsWithWarningsOnly },
+    { ...allFilters.suggestion, value: refsWithSuggestionsOnly },
     { ...allFilters.unverified, value: refsUnverified },
     { ...allFilters.hallucination, value: refsHallucinated },
   ]
@@ -243,7 +244,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const handleExport = (format) => {
     setShowExportMenu(false)
     const sortedRefs = sortReferencesForExport(references, sortMode)
-    const exportData = { paperTitle, paperSource, stats, references: sortedRefs }
 
     // 'diff' mode short-circuits format: there are only two file shapes
     // (markdown and csv) that make sense for a side-by-side report.
@@ -467,6 +467,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         </div>
       </div>
 
+      {/* The animated walkthrough "video" lives ONLY in the Share popup
+          (ShareModal), not inline in the Summary stats — keep this view a
+          plain stats summary. (Reverts R24's stats-page placement.) */}
+
       {/* Reference counts row */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>References</span>
@@ -658,38 +662,38 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
       </div>
 
-      {/* Issue counts row - separate line. Label disambiguated from
-          the "References" row above: each chip here counts INDIVIDUAL
-          issue items (a single ref can contribute multiple), whereas
-          the References row counts REFS-WITH-STATUS. That distinction
-          was confusing users who saw "6 warnings" on References but
-          "8 Warnings" here for the same dataset (8 warning items
-          spread across 6 refs). */}
+      {/* Issue filter row - separate line. Each chip counts REFERENCES with
+          that issue type (same granularity as the References row above), so the
+          two rows agree — clicking a chip filters the list to those references. */}
       {issueFilters.some(f => f.value > 0) && (
         <div className="flex items-center gap-2 flex-wrap mt-2">
           <span
             className="text-xs font-medium"
             style={{ color: 'var(--color-text-muted)' }}
-            title="Total individual issue items across all refs (a single ref can contribute more than one). The References row above counts refs-with-status instead."
+            title="References with each issue type — click to filter the list. Matches the References row above."
           >
-            Issue items
+            Filter by issue
           </span>
           {issueFilters.filter(f => f.value > 0).map(filter => {
             const isSelected = statusFilter.includes(filter.id)
             return (
               <button
                 key={filter.id}
+                type="button"
                 onClick={() => handleFilterClick(filter.id)}
-                className={`group flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer border hover:scale-105 hover:shadow-sm ${
-                  isSelected ? 'ring-1 shadow-sm' : ''
-                }`}
-                style={{ 
+                aria-pressed={isSelected}
+                // Filter chips read as part of the action-control family
+                // (BUTTON_DESIGN §1.0/§4.7 / R33): the ONE 8px radius, never
+                // 9999px. Click-state stability (R52/§1.3): selecting or
+                // hovering swaps ONLY the background/border colour — never
+                // scale, shadow, or a ring box — so the chip never reflows or
+                // jumps under the cursor. The 1px border is always present.
+                className="group flex items-center gap-1 px-2 py-0.5 text-xs transition-colors cursor-pointer border rc-control"
+                style={{
+                  borderRadius: 'var(--control-radius)',
                   backgroundColor: isSelected ? filter.bgColor : 'transparent',
                   borderColor: isSelected ? filter.color : 'var(--color-border)',
                   color: filter.color,
-                  '--hover-bg': filter.bgColor,
-                  '--hover-border': filter.color,
-                  ringColor: isSelected ? filter.color : undefined,
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected) {
@@ -703,7 +707,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                     e.currentTarget.style.borderColor = 'var(--color-border)'
                   }
                 }}
-                title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
+                title={`${filter.value} reference${filter.value === 1 ? '' : 's'} with ${filter.label.toLowerCase()}`}
               >
                 <span className="font-bold">{filter.value}</span>
                 <span>{filter.label}</span>

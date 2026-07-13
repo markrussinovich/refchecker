@@ -22,6 +22,7 @@ export const useHistoryStore = create((set, get) => ({
   selectedBatchId: null,
   selectedBatch: null, // { batch_id, batch_label?, total, checks: [...] }
   isLoadingBatch: false,
+  batchError: null, // set when selectBatch fails/times out so the view can offer Retry
   isLoading: false,
   isLoadingDetail: false,
   detailCache: {}, // checkId -> { check, fetchedAt }
@@ -607,12 +608,19 @@ export const useHistoryStore = create((set, get) => ({
   // fetches the batch detail so the view can render immediately.
   selectBatch: async (batchId) => {
     if (!batchId) {
-      set({ selectedBatchId: null, selectedBatch: null })
+      set({ selectedBatchId: null, selectedBatch: null, batchError: null })
       return
     }
-    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true })
+    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true, batchError: null })
     try {
-      const resp = await api.getBatch(batchId)
+      // Hard ceiling so a slow/hung backend can never strand the panel on
+      // "Loading batch…" forever — the view surfaces a retryable error
+      // instead. 45s is comfortably above a healthy response yet well
+      // under the axios default, so the user gets feedback either way.
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Batch load timed out — the server may be busy.')), 45000)
+      )
+      const resp = await Promise.race([api.getBatch(batchId), timeoutPromise])
       // v0.7.55 (per full-stack review round 2): only commit the
       // result if `selectedBatchId` is still THIS batch. Without
       // this guard a rapid sidebar click between selectBatch and
@@ -620,7 +628,7 @@ export const useHistoryStore = create((set, get) => ({
       // even after `selectCheck` had nulled `selectedBatchId`,
       // leaving an orphan data object that the UI never showed.
       if (get().selectedBatchId === batchId) {
-        set({ selectedBatch: resp.data, isLoadingBatch: false })
+        set({ selectedBatch: resp.data, isLoadingBatch: false, batchError: null })
       } else {
         set({ isLoadingBatch: false })
       }
@@ -629,9 +637,12 @@ export const useHistoryStore = create((set, get) => ({
       // v0.7.56 (per full-stack review round 3): same race-token
       // guard on the error path. A failed fetch that resolves AFTER
       // the user navigated away should NOT surface its error toast
-      // onto the unrelated view they're now on.
+      // onto the unrelated view they're now on. We write a dedicated
+      // `batchError` (not the shared `error`) so BatchSummaryView can
+      // render a Retry affordance instead of an indefinite spinner.
       if (get().selectedBatchId === batchId) {
-        set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+        const msg = e?.response?.data?.detail || e?.message || 'Failed to load batch'
+        set({ isLoadingBatch: false, batchError: msg })
       } else {
         set({ isLoadingBatch: false })
       }
@@ -708,6 +719,17 @@ export const useHistoryStore = create((set, get) => ({
       if (!findHit(r, i)) return r
       const corrected = r.corrected_reference || {}
       const merged = { ...r }
+      // Snapshot the pre-correction state ONCE so optimisticRevertCorrection /
+      // revertAllOptimisticCorrections can roll the badge back when the user
+      // clicks Restore / Reset on a history-viewed check (the badge reads
+      // selectedCheck.results for those, so without this the chip stays frozen).
+      if (!merged._pre_correction) {
+        merged._pre_correction = {
+          status: r.status, errors: r.errors || [], warnings: r.warnings || [],
+          title: r.title, authors: r.authors, year: r.year,
+          venue: r.venue, doi: r.doi, arxiv_id: r.arxiv_id,
+        }
+      }
       for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
         if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
           merged[k] = corrected[k]
@@ -719,6 +741,72 @@ export const useHistoryStore = create((set, get) => ({
       return merged
     })
     set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
+  // Roll one optimistic correction back to its pre-correction snapshot so the
+  // HealthBadge / list react instantly on Restore for a history-viewed check.
+  optimisticRevertCorrection: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    let touched = false
+    const nextResults = selectedCheck.results.map((r, i) => {
+      const hit = String(r.id ?? '') === idStr || String(r.index ?? '') === idStr || String(i) === idStr
+      if (!hit || !r?._pre_correction) return r
+      touched = true
+      const snap = r._pre_correction
+      const restored = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (snap[k] !== undefined) restored[k] = snap[k]
+      }
+      restored.status = snap.status
+      restored.errors = snap.errors || []
+      restored.warnings = snap.warnings || []
+      delete restored._pre_correction
+      return restored
+    })
+    if (touched) set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
+  // Revert EVERY optimistic correction (bulk Reset) so the badge returns to the
+  // pre-apply state for a history-viewed check.
+  revertAllOptimisticCorrections: () => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    let touched = false
+    const nextResults = selectedCheck.results.map((r) => {
+      if (!r?._pre_correction) return r
+      touched = true
+      const snap = r._pre_correction
+      const restored = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (snap[k] !== undefined) restored[k] = snap[k]
+      }
+      restored.status = snap.status
+      restored.errors = snap.errors || []
+      restored.warnings = snap.warnings || []
+      delete restored._pre_correction
+      return restored
+    })
+    if (touched) set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
+  // Optimistically drop a reference from the historical-view results so the
+  // HealthBadge / list move the instant the user clicks Remove (displayRefs
+  // reads selectedCheck.results for non-current checks). reloadCheck() reconciles
+  // with the server afterwards.
+  optimisticRemoveReference: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    const next = selectedCheck.results.filter((r, i) => !(
+      String(r?.id ?? '') === idStr ||
+      String(r?.index ?? '') === idStr ||
+      String(i) === idStr
+    ))
+    if (next.length !== selectedCheck.results.length) {
+      set({ selectedCheck: { ...selectedCheck, results: next } })
+    }
   },
 
   updateLabel: async (id, label) => {

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import {
-  formatAuthors,
   normalizeAuthors,
+  hasEtAlSentinel,
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
   exportReferenceAsBibtex,
@@ -15,7 +15,10 @@ import {
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import { fetchAuthorProfile, findAuthorProfile, getVenueProfile } from '../../utils/api'
 import { useStyleStore } from '../../stores/useStyleStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
+import { useHistoryStore } from '../../stores/useHistoryStore'
 import {
   shouldSuppressVenueWarning,
   acronymFor,
@@ -23,6 +26,8 @@ import {
   styleAcceptsAbbreviatedVenue,
 } from '../../utils/venueAbbreviations'
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
+import AdditionalInfoBar from './AdditionalInfoBar'
+import ArticleAssistant from '../MainPanel/ArticleAssistant'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -37,6 +42,12 @@ const handleExternalClick = (url) => (e) => {
 }
 
 const urlPattern = /https?:\/\/[^\s]+/g
+
+// R04: client-side wall-clock cap on the hallucination "checking" state.
+// If a ref stays pending longer than this (~180s) the FE reverts it to its
+// base status with a "check timed out" note, so a missing backend
+// reference_result can never wedge the card on the spinner forever.
+const HALLUCINATION_PENDING_TIMEOUT_MS = 180000
 
 function normalizeCitationMarkerText(value) {
   return String(value || '')
@@ -56,7 +67,7 @@ function findCitationMarkerRange(sentence, marker) {
 
   const normalizedMarker = normalizeCitationMarkerText(marker)
   if (!normalizedMarker) return null
-  const markerCore = normalizedMarker.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
+  const markerCore = normalizedMarker.replace(/^\s*[[(]\s*/, '').replace(/\s*[\])]\s*$/, '')
   const normalizedCore = markerCore || normalizedMarker
 
   const candidates = []
@@ -67,7 +78,7 @@ function findCitationMarkerRange(sentence, marker) {
     for (let end = start + 3; end <= windowEnd; end += 1) {
       const raw = sentence.slice(start, end)
       const normalized = normalizeCitationMarkerText(raw)
-      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[\[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
+      if (normalized === normalizedMarker || normalized === normalizedCore || normalizeCitationMarkerText(raw.replace(/^\s*[[(]\s*/, '').replace(/\s*[\])]\s*$/, '')) === normalizedCore) {
         candidates.push({ start, end, length: end - start })
       }
     }
@@ -262,12 +273,94 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
-  const status = getEffectiveReferenceStatus(reference, isCheckComplete)
+
+  // R04 FE safety net: if a ref sits in the hallucination "checking" state
+  // for longer than HALLUCINATION_PENDING_TIMEOUT_MS (~180s) — e.g. the
+  // backend's final reference_result never arrived — stop spinning forever.
+  // We locally treat the check as finished (no pending flag) so the card
+  // falls back to its real base status and shows a "check timed out" note,
+  // instead of wedging on "Checking for hallucination with LLM…".
+  const [hallucinationTimedOut, setHallucinationTimedOut] = useState(false)
+  const isHallucinationPending = !reference.hallucination_assessment && (
+    reference.hallucination_check_pending ||
+    (getEffectiveReferenceStatus(reference, isCheckComplete) === 'checking'
+      && reference.errors?.some(e => e.error_type === 'unverified'))
+  )
+  useEffect(() => {
+    if (!isHallucinationPending) {
+      // Pending resolved (or never started) — clear any prior timeout flag
+      // so a later legitimate re-check isn't immediately marked timed-out.
+      setHallucinationTimedOut(false)
+      return undefined
+    }
+    if (hallucinationTimedOut) return undefined
+    const t = setTimeout(() => setHallucinationTimedOut(true), HALLUCINATION_PENDING_TIMEOUT_MS)
+    return () => clearTimeout(t)
+  }, [isHallucinationPending, hallucinationTimedOut])
+
+  // Once timed out, evaluate status as if the check had finished: clear the
+  // pending flag AND treat the check as complete, so the card resolves to its
+  // real base status (verified/error/warning/etc.) instead of staying on
+  // 'checking' — covering both the explicit-pending and the unverified-during-
+  // active-check cases.
+  const statusReference = hallucinationTimedOut && reference.hallucination_check_pending
+    ? { ...reference, hallucination_check_pending: false }
+    : reference
+  const statusIsComplete = isCheckComplete || (hallucinationTimedOut && isHallucinationPending)
+  const status = getEffectiveReferenceStatus(statusReference, statusIsComplete)
 
   // Subscribe to the shared citation-style store so the card re-renders
   // when the user changes the style picker on the References tab.
   const activeFormat = useStyleStore(s => s.format)
   const activeStyleOptions = useStyleStore(s => s.styleOptions)
+
+  // Active check for the currently-viewed article. The per-reference Chat and
+  // the "In Library" confirm both need a real check id to ground/upsert against.
+  // `reference.last_seen_check_id` is only populated for refs already persisted
+  // in the Seen-References cache — it's frequently 0/undefined for the refs of
+  // the article you're looking at right now, which wrongly hid the Chat button.
+  // Fall back to the actively-selected check so it shows for the current
+  // article's references.
+  const selectedCheckId = useHistoryStore(s => s.selectedCheckId)
+  const activeCheckId = reference.last_seen_check_id > 0
+    ? reference.last_seen_check_id
+    : (selectedCheckId && selectedCheckId > 0 ? selectedCheckId : null)
+
+  // "View in document": ask the preview overlay to locate + highlight this
+  // citation context on the native PDF page (same machinery as AI highlights).
+  const requestCitation = useDocViewerStore(s => s.requestCitation)
+  const viewContextInDoc = (ctx, i) => {
+    // Locate the WHOLE referenced sentence (with its surrounding before/after
+    // when present) and colour the highlight by this reference's check status,
+    // and carry the ref id so the highlight can link back to it.
+    const sentence = (ctx?.sentence || ctx?.text || '').trim()
+    if (!sentence) return
+    const text = [ctx?.before, sentence, ctx?.after].filter(Boolean).join(' ').trim() || sentence
+    requestCitation({
+      text,
+      label: ctx?.marker || `Excerpt ${i + 1}`,
+      status,
+      refId: String(reference.id ?? numberToShow),
+      refTitle: reference.title || '',
+    })
+  }
+
+  // Scroll to + flash this card when a citation highlight links back to it
+  // (the "hyperlink the highlighted text back to the reference" flow).
+  const cardRef = useRef(null)
+  useEffect(() => {
+    const myId = String(reference.id ?? numberToShow)
+    const onFocus = (e) => {
+      if (String(e?.detail?.refId) !== myId) return
+      const el = cardRef.current
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('rc-ref-flash')
+      setTimeout(() => { try { el.classList.remove('rc-ref-flash') } catch { /* unmounted */ } }, 1700)
+    }
+    window.addEventListener('refchecker:focus-reference', onFocus)
+    return () => window.removeEventListener('refchecker:focus-reference', onFocus)
+  }, [reference.id, numberToShow])
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -531,7 +624,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // is a false positive. Suppression runs at render time, so flipping
   // the style dropdown re-evaluates instantly.
   const displayWarnings = baseDisplayWarnings.filter(w => {
-    const t = (w.warning_type || w.error_type || '').toLowerCase()
+    // Drop content-free warnings. A warning with no details, no cited/actual
+    // values, and no usable type renders as a meaningless "Unknown mismatch"
+    // on an otherwise cleanly-verified reference — that's the confusing badge
+    // the user asked about. If it carries no information, don't show it.
+    const details = w.error_details || w.warning_details
+    const hasValues = w.cited_value != null || w.actual_value != null
+    const rawType = (w.warning_type || w.error_type || '').toLowerCase()
+    if (!details && !hasValues && (!rawType || rawType === 'unknown')) return false
+    const t = rawType
     if (t !== 'venue') return true
     return !shouldSuppressVenueWarning({
       cited_value: reference.venue,
@@ -557,6 +658,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
   return (
     <div
+      ref={cardRef}
       className="py-4 border-b font-mono text-sm"
       style={{ borderColor: 'var(--color-border)', contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
     >
@@ -584,6 +686,38 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               style={{ color: 'var(--color-text-primary)' }}
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
+              {(reference.is_inline_cited || (reference.citation_contexts?.length > 0)) && (() => {
+                // R37: co-locate the two distinct citation signals.
+                //  - "Used N× in this paper": how many times THIS paper cites
+                //    the reference inline (local, from the body text).
+                //  - "· N citations": how many times the reference is cited
+                //    across the LITERATURE (from enrichment.cited_by_count).
+                // The literature pill is real-data gated — it only renders when
+                // a real count resolved, so nothing is fabricated.
+                const inlineUses = reference.citation_count || reference.citation_contexts?.length || 0
+                const litCount = reference.enrichment?.cited_by_count
+                const hasLitCount = typeof litCount === 'number'
+                return (
+                  <span
+                    title={`Used ${inlineUses || 1}× in this paper — mentioned inline in this paper's body text`}
+                    className="inline-flex items-center gap-1 align-middle ml-1.5 px-1.5 py-0.5 rounded text-xs font-medium"
+                    style={{ color: 'var(--color-accent, #3b82f6)', background: 'rgba(59,130,246,0.14)', verticalAlign: 'middle' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.1 14.2l-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z" />
+                    </svg>
+                    Used {inlineUses > 0 ? inlineUses : 1}× in this paper
+                    {hasLitCount && (
+                      <span
+                        title="Times cited across the literature (OpenAlex/S2)"
+                        style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}
+                      >
+                        {' · '}{litCount.toLocaleString()} citations
+                      </span>
+                    )}
+                  </span>
+                )
+              })()}
             </div>
 
             {/* Export button */}
@@ -641,12 +775,25 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             if (!stylePicked) return null
             const styleDefaults = CITATION_STYLE_DEFAULTS[activeFormat] || {}
             const effectiveOpts = { ...styleDefaults, ...(activeStyleOptions || {}) }
-            let rendered = ''
+            let rendered
             try { rendered = exportReferenceAsStyle(reference, activeFormat, index, effectiveOpts) } catch { return null }
             if (!rendered) return null
+            // In styled mode the structured VenueLine isn't rendered, so surface
+            // the journal/venue details on hover of the preview block (user
+            // request: "journal info on hover").
+            const _v = reference.venue
+            const _full = _v ? (reference.enrichment?.venue || fullNameFor(_v)) : null
+            const _acr = _v ? acronymFor(_full || _v) : null
+            const _vLower = String(_v || '').toLowerCase()
+            const venueTitle = _v ? [
+              `Journal / venue: ${_v}`,
+              ...(_full && String(_full).toLowerCase() !== _vLower ? [`Full name: ${_full}`] : []),
+              ...(_acr && String(_acr).toLowerCase() !== _vLower ? [`NLM abbreviation: ${_acr}`] : []),
+            ].join('\n') : undefined
             return (
               <div
                 className="mt-1 mb-1 px-2 py-1 rounded text-xs"
+                title={venueTitle}
                 style={{
                   background: 'var(--color-bg-tertiary)',
                   border: '1px solid var(--color-border)',
@@ -674,6 +821,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                 <AuthorsLine
                   authors={reference.authors}
                   enrichedAuthors={reference.enrichment?.authors}
+                  paperTitle={reference.title}
+                  paperYear={reference.year}
                 />
               )}
 
@@ -860,6 +1009,20 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                                   {marker}
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
+                                title="Open this passage in the document and highlight it"
+                                style={{
+                                  marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
+                                  borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
+                                  color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
+                                }}
+                              >
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                                View in document
+                              </button>
                             </div>
                             <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
                               {ctx.before && (
@@ -961,6 +1124,29 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               per-author ORCID popover. Renders nothing when no
               enrichment data is available. */}
           <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
+          {/* Additional Info: abstract / claim / preprint / full text + Add to Library */}
+          <AdditionalInfoBar reference={reference} checkId={activeCheckId} />
+
+          {/* Per-reference Chat & Summarize. Grounded on THIS reference (its
+              title / identifiers / abstract / claim) rather than the host
+              paper. Reuses the existing grounded chat backend via the shared
+              ArticleAssistant component in reference mode — it self-omits when
+              there's no real reference text to ground on (no fabrication), and
+              honestly states when it can only use the abstract/title.
+
+              Gated on `activeCheckId` (the live selected check, falling back to
+              the ref's own last_seen_check_id) rather than ONLY
+              last_seen_check_id — the latter is unset for the current article's
+              freshly-checked refs, which wrongly hid the button. */}
+          {activeCheckId > 0 && (
+            <div className="mt-3 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <ArticleAssistant
+                checkId={activeCheckId}
+                reference={reference}
+                label="Chat about this reference"
+              />
+            </div>
+          )}
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
@@ -1013,13 +1199,21 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
           {/* Hallucination check pending indicator — shows when:
               1. Backend explicitly set hallucination_check_pending, OR
-              2. Ref is unverified during an active check (LLM check hasn't started yet) */}
-          {!reference.hallucination_assessment && (
-            reference.hallucination_check_pending ||
-            (status === 'checking' && reference.errors?.some(e => e.error_type === 'unverified'))
-          ) && (
+              2. Ref is unverified during an active check (LLM check hasn't started yet)
+              R04: suppressed once the FE wall-clock cap (HALLUCINATION_PENDING_TIMEOUT_MS)
+              elapses — see the "check timed out" note below. */}
+          {isHallucinationPending && !hallucinationTimedOut && (
             <div className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
               <span>{reference.hallucination_check_pending ? 'Checking for hallucination with LLM...' : 'Awaiting LLM hallucination check...'}</span>
+            </div>
+          )}
+
+          {/* R04 FE safety net: the hallucination check never reported back
+              within the budget. Show a non-blocking note instead of an
+              eternal spinner; the card already fell back to its base status. */}
+          {isHallucinationPending && hallucinationTimedOut && (
+            <div className="flex items-center gap-2 text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              <span>Hallucination check timed out.</span>
             </div>
           )}
 
@@ -1194,8 +1388,32 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
  * Falls back gracefully when no enrichment was returned (e.g. the
  * ref verified via DBLP only and has no author IDs).
  */
-function AuthorsLine({ authors, enrichedAuthors }) {
-  const list = normalizeAuthors(authors)
+function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
+  const citedList = normalizeAuthors(authors)
+  // Hooks MUST run before any early return (rules-of-hooks). If a reference's
+  // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
+  // an early return here would skip the useState below and flip the hook count,
+  // crashing the whole tree with React #310 (blank page).
+  const [showAll, setShowAll] = useState(false)
+  // R09: when the cited list was truncated (ends in an "et al." sentinel)
+  // OR the enriched author list is strictly longer than what was cited,
+  // offer to swap the cited list for the full enriched author list.
+  const [showEnriched, setShowEnriched] = useState(false)
+
+  // Real enriched names from the resolved author records (sentinels already
+  // can't appear here — these are DB-resolved people). Drives the "et al.
+  // (show N authors)" expand control.
+  const enrichedNames = (Array.isArray(enrichedAuthors) ? enrichedAuthors : [])
+    .map(a => (a && typeof a.name === 'string' ? a.name.trim() : ''))
+    .filter(Boolean)
+  const etAlSentinel = hasEtAlSentinel(authors)
+  const canExpandEnriched = enrichedNames.length > citedList.length
+  const offerEtAlExpand = (etAlSentinel || canExpandEnriched) && enrichedNames.length > 0
+
+  // The list actually rendered: the enriched full list when expanded,
+  // otherwise the cited (possibly truncated) list.
+  const list = (showEnriched && offerEtAlExpand) ? enrichedNames : citedList
+  if (citedList.length === 0 && !offerEtAlExpand) return null
   if (list.length === 0) return null
 
   // Normalise a name fragment: lowercase, strip diacritics, strip
@@ -1267,10 +1485,12 @@ function AuthorsLine({ authors, enrichedAuthors }) {
     return null
   }
 
-  // Cap at 10 visible names + " et al." so very long author lists don't
-  // dominate the card. Matches the legacy formatAuthors() behaviour.
-  const visible = list.slice(0, 10)
-  const overflow = list.length > 10
+  // Cap at 10 visible names; an overflow list is expandable to reveal ALL
+  // authors (replaces the old static " et al.").  (showAll is declared above,
+  // before the early return, to satisfy rules-of-hooks.)
+  const CAP = 10
+  const overflow = list.length > CAP
+  const visible = (showAll || !overflow) ? list : list.slice(0, CAP)
   return (
     <div style={{ color: 'var(--color-text-secondary)' }}>
       {visible.map((name, i) => {
@@ -1304,11 +1524,34 @@ function AuthorsLine({ authors, enrichedAuthors }) {
         }
         return (
           <span key={`${name}-${i}`}>
-            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} />
-            {i < visible.length - 1 ? ', ' : (overflow ? ', et al.' : '')}
+            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} paperTitle={paperTitle} paperYear={paperYear} />
+            {i < visible.length - 1 ? ', ' : ''}
           </span>
         )
       })}
+      {overflow && !showAll && (
+        <button type="button" onClick={() => setShowAll(true)}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+          title="Show all authors">, +{list.length - CAP} more</button>
+      )}
+      {overflow && showAll && (
+        <button type="button" onClick={() => setShowAll(false)}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
+      )}
+      {/* R09: "et al." → expand to the full enriched author list. Only shown
+          when the cited list was truncated (or the enriched list is longer)
+          AND we actually have real enriched names to reveal — never fabricated. */}
+      {offerEtAlExpand && !showEnriched && (
+        <button type="button" onClick={() => { setShowEnriched(true); setShowAll(false) }}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+          title="Show the full author list resolved from the matched record">
+          {' '}et al. (show {enrichedNames.length} authors)
+        </button>
+      )}
+      {offerEtAlExpand && showEnriched && (
+        <button type="button" onClick={() => { setShowEnriched(false); setShowAll(false) }}
+          className="ml-1 underline" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
+      )}
     </div>
   )
 }
@@ -1320,28 +1563,232 @@ function AuthorsLine({ authors, enrichedAuthors }) {
  * / Semantic Scholar author IDs, and first affiliation. Click opens
  * the profile link in the system browser.
  */
-function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
+// Session-scoped cache of S2 author profiles so re-hovering the same author
+// (common across a bibliography) never refetches.
+const _authorProfileCache = new Map()
+// R10: session cache of name+title -> resolved (or missed) ID-less author
+// lookups, so clicking "Find profile" again for the same author/paper is free.
+const _authorFindCache = new Map()
+
+// Initials from a display name ("H.B. Guruprasad" -> "HG", "Jane Doe" -> "JD").
+function _authorInitials(name) {
+  const parts = String(name || '').replace(/[^A-Za-z\s.-]/g, '').split(/[\s.-]+/).filter(Boolean)
+  if (!parts.length) return '?'
+  const first = parts[0][0] || ''
+  const last = parts.length > 1 ? (parts[parts.length - 1][0] || '') : ''
+  return (first + last).toUpperCase() || '?'
+}
+// Deterministic avatar colour from the name (stable across renders, no PRNG).
+function _authorColor(name) {
+  const palette = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#16a34a', '#db2777']
+  let h = 0
+  const s = String(name || '')
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return palette[h % palette.length]
+}
+
+// Small, recognizable inline-SVG marks for the author-profile links in the
+// hover popover. These are clean simple glyphs/monograms (not pixel-perfect
+// brand logos) sized to sit inline with the link text. Each is real-data gated
+// by its parent link, so a mark only renders when there's an actual profile to
+// open. `currentColor` keeps them themed (--color-accent) without extra props.
+function ProfileLinkIcon({ icon }) {
+  const common = { width: 13, height: 13, viewBox: '0 0 24 24', 'aria-hidden': true, style: { flexShrink: 0 } }
+  if (icon === 'semanticscholar') {
+    // Semantic Scholar — the open-book "S" mark, simplified to a clean monogram.
+    return (
+      <svg {...common} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 7.5c-1.2-1.3-2.8-2-4.5-2C8.5 5.5 7 7 7 9c0 4.5 9 2.5 9 6.5 0 2-1.8 3-4 3-1.8 0-3.4-.8-4.5-2" />
+      </svg>
+    )
+  }
+  if (icon === 'googlescholar') {
+    // Google Scholar — its graduation-cap mark, drawn as a simple mortarboard.
+    return (
+      <svg {...common} fill="currentColor">
+        <path d="M12 3 1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v3.5L12 20l7-3.32v-3.5L12 17l-7-3.82z" />
+      </svg>
+    )
+  }
+  if (icon === 'orcid') {
+    // ORCID — its circular "iD" mark as a simple monogram.
+    return (
+      <svg {...common} fill="currentColor">
+        <path d="M12 2a10 10 0 100 20 10 10 0 000-20zM8.3 7.2a1 1 0 110 2 1 1 0 010-2zM7.4 10.6h1.8v6.6H7.4v-6.6zm3.4 0h3.3c2.1 0 3.6 1.5 3.6 3.3s-1.5 3.3-3.6 3.3h-3.3v-6.6zm1.8 1.6v3.4h1.3c1.2 0 1.9-.7 1.9-1.7s-.7-1.7-1.9-1.7h-1.3z" />
+      </svg>
+    )
+  }
+  // OpenAlex — a simple ring/node glyph (matches its open-graph branding).
+  return (
+    <svg {...common} fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, paperYear }) {
   const [open, setOpen] = useState(false)
+  // R11: pinned keeps the popover open off-hover until explicitly dismissed
+  // (×, outside-click, or Escape) and switches it to the larger, fully-scrollable
+  // panel that shows the COMPLETE recent-papers list (no slice(0,3) cap).
+  const [pinned, setPinned] = useState(false)
+  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
+  // R10 (A3): an author with NO id (no s2_author_id / openalex_id) can't load a
+  // profile. The "Find profile" action resolves one on demand from the bare
+  // name + the citing paper's title/year — and only when the backend confirms
+  // the author actually appears on a work matching that title (no fabrication).
+  // findState: 'idle' -> not yet attempted; 'loading'; 'found'; 'miss'.
+  const idLess = !!e && !e.s2_author_id && !e.openalex_id
+  const [findState, setFindState] = useState('idle')
+  const [foundProfile, setFoundProfile] = useState(null)
   const wrapperRef = useRef(null)
+  const popoverRef = useRef(null)
   const enterTimer = useRef(null)
   const leaveTimer = useRef(null)
+  // Popover placement so it always fits + scrolls even when the author sits low
+  // on the page. Measured from the anchor's viewport rect: open UPWARD when
+  // there's more room above, and cap maxHeight to the ACTUAL available space so
+  // the lower part is never clipped below the viewport. Recomputed whenever the
+  // popover opens, on scroll, and on resize (real geometry — no guessing).
+  const [placement, setPlacement] = useState({ dir: 'down', maxHeight: '70vh' })
+
+  // Lazily pull the richer Semantic Scholar profile the first time the card
+  // opens for an author that has an S2 id. Soft-fails to the basic card.
+  const loadProfile = () => {
+    const s2 = e?.s2_author_id
+    const oa = e?.openalex_id
+    const key = s2 || (oa ? `oa:${oa}` : null)
+    if (!key || profile) return
+    if (_authorProfileCache.has(key)) { setProfile(_authorProfileCache.get(key)); return }
+    fetchAuthorProfile(s2 ? { author_id: s2 } : { openalex_id: oa })
+      .then(res => {
+        const data = res?.data || { available: false }
+        _authorProfileCache.set(key, data)
+        setProfile(data)
+      })
+      .catch(() => { /* keep basic card */ })
+  }
+
+  // R10 (A3): on-demand name/title resolution for an ID-less author. Calls the
+  // corroboration-gated backend; a confident hit becomes the popover profile,
+  // a miss flips to a quiet "no confident match". Real-data gated end-to-end —
+  // nothing is shown unless the backend confirmed a single matching author.
+  const runFindProfile = () => {
+    if (findState === 'loading' || findState === 'found') return
+    const fkey = `${name}|${paperTitle || ''}`
+    if (_authorFindCache.has(fkey)) {
+      const cached = _authorFindCache.get(fkey)
+      if (cached?.available) { setFoundProfile(cached); setFindState('found') }
+      else setFindState('miss')
+      return
+    }
+    setFindState('loading')
+    findAuthorProfile({ name, title: paperTitle || null, year: paperYear || null })
+      .then(res => {
+        const data = res?.data || { available: false }
+        _authorFindCache.set(fkey, data)
+        if (data.available) { setFoundProfile(data); setFindState('found') }
+        else setFindState('miss')
+      })
+      .catch(() => { setFindState('miss') })
+  }
+
   // 250ms hover delay so brushing past names doesn't flash the popover.
   const onEnter = () => {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
     if (!e) return
-    enterTimer.current = setTimeout(() => setOpen(true), 250)
+    enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
   const onLeave = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    // R11: when pinned, leaving the chip must NOT close the popover.
+    if (pinned) return
     leaveTimer.current = setTimeout(() => setOpen(false), 120)
   }
+  // R11: pin the popover open (stays open off-hover). Clears any pending
+  // hover-leave close, opens immediately, and loads the rich profile.
+  const pin = () => {
+    if (!e) return
+    if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
+    setOpen(true)
+    setPinned(true)
+    loadProfile()
+  }
+  const closePinned = () => { setPinned(false); setOpen(false) }
+
+  // R11: while pinned, dismiss on outside-click (mousedown) or Escape — mirrors
+  // the export-menu outside-click pattern elsewhere in this file.
+  useEffect(() => {
+    if (!pinned) return undefined
+    const onDown = (ev) => {
+      const inAnchor = wrapperRef.current && wrapperRef.current.contains(ev.target)
+      const inPop = popoverRef.current && popoverRef.current.contains(ev.target)
+      if (!inAnchor && !inPop) closePinned()
+    }
+    const onKey = (ev) => { if (ev.key === 'Escape') closePinned() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pinned])
+
   useEffect(() => () => {
     if (enterTimer.current) clearTimeout(enterTimer.current)
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
   }, [])
 
-  const orcidUrl = e?.orcid ? `https://orcid.org/${e.orcid}` : null
-  const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
+  // Decide whether to open the popover up or down, and how tall it may be, from
+  // the real available space around the anchor. Caps maxHeight to min(70vh,
+  // space − margin) so the popover's own overflowY:'auto' actually scrolls the
+  // overflow instead of it falling off-screen unreachable.
+  useEffect(() => {
+    if (!open) return
+    const GAP = 8       // matches marginTop/marginBottom on the popover
+    const MARGIN = 12   // viewport breathing room so it never touches the edge
+    const MIN_H = 160   // never collapse so small the card is unusable
+    const compute = () => {
+      const el = wrapperRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0
+      const spaceBelow = vh - rect.bottom - GAP - MARGIN
+      const spaceAbove = rect.top - GAP - MARGIN
+      const cap70 = Math.round(vh * 0.7)
+      // Open upward only when there's clearly more room above AND below is
+      // genuinely cramped — otherwise prefer the default downward placement.
+      const openUp = spaceBelow < MIN_H && spaceAbove > spaceBelow
+      const avail = openUp ? spaceAbove : spaceBelow
+      const maxH = Math.max(MIN_H, Math.min(cap70, avail))
+      setPlacement({ dir: openUp ? 'up' : 'down', maxHeight: `${maxH}px` })
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [open])
+
+  // R10: a confident "Find profile" hit becomes the effective profile so the
+  // popover renders the resolved author's real metrics / ORCID / id. By-id
+  // profiles (R11/R36) take precedence when present; otherwise the corroborated
+  // found profile drives the card. Real-data gated: foundProfile is only set
+  // after the backend confirmed a single matching author.
+  const effectiveProfile = (profile?.available ? profile : null) || foundProfile || profile
+  // R36: honour an ORCID surfaced by the fetched S2/OpenAlex profile too,
+  // not just the one carried on the enrichment record `e`. Real-data gated:
+  // resolves to a real id or null, never a guess.
+  const resolvedOrcid = (effectiveProfile?.available && effectiveProfile?.orcid) || e?.orcid || null
+  const orcidUrl = resolvedOrcid ? `https://orcid.org/${resolvedOrcid}` : null
+  // Fold a found OpenAlex id (R10) into the profile links so the resolved
+  // author's OpenAlex page is reachable even though `e` carried no id.
+  const resolvedOpenalexId = e?.openalex_id || (foundProfile?.available ? foundProfile.openalex_id : null) || null
+  const openalexUrl = resolvedOpenalexId ? `https://openalex.org/${resolvedOpenalexId}` : null
   const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
 
   return (
@@ -1356,63 +1803,256 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={onClickHref}
-          title={!e ? tooltipFallback : undefined}
+          onClick={(ev) => {
+            // R11: a plain left-click on an enriched name pins the popover open
+            // instead of navigating; modifier-clicks (open-in-new-tab etc.)
+            // still follow the profile link.
+            if (e && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
+              ev.preventDefault()
+              pin()
+              return
+            }
+            onClickHref(ev)
+          }}
+          title={!e ? tooltipFallback : 'Click to pin this author card open'}
           style={{
             color: 'var(--color-text-secondary)',
             textDecorationColor: 'var(--color-link, #3b82f6)',
             textDecorationStyle: 'dotted',
             textUnderlineOffset: '3px',
             textDecorationLine: 'underline',
+            cursor: e ? 'pointer' : undefined,
           }}
         >
           {name}
         </a>
       ) : (
-        <span title={tooltipFallback || undefined}>{name}</span>
+        <span
+          title={tooltipFallback || undefined}
+          onClick={e ? pin : undefined}
+          style={e ? { cursor: 'pointer' } : undefined}
+        >
+          {name}
+        </span>
       )}
-      {open && e && (
+      {open && e && (() => {
+        const dispName = e.name || name
+        const initials = _authorInitials(dispName)
+        const avatarBg = _authorColor(dispName)
+        // R10: prefer a corroborated found profile's affiliations/metrics when
+        // present (effectiveProfile), falling back to the enrichment record.
+        const ep = effectiveProfile
+        const affs = (ep?.available && Array.isArray(ep.affiliations) && ep.affiliations.length)
+          ? ep.affiliations
+          : (Array.isArray(e.institutions) ? e.institutions : [])
+        const hasMetrics = ep?.available && (ep.paperCount != null || ep.citationCount != null || ep.hIndex != null)
+        const loading = (!!e.s2_author_id || !!e.openalex_id) && !profile
+        const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
+        const chip = (label, val, title) => (
+          <span title={title} className="inline-flex flex-col items-center px-2.5 py-1 rounded-lg"
+            style={{ background: 'var(--color-bg-tertiary)', minWidth: 56 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-text-primary)' }}>{val}</span>
+            <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
+          </span>
+        )
+        const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
+        const profileLinks = [
+          orcidUrl && { label: 'ORCID', url: orcidUrl, icon: 'orcid' },
+          openalexUrl && { label: 'OpenAlex', url: openalexUrl, icon: 'openalex' },
+          s2Url && { label: 'Semantic Scholar', url: s2Url, icon: 'semanticscholar' },
+          // Google Scholar has no author API — this is an honest name SEARCH
+          // (not a claimed profile), always available.
+          { label: 'Google Scholar', url: scholarUrl, icon: 'googlescholar' },
+        ].filter(Boolean)
+        return (
         <div
-          role="tooltip"
-          className="rounded-md shadow-lg p-2 text-xs"
+          ref={popoverRef}
+          role={pinned ? 'dialog' : 'tooltip'}
+          aria-label={pinned ? `${dispName} — author details` : undefined}
+          className="rounded-xl text-xs"
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            marginTop: 6,
-            zIndex: 60,
-            minWidth: 260,
-            maxWidth: 360,
+            position: 'absolute', left: 0, zIndex: 60,
+            // Flip up/down based on real available space (see the placement
+            // effect) so the card never opens into a clipped region when the
+            // author sits low on the page.
+            ...(placement.dir === 'up'
+              ? { bottom: '100%', marginBottom: 8 }
+              : { top: '100%', marginTop: 8 }),
+            // R11: the pinned panel is larger (wider + taller) so the full
+            // recent-papers list has room to scroll.
+            minWidth: pinned ? 360 : 300,
+            maxWidth: pinned ? 460 : 380,
+            // Cap height to the ACTUAL space available (min(70vh, space−margin))
+            // and scroll the overflow — the body used to clip below the viewport
+            // when the author had lots of recent papers.
+            maxHeight: pinned ? '80vh' : placement.maxHeight,
+            overflowX: 'hidden', overflowY: 'auto', overscrollBehavior: 'contain',
             background: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
             color: 'var(--color-text-primary)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
             whiteSpace: 'normal',
           }}
+          onMouseEnter={onEnter}
+          onMouseLeave={onLeave}
         >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{e.name || name}</div>
-          {Array.isArray(e.institutions) && e.institutions.length > 0 && (
-            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
-              {e.institutions.slice(0, 2).join(' · ')}
+          {/* Header: avatar + name + affiliation. Pin (⤢) / close (×) controls
+              sit top-right so the popover can be promoted to a persistent panel. */}
+          <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
+            <span className="flex-shrink-0 inline-flex items-center justify-center rounded-full"
+              style={{ width: 36, height: 36, background: avatarBg, color: '#fff', fontWeight: 700, fontSize: 13 }}>
+              {initials}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start gap-2">
+                <div style={{ fontWeight: 600, lineHeight: 1.25, flex: 1, minWidth: 0 }}>{dispName}</div>
+                {pinned ? (
+                  <button type="button" onClick={closePinned} aria-label="Close author card"
+                    title="Close"
+                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 16, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+                    ×
+                  </button>
+                ) : (
+                  <button type="button" onClick={pin} aria-label="Pin author card open"
+                    title="Pin open"
+                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 13, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+                    ⤢
+                  </button>
+                )}
+              </div>
+              {affs.length > 0 && (
+                <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
+                  {affs.slice(0, 2).join(' · ')}
+                </div>
+              )}
+              {/* Author standing — h-index + total citations from the fetched
+                  Semantic Scholar / OpenAlex profile. Real-data gated: each
+                  metric renders only when the profile actually carries it, so
+                  the line disappears entirely when neither is known (no
+                  invented numbers). Surfaced inline in the header so the
+                  h-index is visible immediately, alongside the metric chips. */}
+              {ep?.available && (ep.hIndex != null || ep.citationCount != null) && (
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2 }}>
+                  {ep.hIndex != null && (
+                    <span title="h-index">h-index <span style={{ fontWeight: 700 }}>{fmt(ep.hIndex)}</span></span>
+                  )}
+                  {ep.hIndex != null && ep.citationCount != null && (
+                    <span style={{ color: 'var(--color-text-muted)' }}> · </span>
+                  )}
+                  {ep.citationCount != null && (
+                    <span title="Total citations">{fmt(ep.citationCount)} citations</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Metric chips */}
+          {hasMetrics && (
+            <div className="flex gap-1.5 px-3 pb-2.5">
+              {ep.paperCount != null && chip('papers', fmt(ep.paperCount), 'Publications')}
+              {ep.citationCount != null && chip('citations', fmt(ep.citationCount), 'Total citations')}
+              {ep.hIndex != null && chip('h-index', ep.hIndex, 'h-index')}
             </div>
           )}
-          <div className="space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {orcidUrl && (
-              <ProfileRow label="ORCID" value={e.orcid} href={orcidUrl} />
-            )}
-            {openalexUrl && (
-              <ProfileRow label="OpenAlex" value={e.openalex_id} href={openalexUrl} />
-            )}
-            {s2Url && !orcidUrl && !openalexUrl && (
-              <ProfileRow label="Semantic Scholar" value={e.s2_author_id} href={s2Url} />
-            )}
-          </div>
-          {(orcidUrl || openalexUrl || s2Url) && (
-            <div className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-              Click name to open profile in browser
+
+          {/* R10 (A3): ID-less author resolution. An author with no s2/openalex
+              id can't load a by-id profile, so offer a corroboration-gated
+              "Find profile" lookup (name + this paper's title). A confident hit
+              flows into `effectiveProfile` above and renders real metrics; a
+              miss shows a quiet "no confident match" — never a fabricated
+              profile. Hidden once a profile has been resolved by id or by find. */}
+          {idLess && !(foundProfile?.available) && (
+            <div className="px-3 pb-2.5" style={{ fontSize: 11 }}>
+              {findState === 'idle' && (
+                <button type="button" onClick={runFindProfile}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md"
+                  title={paperTitle ? 'Look up this author on OpenAlex, corroborated by this paper' : 'A paper title is required to find this author confidently'}
+                  disabled={!paperTitle}
+                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)', cursor: paperTitle ? 'pointer' : 'not-allowed', opacity: paperTitle ? 1 : 0.6, border: 'none' }}>
+                  <ProfileLinkIcon icon="openalex" />
+                  Find profile
+                </button>
+              )}
+              {findState === 'loading' && (
+                <span style={{ color: 'var(--color-text-muted)' }}>Searching for a confident match…</span>
+              )}
+              {findState === 'miss' && (
+                <span style={{ color: 'var(--color-text-muted)' }} title="No author on a matching work corroborated this name — nothing was guessed.">
+                  No confident match
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* R53: ORCID — clickable orcid.org page link AND the visible ORCID
+              number, co-located. Real-data gated: only renders when a real
+              ORCID id resolved (from the enrichment record or the fetched
+              profile, R36), never fabricated. */}
+          {orcidUrl && resolvedOrcid && (
+            <div className="flex items-center gap-1.5 px-3 pb-2.5" style={{ fontSize: 11 }}>
+              <ProfileLinkIcon icon="orcid" />
+              <a
+                href={orcidUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(orcidUrl) } }}
+                title={`Open ORCID record ${resolvedOrcid}`}
+                style={{ color: 'var(--color-accent)' }}
+              >
+                ORCID
+              </a>
+              <span style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{resolvedOrcid}</span>
+            </div>
+          )}
+
+          {/* Recent papers. R11: the hover popover shows the top 3; the pinned
+              panel shows the COMPLETE list (the outer container scrolls). */}
+          {ep?.available && Array.isArray(ep.papers) && ep.papers.length > 0 && (
+            <div className="px-3 pb-2.5">
+              <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                Recent work{pinned && ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
+              </div>
+              <div className="space-y-1.5">
+                {(pinned ? ep.papers : ep.papers.slice(0, 3)).map((p, i) => (
+                  <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                    {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="px-3 pb-2.5" style={{ color: 'var(--color-text-muted)' }}>Loading profile…</div>
+          )}
+
+          {/* Footer: profile links */}
+          {(profileLinks.length > 0 || (ep?.available && ep.homepage)) && (
+            <div className="flex items-center gap-2 flex-wrap px-3 py-2"
+              style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
+              {ep?.available && ep.homepage && (
+                <a href={ep.homepage} target="_blank" rel="noopener noreferrer"
+                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(ep.homepage) } }}
+                  className="px-2 py-0.5 rounded-md" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  Homepage
+                </a>
+              )}
+              {profileLinks.map((pl) => (
+                <a key={pl.label} href={pl.url} target="_blank" rel="noopener noreferrer"
+                  onClick={(ev) => { if (isTauri()) { ev.preventDefault(); openExternal(pl.url) } }}
+                  title={`Open ${pl.label}`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md"
+                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)' }}>
+                  <ProfileLinkIcon icon={pl.icon} />
+                  {pl.label}
+                </a>
+              ))}
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
     </span>
   )
 }
@@ -1449,6 +2089,30 @@ function ProfileRow({ label, value, href }) {
  * Click opens the OpenAlex venue page in the system browser.
  */
 function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
+  // Lazy journal/venue profile popover (OpenAlex /sources + DOAJ guidelines).
+  const [vpOpen, setVpOpen] = useState(false)
+  const [vp, setVp] = useState(null)
+  const vpEnter = useRef(null)
+  const vpLeave = useRef(null)
+  const loadVenue = () => {
+    if (vp) return
+    getVenueProfile({ venue_id: venueOpenalexId || null, venue_name: venue || null })
+      .then((res) => setVp(res?.data || { available: false }))
+      .catch(() => setVp({ available: false }))
+  }
+  const vpOnEnter = () => {
+    if (vpLeave.current) { clearTimeout(vpLeave.current); vpLeave.current = null }
+    vpEnter.current = setTimeout(() => { setVpOpen(true); loadVenue() }, 280)
+  }
+  const vpOnLeave = () => {
+    if (vpEnter.current) { clearTimeout(vpEnter.current); vpEnter.current = null }
+    vpLeave.current = setTimeout(() => setVpOpen(false), 150)
+  }
+  useEffect(() => () => {
+    if (vpEnter.current) clearTimeout(vpEnter.current)
+    if (vpLeave.current) clearTimeout(vpLeave.current)
+  }, [])
+
   // Resolve the (full, acronym) pair so we can display both forms.
   // Priority for the FULL name: the OpenAlex-resolved string > the
   // reverse-lookup from the cited string (when only an acronym was
@@ -1482,12 +2146,24 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     if (styleAcceptsAbbrev) supplemental = resolvedAcronym
   }
 
-  const titleBits = []
+  // Always surface the journal/venue details on hover (parallels the per-author
+  // hover) — the first line is the cited venue itself, so the tooltip is never
+  // empty even when there's no enrichment (user request: "journal info on hover
+  // like authors").
+  const titleBits = [`Journal / venue: ${venue}`]
   if (resolvedFull && venueNorm !== fullNorm) titleBits.push(`Full name: ${resolvedFull}`)
-  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM acronym: ${resolvedAcronym}`)
-  if (venueOpenalexId) titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
-  if (venueOpenalexId) titleBits.push('(click to open venue page)')
-  const title = titleBits.join('\n') || undefined
+  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM abbreviation: ${resolvedAcronym}`)
+  if (venueOpenalexId) {
+    titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
+    titleBits.push('(click to open venue page)')
+  }
+  const title = titleBits.join('\n')
+  // Only fall back to the native title tooltip when the rich venue popover
+  // (OpenAlex /sources + DOAJ guidelines) is NOT being shown — otherwise two
+  // banners stack on hover. Mirrors the per-author hover, which suppresses the
+  // native title once its rich profile card is available.
+  const richPopoverShown = vpOpen && vp && vp.available
+  const nativeTitle = richPopoverShown ? undefined : title
   const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
   const handle = (ev) => {
     if (!href || !isTauri()) return
@@ -1496,7 +2172,8 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
     openExternal(href)
   }
   return (
-    <div style={{ color: 'var(--color-text-secondary)' }} title={title}>
+    <div onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} title={nativeTitle}
+      style={{ color: 'var(--color-text-secondary)', position: 'relative', display: 'inline-block' }}>
       {href ? (
         <a
           href={href}
@@ -1520,6 +2197,44 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
           ({supplemental})
         </span>
+      )}
+      {vpOpen && vp && vp.available && (
+        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} className="rounded-xl text-xs"
+          style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, minWidth: 260, maxWidth: 360, maxHeight: '60vh', overflowY: 'auto', background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', boxShadow: '0 12px 40px rgba(0,0,0,0.28)', padding: '10px 12px', whiteSpace: 'normal' }}>
+          <div style={{ fontWeight: 700, marginBottom: 3 }}>{vp.display_name}</div>
+          {vp.publisher && <div style={{ color: 'var(--color-text-muted)' }}>Publisher: {vp.publisher}</div>}
+          {(vp.issn_l || (vp.issn || []).length > 0) && <div style={{ color: 'var(--color-text-muted)' }}>ISSN: {vp.issn_l || (vp.issn || []).join(', ')}</div>}
+          {(vp.is_in_doaj || vp.is_oa || typeof vp.apc_usd === 'number') && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {vp.is_in_doaj && <span style={{ padding: '1px 7px', borderRadius: 9999, background: 'rgba(16,163,127,0.14)', color: 'var(--color-success)' }}>DOAJ</span>}
+              {vp.is_oa && <span style={{ padding: '1px 7px', borderRadius: 9999, background: 'rgba(16,163,127,0.14)', color: 'var(--color-success)' }}>Open access</span>}
+              {typeof vp.apc_usd === 'number' && <span style={{ color: 'var(--color-text-muted)' }}>APC ${vp.apc_usd.toLocaleString()}</span>}
+            </div>
+          )}
+          <div className="mt-1.5 flex flex-wrap gap-3">
+            {vp.author_guidelines_url && (
+              <a href={vp.author_guidelines_url} target="_blank" rel="noopener noreferrer"
+                onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(vp.author_guidelines_url) } }}
+                style={{ color: 'var(--color-accent)' }}>Author guidelines ↗</a>
+            )}
+            {vp.homepage_url && (
+              <a href={vp.homepage_url} target="_blank" rel="noopener noreferrer"
+                onClick={(e) => { if (isTauri()) { e.preventDefault(); openExternal(vp.homepage_url) } }}
+                style={{ color: 'var(--color-accent)' }}>Journal homepage ↗</a>
+            )}
+          </div>
+          {!vp.author_guidelines_url && (
+            <div className="mt-1" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+              No author-guidelines link on record — use the homepage / publisher site.
+            </div>
+          )}
+        </div>
+      )}
+      {vpOpen && vp && vp.available === false && (
+        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave}
+          style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, maxWidth: 280, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: '8px 10px', borderRadius: 10, fontSize: 11 }}>
+          No additional journal metadata found for this venue.
+        </div>
       )}
     </div>
   )

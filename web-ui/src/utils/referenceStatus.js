@@ -258,10 +258,20 @@ const numberOr = (value, fallback = 0) => (
 export const buildReferenceSummary = ({ stats = {}, references = [], isComplete = false } = {}) => {
   const refs = Array.isArray(references) ? references : []
   const derived = refs.length > 0 ? computeReferenceStats(refs, isComplete) : null
-  const totalRefs = numberOr(stats.total_refs, refs.length)
-  const processedRefs = stats.processed_refs !== undefined
+  const rawTotalRefs = numberOr(stats.total_refs, refs.length)
+  const rawProcessedRefs = stats.processed_refs !== undefined
     ? numberOr(stats.processed_refs)
-    : (isComplete && totalRefs > 0 ? totalRefs : numberOr(derived?.totalProcessed))
+    : (isComplete && rawTotalRefs > 0 ? rawTotalRefs : numberOr(derived?.totalProcessed))
+
+  // total_refs may be an early extraction estimate; the real reference set
+  // (after de-dup/merge/re-extraction) can be larger, which would make
+  // processed exceed total and render >100% ("28/23 · 122%"). Reconcile the
+  // displayed total up to processed so the count and the bar stay honest, and
+  // clamp the percent at 100. REAL DATA ONLY — this never invents references,
+  // it just stops the denominator from lagging the numerator.
+  const totalRefs = Math.max(rawTotalRefs, rawProcessedRefs)
+  // Defensive clamp so the visible "X / Y" can never read X > Y.
+  const processedRefs = Math.min(rawProcessedRefs, totalRefs)
 
   return {
     totalRefs,
