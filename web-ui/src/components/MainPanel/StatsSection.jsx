@@ -687,7 +687,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                 // hovering swaps ONLY the background/border colour — never
                 // scale, shadow, or a ring box — so the chip never reflows or
                 // jumps under the cursor. The 1px border is always present.
-                className="group flex items-center gap-1 px-2 py-0.5 text-xs transition-colors cursor-pointer border rc-control"
+                className="group flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors cursor-pointer border rc-control"
                 style={{
                   borderRadius: 'var(--control-radius)',
                   backgroundColor: isSelected ? filter.bgColor : 'transparent',
