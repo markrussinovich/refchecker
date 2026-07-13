@@ -362,6 +362,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               style={{ 
                 backgroundColor: isComplete ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
                 color: isComplete ? 'white' : 'var(--color-text-muted)',
+                // Reserve the same 1px top/bottom border box the bordered
+                // "Filtered:" chip occupies so the header row height is constant
+                // whether or not a filter is active — otherwise selecting a
+                // filter makes that chip (the tallest header element) appear and
+                // shifts the whole Summary box down ~1px. Transparent so the
+                // button's own look is unchanged.
+                border: '1px solid transparent',
               }}
               title={isComplete ? 'Export results' : 'Export available when check completes'}
             >

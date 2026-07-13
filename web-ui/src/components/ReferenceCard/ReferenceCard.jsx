@@ -878,6 +878,28 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {/* Per-reference Chat & Summarize — placed in the reference area,
+              above the Verification section. Grounded on THIS reference (its
+              title / identifiers / abstract / claim) rather than the host
+              paper. Reuses the grounded chat backend via the shared
+              ArticleAssistant in reference mode; it self-omits when there's no
+              real reference text to ground on (no fabrication) and honestly
+              states when it can only use the abstract/title.
+
+              Gated on `activeCheckId` (the live selected check, falling back to
+              the ref's own last_seen_check_id) rather than ONLY
+              last_seen_check_id — the latter is unset for the current article's
+              freshly-checked refs, which wrongly hid the button. */}
+          {activeCheckId > 0 && (
+            <div className="mt-3">
+              <ArticleAssistant
+                checkId={activeCheckId}
+                reference={reference}
+                label="Chat about this reference"
+              />
+            </div>
+          )}
+
           {/* Divider before verification results */}
           {(displayUrls.length > 0 ||
             displayErrors.length > 0 ||
@@ -1130,27 +1152,6 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
           {/* Additional Info: abstract / claim / preprint / full text + Add to Library */}
           <AdditionalInfoBar reference={reference} checkId={activeCheckId} />
-
-          {/* Per-reference Chat & Summarize. Grounded on THIS reference (its
-              title / identifiers / abstract / claim) rather than the host
-              paper. Reuses the existing grounded chat backend via the shared
-              ArticleAssistant component in reference mode — it self-omits when
-              there's no real reference text to ground on (no fabrication), and
-              honestly states when it can only use the abstract/title.
-
-              Gated on `activeCheckId` (the live selected check, falling back to
-              the ref's own last_seen_check_id) rather than ONLY
-              last_seen_check_id — the latter is unset for the current article's
-              freshly-checked refs, which wrongly hid the button. */}
-          {activeCheckId > 0 && (
-            <div className="mt-3 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <ArticleAssistant
-                checkId={activeCheckId}
-                reference={reference}
-                label="Chat about this reference"
-              />
-            </div>
-          )}
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
