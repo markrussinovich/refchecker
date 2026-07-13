@@ -768,7 +768,8 @@ class ArXivCitationChecker:
             cited_year=cited_year,
             paper_year=authoritative_year,
             use_flexible_validation=True,
-            context={'arxiv_match': True}
+            context={'arxiv_match': True,
+                     'cited_doi': reference.get('doi') or reference.get('DOI')}
         )
         if year_warning:
             errors.append(year_warning)

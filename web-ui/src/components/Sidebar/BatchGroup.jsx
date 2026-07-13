@@ -20,7 +20,7 @@ export default function BatchGroup({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const { fetchHistory, deleteCheck, selectCheck, selectBatch } = useHistoryStore()
+  const { fetchHistory, deleteCheck, selectBatch } = useHistoryStore()
 
   const handleEditStart = (e) => {
     e.stopPropagation()

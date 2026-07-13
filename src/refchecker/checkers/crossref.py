@@ -89,7 +89,7 @@ class CrossRefReferenceChecker:
         params = {
             "query": query,
             "rows": min(limit, 20),  # Limit for performance
-            "select": "DOI,title,author,published,publisher,container-title,type,URL,link,abstract,subject"
+            "select": "DOI,title,author,published,publisher,container-title,type,URL,link,abstract,subject,is-referenced-by-count,references-count,funder"
         }
         
         # Add year filter if provided
@@ -174,7 +174,7 @@ class CrossRefReferenceChecker:
         params = {
             "query.bibliographic": bib_string,
             "rows": min(limit, 20),
-            "select": "DOI,title,author,published,published-print,published-online,issued,created,publisher,container-title,type,URL,link,abstract,subject",
+            "select": "DOI,title,author,published,published-print,published-online,issued,created,publisher,container-title,type,URL,link,abstract,subject,is-referenced-by-count,references-count,funder",
         }
         if year:
             # Widen the window to year±1 for the bib fallback. This is

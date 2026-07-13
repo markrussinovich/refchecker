@@ -28,7 +28,6 @@ Options:
 """
 
 import arxiv
-import pandas as pd
 import requests
 import re
 import datetime
@@ -3110,10 +3109,17 @@ class ArxivReferenceChecker:
             # v0.7.68: subtitle tolerance — "X: subtitle" vs "X" is the
             # same paper, not a Title mismatch. We landed here via DOI/ID
             # match so the records are confirmed-same.
-            from refchecker.utils.text_utils import titles_align_with_subtitle_tolerance
+            from refchecker.utils.text_utils import (
+                titles_align_with_subtitle_tolerance,
+                titles_match_with_typo_tolerance,
+            )
             _subtitle_ok = titles_align_with_subtitle_tolerance(title, paper_data.get('title'))
+            # We reached verify_db_reference via a DOI/ID match, so the records
+            # are confirmed-same paper. Tolerate small OCR/typo differences
+            # (e.g. an extra letter in the DB title) instead of flagging them.
+            _typo_ok = titles_match_with_typo_tolerance(title, paper_data.get('title'))
 
-            if normalized_title != db_title and not _subtitle_ok:
+            if normalized_title != db_title and not _subtitle_ok and not _typo_ok:
                 from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(title)
@@ -4467,7 +4473,21 @@ class ArxivReferenceChecker:
                     print(f"🚩 Total likely hallucinated: {flagged_count}")
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and total_unverified == 0:
                     print(f"✅ All references verified successfully!")
-                
+
+                # Citation-health grade — qualitative, derived only from the real
+                # aggregate verdicts (no fabricated precise %; the exact score is
+                # in the app/report).
+                if self.total_references_processed > 0:
+                    if flagged_count > 0:
+                        grade = "Critical — likely hallucinations present"
+                    elif self.total_errors_found > 0:
+                        grade = "Poor — errors need correction"
+                    elif self.total_warnings_found > 0 or total_unverified > 0:
+                        grade = "Fair — minor warnings / unverified"
+                    else:
+                        grade = "Excellent — all verified"
+                    print(f"🏅 Citation health: {grade}")
+
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
@@ -4496,7 +4516,19 @@ class ArxivReferenceChecker:
                 if flagged_count > 0:
                     print(f"🚩 Total likely hallucinated: {flagged_count}")
                     self._print_hallucination_console_summary(payload=structured_payload)
-                
+
+                # Citation-health grade for the batch (qualitative, real aggregates).
+                if self.total_references_processed > 0:
+                    if flagged_count > 0:
+                        grade = "Critical — likely hallucinations present"
+                    elif self.total_errors_found > 0:
+                        grade = "Poor — errors need correction"
+                    elif self.total_warnings_found > 0 or total_unverified > 0:
+                        grade = "Fair — minor warnings / unverified"
+                    else:
+                        grade = "Excellent — all verified"
+                    print(f"🏅 Citation health: {grade}")
+
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
@@ -7721,12 +7753,37 @@ def _update_local_databases(
 
 def main():
     """Main function to parse arguments and run the reference checker"""
-    print(f"Refchecker v{__version__} - Validate references in academic papers")
-    print(f"By Mark Russinovich and various agentic AI assistants")
+    # Hermes-Agent-style startup banner (ASCII logo + environment + capabilities).
+    # Printed to stderr so it never pollutes machine-readable stdout (e.g.
+    # --report-format json). Falls back to a one-liner if anything goes wrong.
+    try:
+        from refchecker.utils.banner import print_banner
+        print_banner(__version__)
+    except Exception:  # noqa: BLE001
+        print(f"Refchecker v{__version__} - Validate references in academic papers")
+        print("By Mark Russinovich and various agentic AI assistants")
 
     supported_openreview_help = 'Supported OpenReview shorthands: iclr, icml, aistats, uai, corl'
 
-    parser = argparse.ArgumentParser(description="Academic paper references checker")
+    parser = argparse.ArgumentParser(
+        prog="academic-refchecker",
+        description=(
+            "RefChecker — verify the references in an academic paper against "
+            "Semantic Scholar / OpenAlex / Crossref / DBLP / ACL / arXiv / "
+            "OpenReview, and optionally screen the manuscript for AI-generated text."
+        ),
+        epilog=(
+            "examples:\n"
+            "  academic-refchecker --paper 2406.01234\n"
+            "  academic-refchecker --paper https://arxiv.org/abs/2406.01234\n"
+            "  academic-refchecker --paper ./paper.pdf --report-format json\n"
+            "  academic-refchecker --paper ./refs.bib --output-file errors.txt\n"
+            "  academic-refchecker --paper-list papers.txt\n\n"
+            "AI-text detection is opt-in and ADVISORY ONLY — never proof of "
+            "misconduct. See the README for the full options and the desktop app."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,

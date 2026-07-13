@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listSeenReferences, clearSeenReferences, backfillSeenReferences } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+
+const GraphLibraryView = lazy(() => import('./GraphLibraryView'))
 
 /**
  * "Seen References" — a single global view of every reference RefChecker
@@ -31,6 +33,7 @@ export default function SeenReferencesView() {
   // identity keys.
   const [backfillBusy, setBackfillBusy] = useState(false)
   const [backfillStatus, setBackfillStatus] = useState(null)
+  const [showGraph, setShowGraph] = useState(false)
   const PAGE = 100
   const debounceRef = useRef(null)
 
@@ -207,6 +210,25 @@ export default function SeenReferencesView() {
             ↻
           </button>
           <button
+            onClick={() => setShowGraph(true)}
+            disabled={total === 0}
+            className="px-2 py-1 rounded text-xs inline-flex items-center gap-1"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: 'transparent',
+              color: 'var(--color-text-secondary)',
+              opacity: total === 0 ? 0.5 : 1,
+              cursor: total === 0 ? 'not-allowed' : 'pointer',
+            }}
+            title="Explore the whole library as a 3D graph (nodes sized by times seen, edges = shared authors/venue)"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="5" cy="6" r="2" /><circle cx="19" cy="7" r="2" /><circle cx="12" cy="18" r="2" />
+              <line x1="6.7" y1="7" x2="10.5" y2="16.5" /><line x1="17.5" y1="8.5" x2="13.3" y2="16.7" /><line x1="7" y1="6.3" x2="17" y2="6.8" />
+            </svg>
+            3D graph
+          </button>
+          <button
             onClick={handleBackfill}
             disabled={backfillBusy}
             className="px-2 py-1 rounded text-xs"
@@ -379,6 +401,11 @@ export default function SeenReferencesView() {
             type="button"
           >Next</button>
         </div>
+      )}
+      {showGraph && (
+        <Suspense fallback={null}>
+          <GraphLibraryView onClose={() => setShowGraph(false)} />
+        </Suspense>
       )}
     </div>
   )

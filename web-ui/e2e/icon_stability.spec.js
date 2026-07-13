@@ -4,7 +4,12 @@ async function setupWebSocketMock(page) {
   await page.addInitScript(() => {
     const connections = {};
     class MockWebSocket {
-      constructor(url) {
+      constructor(url, protocols) {
+        // Only the app's /api/ws/ socket is mocked; delegate HMR/other sockets
+        // to the real WebSocket so Vite HMR doesn't flood the page with errors.
+        if (typeof url !== 'string' || url.indexOf('/api/ws/') === -1) {
+          return new __RealWebSocket(url, protocols);
+        }
         this.url = url;
         this.sessionId = url.split('/').pop();
         this.readyState = 1;
@@ -16,6 +21,7 @@ async function setupWebSocketMock(page) {
       _emit(data) { this.onmessage?.({ data: JSON.stringify(data) }); }
     }
     window.__wsConnections = connections;
+    const __RealWebSocket = window.WebSocket;
     window.WebSocket = MockWebSocket;
   });
   return async (sessionId, payload) => {

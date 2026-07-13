@@ -79,7 +79,9 @@ async function tauriPathToFile(path) {
 
 export default function GlobalDropZone() {
   const [active, setActive] = useState(false)
-  const [counter, setCounter] = useState(0) // nested dragenter/leave counter
+  // Nested dragenter/leave counter. The value itself is never read (only the
+  // functional setter mutates it to track depth), so the slot is discarded.
+  const [, setCounter] = useState(0)
 
   // v0.7.38: split HTML5 drag handling by runtime mode.
   //

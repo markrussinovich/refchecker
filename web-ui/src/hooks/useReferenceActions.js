@@ -95,6 +95,14 @@ export default function useReferenceActions() {
       await reloadCheck()
       return addedId
     } catch (e) {
+      // R17 (G3) — the backend rejects a duplicate with 409 and a friendly
+      // top-level envelope ({duplicate, existing_index, message}). Surface
+      // "already reference [N]" instead of a generic "Add failed".
+      const r = e?.response
+      if (r?.status === 409 && r?.data?.duplicate) {
+        alert(r.data.message || `Already reference [${r.data.existing_index}] in this check.`)
+        return null
+      }
       alert(e?.response?.data?.detail || e?.message || 'Add failed')
       return null
     } finally {
@@ -140,6 +148,9 @@ export default function useReferenceActions() {
       )
     )
     useCheckStore.getState().removeReference(ident)
+    // Also drop it from the historical-view source so the badge/list move
+    // immediately when displayRefs reads selectedCheck.results (not checkStore).
+    useHistoryStore.getState().optimisticRemoveReference?.(ident)
     try {
       await removeReferenceFromCheck(selectedCheckId, ident)
       setRemovedRefs(prev => [snapshot, ...prev].slice(0, 20))

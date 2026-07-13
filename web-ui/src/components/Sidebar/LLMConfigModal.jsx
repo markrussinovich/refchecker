@@ -526,18 +526,19 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         )}
 
         {/* Actions */}
-        <div className="flex justify-between gap-3 pt-2 items-center flex-wrap">
+        <div className="flex flex-col gap-3 pt-2">
           <Button
             type="button"
             variant="secondary"
             onClick={handleTestConnection}
             disabled={isSubmitting || isValidating || testing}
             loading={testing}
+            className="w-full"
             title="Run a small live call to verify the API key + model before saving"
           >
             {testing ? 'Testing…' : 'Test connection'}
           </Button>
-          <div className="flex gap-3 ml-auto">
+          <div className="flex justify-end gap-3">
             <Button
               type="button"
               variant="secondary"

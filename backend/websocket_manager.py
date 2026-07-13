@@ -140,5 +140,132 @@ class ConnectionManager:
         })
 
 
+class PresenceManager:
+    """Tracks which authenticated users are viewing a shared room (batch/check id).
+
+    A "room" is any opaque string id (a batch id, a check id, …). Each connected
+    WebSocket carries a user identity (from auth); the manager broadcasts
+    presence join/leave events to the other connections in the same room and can
+    hand a newcomer the current roster. Presence is real — it reflects only the
+    sockets that are actually connected right now (issue #67).
+    """
+
+    def __init__(self):
+        # room_id -> { websocket -> user dict {user_id, name, email} }
+        self._rooms: Dict[str, Dict[WebSocket, dict]] = {}
+
+    @staticmethod
+    def _roster(members: Dict[WebSocket, dict]) -> list:
+        """Deduplicate by user_id so a user with multiple tabs counts once.
+
+        Entries without a real ``user_id`` (e.g. a malformed/anonymous token)
+        are skipped: they are not authenticated identities, and treating them
+        all as the same ``None`` key would collapse every such connection into
+        a single bogus roster entry (and could shadow real users).
+        """
+        seen: Dict[int, dict] = {}
+        for user in members.values():
+            uid = user.get("user_id")
+            if uid is None or uid in seen:
+                continue
+            seen[uid] = user
+        return list(seen.values())
+
+    def roster(self, room_id: str) -> list:
+        """Current de-duplicated list of users present in a room."""
+        return self._roster(self._rooms.get(room_id, {}))
+
+    async def join(self, websocket: WebSocket, room_id: str, user: dict):
+        """Register a connection in a room and notify everyone of the new roster.
+
+        The websocket must already be accepted by the caller. Sends the joiner
+        the full current roster (type ``presence_state``) and broadcasts a
+        ``presence_join`` to the others.
+        """
+        members = self._rooms.setdefault(room_id, {})
+        uid = user.get("user_id")
+        # A None user_id is not a real identity; never treat two such
+        # connections as "the same user already present".
+        already_present = uid is not None and any(
+            m.get("user_id") == uid for m in members.values()
+        )
+        members[websocket] = user
+
+        # Tell the newcomer who is already here.
+        await self._send(websocket, {
+            "type": "presence_state",
+            "room_id": room_id,
+            "users": self.roster(room_id),
+        })
+
+        # Notify others only when this user wasn't already represented by
+        # another tab — avoids spurious join spam on reconnects/extra tabs.
+        if not already_present:
+            await self._broadcast(room_id, {
+                "type": "presence_join",
+                "room_id": room_id,
+                "user": user,
+                "users": self.roster(room_id),
+            }, exclude=websocket)
+        logger.info(f"Presence join: user {user.get('user_id')} -> room {room_id}")
+
+    async def leave(self, websocket: WebSocket, room_id: str):
+        """Remove a connection from a room and broadcast a leave if the user is fully gone."""
+        members = self._rooms.get(room_id)
+        if not members or websocket not in members:
+            return
+        user = members.pop(websocket)
+        if not members:
+            del self._rooms[room_id]
+
+        uid = user.get("user_id")
+        still_present = uid is not None and any(
+            m.get("user_id") == uid
+            for m in self._rooms.get(room_id, {}).values()
+        )
+        if not still_present:
+            await self._broadcast(room_id, {
+                "type": "presence_leave",
+                "room_id": room_id,
+                "user": user,
+                "users": self.roster(room_id),
+            })
+        logger.info(f"Presence leave: user {user.get('user_id')} -> room {room_id}")
+
+    async def broadcast_to_room(self, room_id: str, message_type: str, data: dict):
+        """Fan a live event (reference_result / summary_update) out to every
+        socket present in a room, regardless of which session opened it (R26).
+
+        Used so a batch shared with a team streams results to every team member
+        viewing the same ``batch-{id}`` room, not just the owner's session. A
+        no-op when nobody is present in the room."""
+        if room_id not in self._rooms:
+            return
+        message = {"type": message_type, **data}
+        await self._broadcast(room_id, message)
+
+    def has_room(self, room_id: str) -> bool:
+        """Whether anyone is currently present in a room."""
+        return bool(self._rooms.get(room_id))
+
+    async def _broadcast(self, room_id: str, message: dict, exclude: WebSocket = None):
+        message_json = json.dumps(message)
+        for ws in list(self._rooms.get(room_id, {}).keys()):
+            if ws is exclude:
+                continue
+            await self._send(ws, message_json)
+
+    @staticmethod
+    async def _send(websocket: WebSocket, message):
+        message_json = message if isinstance(message, str) else json.dumps(message)
+        try:
+            await websocket.send_text(message_json)
+        except Exception as e:
+            logger.error(f"Error sending presence message: {e}")
+
+
 # Global connection manager instance
 manager = ConnectionManager()
+
+# Global presence manager instance (issue #67)
+presence = PresenceManager()

@@ -3,6 +3,8 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { openExternal } from '../../utils/tauriBridge'
+import ShareModal from '../Modals/ShareModal'
+import PresenceAvatars from '../Presence/PresenceAvatars'
 
 /**
  * Batch summary view (v0.7.45) — the dedicated MainPanel page that
@@ -30,6 +32,31 @@ const STATUS_COLOR = {
   queued: '#94a3b8',
 }
 
+// Hoisted to module scope: a pure presentational chip that reads everything
+// from props (no closure over component state). Defining it inside the render
+// body re-creates the component type every render — which React Compiler flags
+// and which remounts the subtree on each render.
+function Chip({ label, value, color, active, onClick, title }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="px-3 py-1.5 rounded-md border text-xs transition-all"
+      style={{
+        borderColor: active ? color : 'var(--color-border)',
+        background: active ? `${color}22` : 'var(--color-bg-secondary)',
+        color: active ? color : 'var(--color-text-primary)',
+        cursor: onClick ? 'pointer' : 'default',
+        fontWeight: active ? 600 : 500,
+      }}
+    >
+      <span style={{ color }}>{label}</span>
+      <span className="ml-2 font-mono" style={{ color: active ? color : 'var(--color-text-primary)' }}>{value}</span>
+    </button>
+  )
+}
+
 function fmtUsd(n) {
   if (!n && n !== 0) return '$0.00'
   return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`
@@ -44,11 +71,20 @@ function fmtTok(n) {
 export default function BatchSummaryView() {
   const selectedBatch = useHistoryStore(s => s.selectedBatch)
   const isLoadingBatch = useHistoryStore(s => s.isLoadingBatch)
+  const batchError = useHistoryStore(s => s.batchError)
+  const selectedBatchId = useHistoryStore(s => s.selectedBatchId)
   const selectBatch = useHistoryStore(s => s.selectBatch)
   const openBatchChild = useHistoryStore(s => s.openBatchChild)
   const [usage, setUsage] = useState({ input_tokens: 0, output_tokens: 0, cost_usd: 0, by_flow: {}, per_check: {} })
   const [isCancelling, setIsCancelling] = useState(false)
   const [filter, setFilter] = useState('all') // all | error | hallucinated | in_progress | completed
+  const [showShare, setShowShare] = useState(false)
+  // R26: teams the current user can share this batch with, and the team the
+  // batch is currently shared with (from the summary). Empty when not in
+  // multi-user mode, which hides the control entirely.
+  const [myTeams, setMyTeams] = useState([])
+  const [sharedTeamId, setSharedTeamId] = useState(null)
+  const [shareBusy, setShareBusy] = useState(false)
 
   const batchId = selectedBatch?.batch_id
   const checks = selectedBatch?.checks || []
@@ -93,6 +129,43 @@ export default function BatchSummaryView() {
   useEffect(() => {
     fetchUsage()
   }, [fetchUsage, agg.completed, agg.errored, agg.cancelled])
+
+  // R26: sync the locally-tracked shared team from the batch summary. The
+  // summary's team_id is null for an unshared batch.
+  useEffect(() => {
+    setSharedTeamId(selectedBatch?.team_id ?? null)
+  }, [selectedBatch?.team_id, batchId])
+
+  // R26: load the teams the user can share with. Soft-fails (and stays empty)
+  // in single-user mode where /api/teams returns nothing actionable.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const resp = await api.getTeams()
+        if (!cancelled) setMyTeams(resp.data?.teams || [])
+      } catch {
+        if (!cancelled) setMyTeams([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [batchId])
+
+  const handleShareWithTeam = useCallback(async (teamIdRaw) => {
+    if (!batchId) return
+    const teamId = Number(teamIdRaw) || 0 // 0 == unshare
+    setShareBusy(true)
+    try {
+      await api.shareBatchWithTeam(batchId, teamId)
+      setSharedTeamId(teamId || null)
+      // Refresh so the summary + child rows reflect the new team_id.
+      await selectBatch(batchId)
+    } catch (e) {
+      logger.warning?.('BatchSummary', 'shareBatchWithTeam failed', e)
+    } finally {
+      setShareBusy(false)
+    }
+  }, [batchId, selectBatch])
 
   // v0.7.57: fan out a `refchecker:check-completed` window event
   // when a poll detects new completions. The 16-WS cap (v0.7.44)
@@ -144,7 +217,10 @@ export default function BatchSummaryView() {
   // they realise they grabbed the wrong folder.
   const handleCancelAndDelete = async () => {
     if (!batchId || isCancelling) return
-    if (!window.confirm(`Cancel ${agg.inProgress} in-progress AND delete all ${agg.total} papers in this batch? This can't be undone.`)) return
+    const confirmMsg = agg.inProgress > 0
+      ? `Cancel ${agg.inProgress} in-progress AND delete all ${agg.total} papers in this batch? This can't be undone.`
+      : `Delete all ${agg.total} papers in this batch? This can't be undone.`
+    if (!window.confirm(confirmMsg)) return
     setIsCancelling(true)
     try {
       if (agg.inProgress > 0) {
@@ -174,37 +250,45 @@ export default function BatchSummaryView() {
       if (filter === 'warning') return (c.warnings_count || 0) > 0
       if (filter === 'unverified') return (c.unverified_count || 0) > 0
       if (filter === 'hallucinated') return (c.hallucination_count || 0) > 0
+      if (filter === 'ai_flagged') return c.ai_detection_band === 'high' || c.ai_detection_band === 'medium'
       return true
     })
   }, [checks, filter])
 
   if (isLoadingBatch && !selectedBatch) {
     return (
-      <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="p-6 text-center text-sm flex flex-col items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+        <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
         Loading batch…
       </div>
     )
   }
+  // Error/timeout escape hatch — previously this returned null, leaving the
+  // user on an indefinite "Loading batch…" (if the request hung) or a blank
+  // panel (if it failed). Now a failed/timed-out load is recoverable.
+  if (!selectedBatch && batchError) {
+    return (
+      <div className="p-6 text-center text-sm flex flex-col items-center gap-3" style={{ color: 'var(--color-text-secondary)' }}>
+        <svg className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <p style={{ color: 'var(--color-text-primary)' }}>Couldn’t load this batch</p>
+        <p className="text-xs max-w-xs">{batchError}</p>
+        <button
+          type="button"
+          onClick={() => selectedBatchId && selectBatch(selectedBatchId)}
+          className="px-3 py-1.5 rounded-md border text-xs transition-all"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', background: 'var(--color-bg-tertiary)' }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
   if (!selectedBatch) return null
-
-  const Chip = ({ label, value, color, active, onClick, title }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className="px-3 py-1.5 rounded-md border text-xs transition-all"
-      style={{
-        borderColor: active ? color : 'var(--color-border)',
-        background: active ? `${color}22` : 'var(--color-bg-secondary)',
-        color: active ? color : 'var(--color-text-primary)',
-        cursor: onClick ? 'pointer' : 'default',
-        fontWeight: active ? 600 : 500,
-      }}
-    >
-      <span style={{ color }}>{label}</span>
-      <span className="ml-2 font-mono" style={{ color: active ? color : 'var(--color-text-primary)' }}>{value}</span>
-    </button>
-  )
 
   return (
     <div className="space-y-3">
@@ -226,6 +310,45 @@ export default function BatchSummaryView() {
               {agg.cancelled > 0 && <span style={{ color: STATUS_COLOR.cancelled }}> · {agg.cancelled} cancelled</span>}
             </div>
           </div>
+          {/* Realtime presence — team members viewing this same batch (#67) */}
+          {batchId && <PresenceAvatars roomId={`batch-${batchId}`} />}
+          {/* R26: share the whole batch with a team so its members can open it
+              live. Hidden unless the user belongs to at least one team. */}
+          {myTeams.length > 0 && (
+            <label className="inline-flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }} title="Share this batch with a team — members can open it and collaborate live">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4z" />
+              </svg>
+              <select
+                value={sharedTeamId ?? ''}
+                onChange={(e) => handleShareWithTeam(e.target.value)}
+                disabled={shareBusy}
+                className="text-xs rounded-md px-1.5 py-1"
+                style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
+                aria-label="Share batch with team"
+              >
+                <option value="">Not shared</option>
+                {myTeams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {agg.completed > 0 && (
+            <button
+              onClick={() => setShowShare(true)}
+              className="px-3 py-1 rounded text-xs font-semibold inline-flex items-center gap-1.5"
+              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none' }}
+              type="button"
+              title="Export one report for this batch — overview plus each paper (HTML, PDF, Markdown or Word)"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /><line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+              </svg>
+              Share batch
+            </button>
+          )}
           {agg.inProgress > 0 && (
             <button
               onClick={handleCancelAll}
@@ -254,9 +377,11 @@ export default function BatchSummaryView() {
               opacity: isCancelling ? 0.5 : 1,
             }}
             type="button"
-            title="Cancel any in-progress AND delete every paper in this batch from history."
+            title={agg.inProgress > 0
+              ? 'Cancel any in-progress AND delete every paper in this batch from history.'
+              : 'Delete every paper in this batch from history.'}
           >
-            {isCancelling ? '…' : 'Cancel & delete all'}
+            {isCancelling ? '…' : (agg.inProgress > 0 ? 'Cancel & delete all' : 'Delete all')}
           </button>
         </div>
 
@@ -308,7 +433,9 @@ export default function BatchSummaryView() {
               label="AI-flagged"
               value={agg.aiHigh + agg.aiMedium}
               color="#ef4444"
-              title="Papers whose body text scored medium/high AI-likelihood (advisory only — not proof of AI authorship)"
+              active={filter === 'ai_flagged'}
+              onClick={() => setFilter(f => f === 'ai_flagged' ? 'all' : 'ai_flagged')}
+              title="Click to filter to papers whose body text scored medium/high AI-likelihood (advisory only — not proof of AI authorship)"
             />
           )}
         </div>
@@ -469,6 +596,13 @@ export default function BatchSummaryView() {
           )}
         </div>
       </div>
+      {showShare && (
+        <ShareModal
+          batchId={batchId}
+          title={selectedBatch.batch_label || `Batch of ${agg.total} ${agg.total === 1 ? 'paper' : 'papers'}`}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
   )
 }

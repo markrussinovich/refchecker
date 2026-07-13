@@ -25,10 +25,60 @@
   --color-suggestion-bg: #f5f3ff;
   --color-hallucination: #dc6b1d;
   --color-hallucination-bg: #fff7ed;
-  
+  /* Previously referenced-but-undefined tokens (were falling back to hardcoded
+     values in MainPanel/UserMenu/LoginPage). */
+  --color-text-tertiary: #9aa0ad;
+  --color-accent-muted: rgba(16, 163, 127, 0.12);
+  /* Structural tokens for a calmer, Mac-native feel: system font stack
+     (SF/-apple-system first), radii, card shadow, panel surface. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 10px rgba(0, 0, 0, 0.06);
+  --panel-bg: #ffffff;
+
   /* Sidebar */
   --sidebar-width: 280px;
   --sidebar-bg: #f9f9f9;
+
+  /* === Action-control geometry (theme-agnostic) — BUTTON_DESIGN §1.1 ===
+     The shared token system every article-level action control consumes, so the
+     re-check pills, gap-finder header, citation split-button, assistant trigger,
+     AI-likelihood pill and AdditionalInfoBar pills all read as ONE family. */
+  --control-h:            28px;   /* the ONE canonical control height */
+  --control-h-sm:         22px;   /* dense inline pills (AI-likelihood, AdditionalInfoBar) */
+  --control-pad-x:        12px;   /* horizontal padding for default controls */
+  --control-pad-x-sm:     9px;    /* horizontal padding for dense pills */
+  --control-gap:          6px;    /* icon↔label gap inside a control */
+  --control-icon:         14px;   /* the ONE icon-glyph size for every control */
+  --control-icon-slot:    16px;   /* fixed square that holds icon/refresh/spinner — never reflows */
+  --control-radius:       8px;    /* THE radius for every pill/button/segment */
+  --control-caret-w:      28px;   /* split-button caret segment width (square) */
+  --control-font:         12px;   /* 0.75rem — matches existing text-xs usage */
+  --control-font-weight:  500;    /* matches existing font-medium */
+  --control-font-weight-active: 600; /* segmented-control active tab weight */
+  --control-border:       1px solid var(--color-border);
+  --control-focus-ring:   0 0 0 2px var(--color-bg-secondary), 0 0 0 4px var(--color-accent);
+  --control-row-gap:      8px;    /* vertical rhythm BETWEEN action blocks */
+  --control-caption-gap:  4px;    /* gap between a pill and its caption bubble */
+  --control-transition:   background 120ms ease, color 120ms ease, border-color 120ms ease;
+
+  /* === Status pill fills + hovers (light theme) — BUTTON_DESIGN §1.1 ===
+     These ARE the live translucent tints already used inline in the source
+     (RetractionCheck/CitationIntegrity), now named. They deliberately do NOT
+     route through the opaque themed *-bg tokens (which are the wrong brown/red
+     tint in dark mode). +0.08 alpha on hover, deterministic. */
+  --status-success-fill:        rgba(16, 185, 129, 0.12);
+  --status-success-fill-hover:  rgba(16, 185, 129, 0.20);
+  --status-warning-fill:        rgba(245, 158, 11, 0.14);
+  --status-warning-fill-hover:  rgba(245, 158, 11, 0.22);
+  --status-error-fill:          rgba(239, 68, 68, 0.12);
+  --status-error-fill-hover:    rgba(239, 68, 68, 0.20);
+  --outline-fill:               var(--color-bg-secondary); /* resting action pill */
+  --outline-fill-hover:         var(--color-bg-tertiary);  /* deterministic, themed */
 }
 
 .dark {
@@ -55,8 +105,33 @@
   --color-suggestion-bg: #2e1f4d;
   --color-hallucination: #fb923c;
   --color-hallucination-bg: #431c07;
+  --color-text-tertiary: #8b8b96;
+  --color-accent-muted: rgba(16, 163, 127, 0.18);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 12px rgba(0, 0, 0, 0.4);
+  --panel-bg: #2f2f2f;
   --sidebar-bg: #171717;
+
+  /* === Status pill fills + hovers (dark theme) — BUTTON_DESIGN §1.1 ===
+     Slightly higher base alpha in dark so the tint reads on the dark surface,
+     matching the perceived weight of the light-theme tints. Same +0.08 hover
+     delta. --outline-fill / --outline-fill-hover already resolve via the themed
+     --color-bg-secondary / --color-bg-tertiary, so no dark override needed. */
+  --status-success-fill:        rgba(16, 185, 129, 0.18);
+  --status-success-fill-hover:  rgba(16, 185, 129, 0.26);
+  --status-warning-fill:        rgba(251, 191, 36, 0.18);
+  --status-warning-fill-hover:  rgba(251, 191, 36, 0.26);
+  --status-error-fill:          rgba(248, 113, 113, 0.18);
+  --status-error-fill-hover:    rgba(248, 113, 113, 0.26);
 }
+
+/* Mac-native typography: SF/-apple-system first, smoothed, controls inherit. */
+html, body, #root {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; }
 
 /* Base styles */
 html {
@@ -224,4 +299,143 @@ a[href^="http"]:hover,
 a[href^="https"]:hover,
 a[href^="mailto:"]:hover {
   text-decoration-thickness: 2px;
+}
+
+/* Reference card flash when navigated to from a citation highlight. */
+@keyframes rcRefFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); }
+  20%  { box-shadow: 0 0 0 3px rgba(59,130,246,0.65); }
+  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.0); }
+}
+.rc-ref-flash { animation: rcRefFlash 1.6s ease-out 1; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .rc-ref-flash { animation: none; }
+}
+
+/* Add-to-references "document changes" preview (list-level diff chips). The
+   document/PDF is never mutated — these only preview how the printed numbering
+   and existing inline markers would shift. */
+.rc-diff-row { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.rc-diff-old { color: var(--color-text-muted); text-decoration: line-through; }
+.rc-diff-arrow { color: var(--color-text-muted); }
+.rc-diff-new { color: var(--color-accent); font-weight: 600; }
+.rc-diff-added { color: var(--color-success, #22c55e); font-weight: 600; }
+
+/* ── Shared button/pill control system (BUTTON_DESIGN §1.2, §1.4, §3.4) ──
+   Every control rendered through common/Button, IconButton or SplitButton
+   carries .rc-control. The focus ring is :focus-visible only (so a plain mouse
+   click never paints it) and is drawn OUTSIDE the box as a double box-shadow,
+   so it grows nothing and reflows nothing. overflow:visible lets the ring
+   escape rounded/scroll ancestors (split-button segments, scrolling result
+   panels) per the §1.2 overflow note. */
+.rc-control { outline: none; overflow: visible; }
+.rc-control:focus-visible { box-shadow: var(--control-focus-ring); }
+
+/* macOS-native segmented control (BUTTON_DESIGN §3.4b). The active indicator is
+   a filled segment (a moving background), NEVER an added border — a border adds
+   box height and reflows. Each tab reserves its 600-weight width via a hidden
+   bold sizer (rendered in JSX) so Summarize↔Chat never shifts. */
+.rc-segmented {
+  display: inline-flex;
+  height: var(--control-h);
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--control-radius);
+  background: var(--color-bg-tertiary);
+  box-sizing: border-box;
+}
+.rc-segment {
+  position: relative;
+  min-width: 84px;
+  border: none;
+  border-radius: 6px; /* inner radius = outer 8 − 2px padding */
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--control-font);
+  cursor: pointer;
+  transition: var(--control-transition);
+}
+.rc-segment[aria-selected="true"] {
+  background: var(--color-bg-primary);
+  color: var(--color-accent);
+}
+
+/* Fixed-square icon-button (BUTTON_DESIGN §1.4). 28×28 by default, 22×22 for
+   size="sm"; never reflows because its size is fixed regardless of content. */
+.rc-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  min-width: var(--control-h);
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: var(--control-transition);
+}
+.rc-iconbtn:hover { background: var(--color-bg-tertiary); }
+.rc-iconbtn.rc-iconbtn-sm {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  min-width: var(--control-h-sm);
+}
+.rc-iconbtn[disabled] { opacity: 0.6; cursor: default; }
+.rc-iconbtn-chevron { transition: transform 150ms ease; }
+.rc-iconbtn-chevron.rc-rotated { transform: rotate(180deg); }
+
+/* Split-button caret entrance (BUTTON_DESIGN §3.2): fades + slides in so the
+   post-result caret is not a "pop"; the main segment's left edge never moves. */
+@keyframes rcCaretIn {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.rc-caret-in { animation: rcCaretIn 120ms ease; }
+
+/* === 2×2 action-button grid (ActionPanelGrid) ===
+   The four article-tool triggers (Retractions / Gap-finder / Citation-numbering
+   / Chat & Summarize) sit in a fixed 2-column grid and never move; the open
+   panel portals its details into the full-width host rendered below the grid. */
+.rc-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--control-row-gap);
+  align-items: start;          /* a tall trigger never stretches its row-mate */
+}
+/* Whatever trigger a panel drops into its cell (a pill Button or a SplitButton)
+   fills the column so the 2×2 reads as four even buttons. */
+.rc-action-grid > .rc-grid-cell { min-width: 0; }
+.rc-action-grid > .rc-grid-cell > * { width: 100%; }
+.rc-grid-trigger { width: 100%; justify-content: flex-start; }
+/* The shared full-width details region below the grid. Collapses to nothing
+   when no panel is open (the open panel portals exactly one child in). */
+.rc-action-grid-content:empty { display: none; }
+.rc-action-grid-content > .rc-action-details { margin-top: var(--control-row-gap); }
+/* On a narrow window fall back to a single column (still never shifts). */
+@media (max-width: 560px) {
+  .rc-action-grid { grid-template-columns: 1fr; }
+}
+
+/* Non-reflowing grid-row expand for collapsible result bodies (gap-finder,
+   AI-likelihood): animate grid-template-rows 0fr→1fr so the fixed header stays
+   put while the list reveals. overflow:hidden lives only on the animated wrapper
+   (which has no focusable controls flush to its edge). */
+.rc-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 160ms ease;
+}
+.rc-collapse.rc-collapsed { grid-template-rows: 0fr; }
+.rc-collapse > .rc-collapse-inner { overflow: hidden; min-height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-control,
+  .rc-segment,
+  .rc-iconbtn,
+  .rc-iconbtn-chevron { transition: none; }
+  .rc-collapse { transition: none; }
+  .rc-caret-in { animation: none; }
 }
