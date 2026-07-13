@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/useSettingsStore'
 import Button from '../common/Button'
 import IconButton from '../common/IconButton'
 import LabelSizer from '../common/LabelSizer'
+import Markdown from '../common/Markdown'
 
 const CHAT_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
@@ -444,9 +445,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
                     {!isRefMode && <SourceBadge source={summary.source} />}
                   </div>
                   {!isRefMode && <SourceBanner source={summary.source} />}
-                  <div className="text-sm mt-2 whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>
-                    {summary.summary}
-                  </div>
+                  <Markdown className="text-sm mt-2" style={{ color: 'var(--color-text-primary)' }} text={summary.summary} />
                 </div>
               )}
             </div>
@@ -469,7 +468,7 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
                   </div>
                 )}
                 {messages.map((m, i) => (
-                  <div key={i} className="text-sm rounded-md px-2.5 py-1.5 whitespace-pre-wrap"
+                  <div key={i} className="text-sm rounded-md px-2.5 py-1.5"
                     style={{
                       background: m.role === 'user' ? 'var(--color-bg-tertiary)' : 'var(--color-bg-primary)',
                       color: 'var(--color-text-primary)',
@@ -478,7 +477,9 @@ export default function ArticleAssistant({ checkId, reference = null, label = nu
                     <span style={{ fontWeight: 700, color: 'var(--color-text-secondary)' }}>
                       {m.role === 'user' ? 'You' : (isRefMode ? 'Reference' : 'Article')}:
                     </span>{' '}
-                    {m.content}
+                    {m.role === 'user'
+                      ? <span className="whitespace-pre-wrap">{m.content}</span>
+                      : <Markdown text={m.content} style={{ display: 'inline' }} />}
                   </div>
                 ))}
                 {chat.loading && (
