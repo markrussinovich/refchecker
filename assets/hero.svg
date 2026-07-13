@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="200" viewBox="0 0 860 200" role="img" aria-label="RefChecker — animated banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#11182f"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c9cff"/>
+      <stop offset="0.5" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#34d399"/>
+      <animate attributeName="x1" values="0;0.4;0" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values="1;1.4;1" dur="6s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#22d3ee" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="round"><rect width="860" height="200" rx="16"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <rect width="860" height="200" fill="url(#bg)"/>
+
+    <!-- subtle grid -->
+    <g stroke="#1e2a45" stroke-width="1">
+      <path d="M0 50 H860 M0 100 H860 M0 150 H860"/>
+      <path d="M120 0 V200 M280 0 V200 M440 0 V200 M600 0 V200 M760 0 V200"/>
+    </g>
+
+    <!-- sweeping scan beam -->
+    <rect x="-160" y="0" width="160" height="200" fill="url(#beam)">
+      <animate attributeName="x" values="-160;860" dur="3.4s" repeatCount="indefinite"/>
+    </rect>
+
+    <!-- wordmark -->
+    <text x="48" y="96" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif" font-size="52" font-weight="800" fill="url(#word)">RefChecker</text>
+    <text x="50" y="128" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" fill="#94a3b8">academic reference verification &amp; AI-text detection</text>
+
+    <!-- animated reference rows being verified -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">
+      <g transform="translate(560,52)">
+        <circle cx="0" cy="-4" r="5" fill="#34d399">
+          <animate attributeName="opacity" values="0;1;1" dur="3s" begin="0s" repeatCount="indefinite"/>
+        </circle>
+        <text x="14" y="0" fill="#cbd5e1">[1] verified</text>
+      </g>
+      <g transform="translate(560,82)">
+        <circle cx="0" cy="-4" r="5" fill="#f59e0b">
+          <animate attributeName="opacity" values="0;0;1;1" dur="3s" begin="0.6s" repeatCount="indefinite"/>
+        </circle>
+        <text x="14" y="0" fill="#cbd5e1">[2] venue warning</text>
+      </g>
+      <g transform="translate(560,112)">
+        <circle cx="0" cy="-4" r="5" fill="#ef4444">
+          <animate attributeName="opacity" values="0;0;0;1;1" dur="3s" begin="1.2s" repeatCount="indefinite"/>
+        </circle>
+        <text x="14" y="0" fill="#cbd5e1">[3] not found</text>
+      </g>
+      <g transform="translate(560,142)">
+        <circle cx="0" cy="-4" r="5" fill="#7c9cff">
+          <animate attributeName="opacity" values="0;0;0;0;1" dur="3s" begin="1.8s" repeatCount="indefinite"/>
+        </circle>
+        <text x="14" y="0" fill="#cbd5e1">AI-text: inconclusive</text>
+      </g>
+    </g>
+
+    <!-- pulsing health ring -->
+    <g transform="translate(792,100)">
+      <circle r="26" fill="none" stroke="#1e2a45" stroke-width="6"/>
+      <circle r="26" fill="none" stroke="#34d399" stroke-width="6" stroke-linecap="round"
+              stroke-dasharray="163" transform="rotate(-90)">
+        <animate attributeName="stroke-dashoffset" values="163;30;163" dur="4s" repeatCount="indefinite"/>
+      </circle>
+      <text x="0" y="5" text-anchor="middle" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="15" font-weight="700" fill="#e2e8f0">
+        <animate attributeName="opacity" values="0.6;1;0.6" dur="4s" repeatCount="indefinite"/>✓</text>
+    </g>
+
+    <rect width="859" height="199" rx="16" fill="none" stroke="#22304f" stroke-width="1"/>
+  </g>
+</svg>

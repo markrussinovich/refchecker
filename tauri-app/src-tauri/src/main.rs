@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use once_cell::sync::OnceCell;
@@ -156,6 +156,15 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
 
     *sidecar_slot().lock().unwrap() = Some(child);
 
+    // Capture the sidecar's recent stderr and whether it exited early, so a boot
+    // failure surfaces the REAL reason (a Python traceback) instead of a generic
+    // timeout, and so we can fail fast the instant the process dies rather than
+    // waiting out the full deadline.
+    let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let exited: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let stderr_for_task = Arc::clone(&stderr_tail);
+    let exited_for_task = Arc::clone(&exited);
+
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -163,16 +172,33 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
                     log::info!("[sidecar] {}", String::from_utf8_lossy(&line).trim_end());
                 }
                 CommandEvent::Stderr(line) => {
-                    log::warn!("[sidecar] {}", String::from_utf8_lossy(&line).trim_end());
+                    let text = String::from_utf8_lossy(&line).trim_end().to_string();
+                    log::warn!("[sidecar] {}", text);
+                    if let Ok(mut buf) = stderr_for_task.lock() {
+                        buf.push(text);
+                        let len = buf.len();
+                        if len > 40 {
+                            buf.drain(0..len - 40);
+                        }
+                    }
                 }
                 CommandEvent::Error(err) => {
                     log::error!("[sidecar] error event: {err}");
+                    if let Ok(mut e) = exited_for_task.lock() {
+                        *e = Some(format!("spawn error: {err}"));
+                    }
                 }
                 CommandEvent::Terminated(payload) => {
                     log::warn!(
                         "[sidecar] terminated: code={:?} signal={:?}",
                         payload.code, payload.signal
                     );
+                    if let Ok(mut e) = exited_for_task.lock() {
+                        *e = Some(format!(
+                            "process exited before becoming healthy (code={:?} signal={:?})",
+                            payload.code, payload.signal
+                        ));
+                    }
                     break;
                 }
                 _ => {}
@@ -180,19 +206,50 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
         }
     });
 
-    // Block-poll the health endpoint until it answers or we time out.
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // Block-poll the health endpoint until it answers, the process dies, or we
+    // time out. The PyInstaller one-file sidecar extracts to a temp dir and
+    // imports a large dependency set (pandas/numpy + the LLM SDKs) on every
+    // launch, which can take 30-90s on slower disks, first launch, or while
+    // antivirus scans the freshly-extracted binary. 300s gives generous
+    // first-launch headroom; if the process instead crashes, we fail fast below
+    // with its stderr rather than waiting out the whole deadline.
+    let timeout_secs = 300u64;
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     let url = format!("http://127.0.0.1:{port}/api/health");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(500))
         .build()
         .map_err(|e| format!("reqwest client: {e}"))?;
 
+    let tail = || -> String {
+        match stderr_tail.lock() {
+            Ok(buf) => {
+                let n = buf.len();
+                let start = if n > 12 { n - 12 } else { 0 };
+                buf[start..].join("\n")
+            }
+            Err(_) => String::new(),
+        }
+    };
+
     loop {
+        // Fail fast if the sidecar process exited before becoming healthy.
+        let crashed: Option<String> = exited.lock().ok().and_then(|g| (*g).clone());
+        if let Some(reason) = crashed {
+            let t = tail();
+            return Err(if t.is_empty() {
+                format!("Sidecar {reason}")
+            } else {
+                format!("Sidecar {reason}\n\nLast output:\n{t}")
+            });
+        }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "Sidecar did not become healthy on http://127.0.0.1:{port}/api/health within 60s"
-            ));
+            let t = tail();
+            return Err(if t.is_empty() {
+                format!("Sidecar did not become healthy on http://127.0.0.1:{port}/api/health within {timeout_secs}s")
+            } else {
+                format!("Sidecar did not become healthy on http://127.0.0.1:{port}/api/health within {timeout_secs}s\n\nLast output:\n{t}")
+            });
         }
         match client.get(&url).send() {
             Ok(resp) if resp.status().is_success() => {

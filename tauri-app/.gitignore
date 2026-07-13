@@ -8,7 +8,11 @@ venv/
 
 # Rust / Tauri build artifacts
 src-tauri/target/
-src-tauri/Cargo.lock
+# NOTE: Cargo.lock IS committed (binary app) so CI builds are reproducible.
+# Leaving it un-pinned let a fresh `time 0.3.48` resolve in CI and break
+# `tauri-utils` with E0119, failing the v0.9.21 release build while v0.9.20
+# (which had resolved time 0.3.47) succeeded. Committing the lock pins the
+# whole dependency tree to the known-good set.
 
 # PyInstaller sidecar output (rebuilt by CI / local script)
 src-tauri/binaries/

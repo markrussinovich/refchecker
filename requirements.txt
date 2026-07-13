@@ -1,6 +1,10 @@
 # Core dependencies - required for basic functionality
 numpy>=2.4.4
 requests>=2.33.1
+# Native document viewer: text→PDF conversion for non-PDF sources (.txt/.tex/
+# .bib/pasted text) so every source renders in the same pdf.js viewer. Embeds
+# the bundled Bitstream Vera font — pure-Python, PyInstaller/bundle-safe.
+reportlab>=4.0
 beautifulsoup4>=4.14.3
 pypdf>=6.10.2
 arxiv>=3.0.0
