@@ -105,6 +105,16 @@ def _gaps_test_client(monkeypatch):
 
     monkeypatch.setattr(backend_main.db, "get_check_by_id", _fake_get_check_by_id)
 
+    # The gaps route reads via the team-aware _get_accessible_check_or_404,
+    # which also awaits db.get_user_team_ids for a non-anonymous user. Stub it
+    # so this route smoke test controls *every* DB call the handler makes and
+    # stays independent of the real db singleton's state (which other tests may
+    # have swapped for a mock earlier in the session).
+    async def _fake_get_user_team_ids(user_id):
+        return []
+
+    monkeypatch.setattr(backend_main.db, "get_user_team_ids", _fake_get_user_team_ids)
+
     captured = {}
 
     def _fake_find_gaps(refs, **_kw):
