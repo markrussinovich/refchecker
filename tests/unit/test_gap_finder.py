@@ -105,6 +105,12 @@ def _gaps_test_client(monkeypatch):
 
     monkeypatch.setattr(backend_main.db, "get_check_by_id", _fake_get_check_by_id)
 
+    # _get_accessible_check_or_404 also consults team membership (R26).
+    async def _fake_get_user_team_ids(user_id):
+        return []
+
+    monkeypatch.setattr(backend_main.db, "get_user_team_ids", _fake_get_user_team_ids)
+
     captured = {}
 
     def _fake_find_gaps(refs, **_kw):

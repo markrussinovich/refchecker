@@ -4724,9 +4724,7 @@ async def start_batch_check_files(
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
         semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
-        paperclip_api_key = await _resolve_paperclip_api_key(
-            _form_default_value(paperclip_api_key)
-        )
+        paperclip_api_key = _form_default_value(paperclip_api_key)
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -4789,6 +4787,7 @@ async def start_batch_check_files(
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             semantic_scholar_api_key
         )
+        paperclip_api_key = await _resolve_paperclip_api_key(paperclip_api_key)
 
         llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
             user_id=user_id,
