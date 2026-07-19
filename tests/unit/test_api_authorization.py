@@ -365,9 +365,10 @@ def test_single_user_preferences_persist_for_local_user(tmp_path, monkeypatch):
     assert _run(temp_db.get_user_preference(0, "citation_format")) == "apa"
 
 
-def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db):
+def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db, monkeypatch):
     """Semantic Scholar keys are managed in browser storage in multi-user mode."""
     api_main, db = auth_db
+    monkeypatch.delenv("SEMANTIC_SCHOLAR_API_KEY", raising=False)
     owner = _run(_create_user(api_main, db, "owner-ss"))
 
     status = _run(api_main.get_semantic_scholar_key_status(owner))
@@ -391,11 +392,40 @@ def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db):
 
 
 def test_multiuser_semantic_scholar_key_resolves_from_environment(auth_db, monkeypatch):
-    api_main, _db = auth_db
+    api_main, db = auth_db
     monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "env-ss-key")
 
     assert _run(api_main._resolve_semantic_scholar_api_key(None)) == "env-ss-key"
     assert _run(api_main._resolve_semantic_scholar_api_key("browser-key")) == "browser-key"
+
+    # Like env LLM keys, the shared server key is surfaced to every session.
+    owner = _run(_create_user(api_main, db, "owner-ss-env"))
+    status = _run(api_main.get_semantic_scholar_key_status(owner))
+    assert status["has_key"] is True
+    assert status["storage"] == "environment"
+
+
+def test_multiuser_paperclip_key_resolves_from_environment(auth_db, monkeypatch):
+    api_main, db = auth_db
+    monkeypatch.setenv("PAPERCLIP_API_KEY", "env-pc-key")
+
+    assert _run(api_main._resolve_paperclip_api_key(None)) == "env-pc-key"
+    assert _run(api_main._resolve_paperclip_api_key("browser-key")) == "browser-key"
+
+    owner = _run(_create_user(api_main, db, "owner-pc-env"))
+    status = _run(api_main.get_paperclip_key_status(owner))
+    assert status["has_key"] is True
+    assert status["storage"] == "environment"
+
+
+def test_multiuser_paperclip_key_skips_database_without_environment(auth_db, monkeypatch):
+    api_main, db = auth_db
+    monkeypatch.delenv("PAPERCLIP_API_KEY", raising=False)
+
+    # A leftover single-user database key must not leak into multi-user sessions.
+    _run(db.set_setting("paperclip_api_key", "db-pc-key"))
+    assert _run(api_main._resolve_paperclip_api_key(None)) is None
+    assert _run(api_main._resolve_paperclip_api_key("browser-key")) == "browser-key"
 
 
 def test_single_user_semantic_scholar_key_is_stored_in_database(tmp_path, monkeypatch):
@@ -449,6 +479,26 @@ def test_single_user_semantic_scholar_environment_key_precedes_database(tmp_path
 
     assert _run(api_main._resolve_semantic_scholar_api_key(None)) == "env-ss-key"
     assert _run(api_main._resolve_semantic_scholar_api_key("browser-key")) == "browser-key"
+
+
+def test_single_user_paperclip_key_resolves_env_then_database(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.delenv("PAPERCLIP_API_KEY", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization_single_user_paperclip")
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "local-pc.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+
+    assert _run(api_main._resolve_paperclip_api_key(None)) is None
+
+    _run(temp_db.set_setting("paperclip_api_key", "db-pc-key"))
+    assert _run(api_main._resolve_paperclip_api_key(None)) == "db-pc-key"
+
+    monkeypatch.setenv("PAPERCLIP_API_KEY", "env-pc-key")
+    assert _run(api_main._resolve_paperclip_api_key(None)) == "env-pc-key"
+    assert _run(api_main._resolve_paperclip_api_key("browser-key")) == "browser-key"
 
 
 def _create_local_reference_db(path, *, with_snapshot=False):
@@ -636,8 +686,9 @@ def test_env_llm_config_resolution_prefers_request_key(auth_db, monkeypatch):
     assert override_key == "browser-override"
 
 
-def test_multiuser_rejects_server_side_paperclip_key_storage(auth_db):
+def test_multiuser_rejects_server_side_paperclip_key_storage(auth_db, monkeypatch):
     api_main, db = auth_db
+    monkeypatch.delenv("PAPERCLIP_API_KEY", raising=False)
     owner = _run(_create_user(api_main, db, "owner-paperclip-browser"))
 
     status = _run(api_main.get_paperclip_key_status(owner))

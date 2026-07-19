@@ -89,12 +89,18 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [pcIsSaving, setPcIsSaving] = useState(false)
   const [pcError, setPcError] = useState(null)
   const [pcServerHasKey, setPcServerHasKey] = useState(false)
+  const [pcKeyStorage, setPcKeyStorage] = useState(null)
   const [ssIsSaving, setSsIsSaving] = useState(false)
   const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
   const [ssServerHasKey, setSsServerHasKey] = useState(false)
+  const [ssKeyStorage, setSsKeyStorage] = useState(null)
   const ssHasKey = hasKey('semantic_scholar') || ssServerHasKey
   const pcHasKey = hasKey('paperclip') || pcServerHasKey
+  // Server env keys ("environment" storage) serve all sessions, like env
+  // LLM keys — users can override with a browser key but not remove them.
+  const ssEnvKey = ssKeyStorage === 'environment'
+  const pcEnvKey = pcKeyStorage === 'environment'
 
   // Local DB path state
   const [dbPathLocal, setDbPathLocal] = useState(settings.db_path?.value || '')
@@ -388,21 +394,26 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
   }
 
-  // Load SS key status from server on mount
-  useEffect(() => {
+  // Load SS key status from server on mount. In multi-user mode the server
+  // reports has_key when a shared environment key serves all sessions.
+  const refreshSsKeyStatus = () => {
     api.getSemanticScholarKeyStatus().then(res => {
       setSsServerHasKey(res.data.has_key)
+      setSsKeyStorage(res.data.storage || null)
     }).catch(() => {})
-  }, [])
+  }
+  useEffect(refreshSsKeyStatus, [])
 
-  // Same for Paperclip — server tells us whether a local key is on file.
-  // In multi-user mode the endpoint returns browser-only/no server key,
-  // while useKeyStore tracks the user's browser-cached key.
-  useEffect(() => {
+  // Same for Paperclip — server tells us whether a shared key is on file
+  // (single-user database key, or a server environment key in multi-user
+  // mode), while useKeyStore tracks the user's browser-cached key.
+  const refreshPcKeyStatus = () => {
     api.getPaperclipKeyStatus().then(res => {
       setPcServerHasKey(res.data.has_key)
+      setPcKeyStorage(res.data.storage || null)
     }).catch(() => {})
-  }, [])
+  }
+  useEffect(refreshPcKeyStatus, [])
 
   // Close on escape key
   useEffect(() => {
@@ -462,7 +473,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
       if (multiuser) {
         setKey('semantic_scholar', ssApiKey.trim())
-        setSsServerHasKey(false)
+        refreshSsKeyStatus()
         logger.info('SettingsPanel', 'SS API key saved to browser key cache')
       } else {
         await api.setSemanticScholarKey(ssApiKey.trim())
@@ -488,7 +499,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     try {
       if (multiuser) {
         deleteKey('semantic_scholar')
-        setSsServerHasKey(false)
+        refreshSsKeyStatus()
       } else {
         await api.deleteSemanticScholarKey()
         deleteKey('semantic_scholar')
@@ -524,7 +535,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setPcError(null)
       if (multiuser) {
         setKey('paperclip', pcApiKey.trim())
-        setPcServerHasKey(false)
+        refreshPcKeyStatus()
       } else {
         await api.setPaperclipKey(pcApiKey.trim())
         deleteKey('paperclip')
@@ -547,11 +558,12 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     try {
       if (multiuser) {
         deleteKey('paperclip')
+        refreshPcKeyStatus()
       } else {
         await api.deletePaperclipKey()
         deleteKey('paperclip')
+        setPcServerHasKey(false)
       }
-      setPcServerHasKey(false)
       setPcIsEditing(false)
       setPcApiKey('')
       setPcError(null)
@@ -1845,7 +1857,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             </div>
             {multiuser && (
               <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                Encrypted in this browser cache for the local web interface and not saved on the server.
+                {ssEnvKey
+                  ? 'A server-provided key is active for all users. A key you set here is encrypted in this browser cache and overrides it for your checks.'
+                  : 'Encrypted in this browser cache for the local web interface and not saved on the server.'}
               </div>
             )}
           </div>
@@ -1858,7 +1872,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               >
                 {ssHasKey ? 'Edit' : 'Set'}
               </button>
-              {ssHasKey && (
+              {(multiuser ? hasKey('semantic_scholar') : ssHasKey) && (
                 <button
                   onClick={handleSsDelete}
                   disabled={ssIsSaving}
@@ -1940,7 +1954,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 style={{ color: 'var(--color-link, #3b82f6)' }}
               >paperclip.gxl.ai/keys</a>.
               {' '}The next check picks it up automatically.
-              {multiuser && ' Stored in this browser only.'}
+              {multiuser && (pcEnvKey
+                ? ' A server-provided key is active for all users; a key you set here is stored in this browser only and overrides it for your checks.'
+                : ' Stored in this browser only.')}
             </div>
           </div>
           {!pcIsEditing && (
@@ -1952,7 +1968,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               >
                 {pcHasKey ? 'Edit' : 'Set'}
               </button>
-              {pcHasKey && (
+              {(multiuser ? hasKey('paperclip') : pcHasKey) && (
                 <button
                   onClick={handlePcDelete}
                   disabled={pcIsSaving}

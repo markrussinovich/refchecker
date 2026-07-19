@@ -136,4 +136,36 @@ describe('SettingsPanel Semantic Scholar key storage', () => {
     expect(mocks.setPaperclipKey).toHaveBeenCalledWith('pc-key')
     expect(mocks.deleteKey).toHaveBeenCalledWith('paperclip')
   })
+
+  it('shows server environment keys as active for all sessions in multi-user mode', async () => {
+    mocks.multiuser = true
+    mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: { has_key: true, storage: 'environment' } })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: true, storage: 'environment' } })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'API Keys' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/server-provided key is active for all users/i).length).toBe(2)
+    })
+    // The shared env key belongs to the server — nothing user-removable
+    // until a browser override key exists.
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+    // Status reads as configured, so both blocks offer Edit (override).
+    expect(screen.getAllByRole('button', { name: 'Edit' }).length).toBe(2)
+  })
+
+  it('offers Remove for the browser override key even when a server env key exists', async () => {
+    mocks.multiuser = true
+    mocks.hasKey.mockReturnValue(true)
+    mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: { has_key: true, storage: 'environment' } })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: true, storage: 'environment' } })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'API Keys' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Remove' }).length).toBe(2)
+    })
+  })
 })

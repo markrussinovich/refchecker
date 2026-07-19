@@ -1972,7 +1972,9 @@ async def start_check(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
-        paperclip_api_key = _form_default_value(paperclip_api_key)
+        paperclip_api_key = await _resolve_paperclip_api_key(
+            _form_default_value(paperclip_api_key)
+        )
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -4502,6 +4504,7 @@ async def start_batch_check(
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             request.semantic_scholar_api_key
         )
+        paperclip_api_key = await _resolve_paperclip_api_key(request.paperclip_api_key)
 
         llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
             user_id=user_id,
@@ -4573,7 +4576,7 @@ async def start_batch_check(
                 "llm_provider": llm_provider if request.use_llm else None,
                 "llm_model": llm_model if request.use_llm else None,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
-                "paperclip_key_present": bool(request.paperclip_api_key),
+                "paperclip_key_present": bool(paperclip_api_key),
             },
         )
 
@@ -4644,7 +4647,7 @@ async def start_batch_check(
                     ai_detection_service=request.ai_detection_service,
                     ai_detection_detectors=getattr(request, 'ai_detection_detectors', None),
                     detection_mode=getattr(request, 'detection_mode', 'both'),
-                    paperclip_api_key=request.paperclip_api_key,
+                    paperclip_api_key=paperclip_api_key,
                 )
             )
             active_checks[session_id] = {
@@ -4721,7 +4724,9 @@ async def start_batch_check_files(
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
         semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
-        paperclip_api_key = _form_default_value(paperclip_api_key)
+        paperclip_api_key = await _resolve_paperclip_api_key(
+            _form_default_value(paperclip_api_key)
+        )
         ai_detection_enabled = _form_default_value(ai_detection_enabled)
         ai_detection_backend = _form_default_value(ai_detection_backend)
         ai_detection_api_key = _form_default_value(ai_detection_api_key)
@@ -5584,7 +5589,10 @@ class SemanticScholarKeyValidate(BaseModel):
 
 
 async def _resolve_semantic_scholar_api_key(api_key: Optional[str]) -> Optional[str]:
-    """Use per-request browser keys first, then env, then the single-user stored key."""
+    """Use per-request browser keys first, then env, then the single-user stored key.
+
+    Like the env-provided LLM keys, a SEMANTIC_SCHOLAR_API_KEY on the server
+    serves every session in multi-user mode."""
     if api_key:
         return api_key
     env_api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY")
@@ -5593,6 +5601,21 @@ async def _resolve_semantic_scholar_api_key(api_key: Optional[str]) -> Optional[
     if is_multiuser_mode():
         return None
     return await db.get_setting("semantic_scholar_api_key")
+
+
+async def _resolve_paperclip_api_key(api_key: Optional[str]) -> Optional[str]:
+    """Use per-request browser keys first, then env, then the single-user stored key.
+
+    Like the env-provided LLM keys, a PAPERCLIP_API_KEY on the server serves
+    every session in multi-user mode."""
+    if api_key:
+        return api_key
+    env_api_key = os.getenv("PAPERCLIP_API_KEY")
+    if env_api_key:
+        return env_api_key
+    if is_multiuser_mode():
+        return None
+    return await db.get_setting("paperclip_api_key")
 
 
 @app.post("/api/settings/semantic-scholar/validate")
@@ -5657,6 +5680,14 @@ async def validate_semantic_scholar_key(
 async def get_semantic_scholar_key_status(current_user: UserInfo = Depends(require_user)):
     """Return Semantic Scholar API key storage status for the current mode."""
     if is_multiuser_mode():
+        # Like the env-provided LLM keys, a server SEMANTIC_SCHOLAR_API_KEY
+        # serves every session; browser keys still override per request.
+        if os.getenv("SEMANTIC_SCHOLAR_API_KEY"):
+            return {
+                "has_key": True,
+                "storage": "environment",
+                "message": "Semantic Scholar API key provided by the server environment and used for all sessions",
+            }
         return {
             "has_key": False,
             "storage": "browser-only",
@@ -5717,6 +5748,14 @@ class PaperclipKeyUpdate(BaseModel):
 async def get_paperclip_key_status(current_user: UserInfo = Depends(require_user)):
     """Return Paperclip API key storage status."""
     if is_multiuser_mode():
+        # Like the env-provided LLM keys, a server PAPERCLIP_API_KEY serves
+        # every session; browser keys still override per request.
+        if os.getenv("PAPERCLIP_API_KEY"):
+            return {
+                "has_key": True,
+                "storage": "environment",
+                "message": "Paperclip API key provided by the server environment and used for all sessions",
+            }
         return {
             "has_key": False,
             "storage": "browser-only",
