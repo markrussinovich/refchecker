@@ -319,6 +319,47 @@ async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
     await _run_database_refresh_subprocess('s2', db_path)
 
 
+def _sweep_orphaned_refresh_tmpdirs() -> None:
+    """Delete orphaned staging dirs left in DB directories by killed refreshes.
+
+    The database builders stage downloads in tempfile.TemporaryDirectory(dir=
+    db_parent); Python only removes those on graceful exit, so a build killed
+    by a restart or crash strands a multi-GB tmp* dir on the data disk. Enough
+    restarts fill the disk completely, which then breaks SQLite (disk I/O
+    error) and takes the whole service down.
+    """
+    candidates = {get_data_dir(), get_data_dir() / "databases"}
+    env_db_dir = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+    if env_db_dir:
+        candidates.add(Path(env_db_dir))
+    for root in candidates:
+        try:
+            entries = list(os.scandir(root))
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.name.startswith("tmp") or not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                # No refresh subprocess is running yet at startup, so a
+                # staging dir here is orphaned; the age guard only protects
+                # refreshes launched outside this process (e.g. the CLI).
+                age = time.time() - entry.stat(follow_symlinks=False).st_mtime
+                if age < 1800:
+                    continue
+                size = sum(
+                    f.stat(follow_symlinks=False).st_size
+                    for f in Path(entry.path).rglob("*") if f.is_file()
+                )
+                shutil.rmtree(entry.path)
+                logger.warning(
+                    f"Removed orphaned refresh staging dir {entry.path} "
+                    f"({size / 1e9:.2f}GB reclaimed)"
+                )
+            except OSError as e:
+                logger.warning(f"Could not remove staging dir {entry.path}: {e}")
+
+
 async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
     """Refresh a configured local database in a background subprocess when supported."""
     repo_root = Path(__file__).resolve().parent.parent
@@ -1018,6 +1059,10 @@ class TeamMemberAdd(BaseModel):
 async def _run_startup_tasks() -> None:
     """Initialize persistent services used by the API."""
     try:
+        _sweep_orphaned_refresh_tmpdirs()
+    except Exception as e:
+        logger.warning(f"Orphaned staging dir sweep failed: {e}")
+    try:
         await db.init_db()
     except Exception as e:
         # A crash here turns a degraded data disk (full, bad WAL sidecars)
@@ -1033,6 +1078,23 @@ async def _run_startup_tasks() -> None:
                 f"total={usage.total / 1e9:.1f}GB used={usage.used / 1e9:.1f}GB "
                 f"free={usage.free / 1e9:.1f}GB"
             )
+            sizes = []
+            for entry in os.scandir(data_dir):
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        size = entry.stat(follow_symlinks=False).st_size
+                    elif entry.is_dir(follow_symlinks=False):
+                        size = sum(
+                            f.stat(follow_symlinks=False).st_size
+                            for f in Path(entry.path).rglob("*") if f.is_file()
+                        )
+                    else:
+                        continue
+                    sizes.append((size, entry.name))
+                except OSError:
+                    continue
+            for size, name in sorted(sizes, reverse=True)[:15]:
+                logger.error(f"  {size / 1e9:>8.2f}GB  {name}")
         except Exception as diag_err:
             logger.error(f"Could not read disk usage for diagnostics: {diag_err}")
     logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
