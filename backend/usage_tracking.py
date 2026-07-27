@@ -106,6 +106,26 @@ def _clean_event(value: Any) -> Any:
     return value
 
 
+_USAGE_LOG_ROTATE_BYTES = 500 * 1024 * 1024
+
+
+def rotate_usage_log_if_oversized() -> None:
+    """Rotate the telemetry JSONL once it exceeds the size cap, keeping one
+    predecessor.
+
+    Events append forever otherwise; on disk-backed deployments the file
+    grows into the gigabytes and helps fill the data disk, which breaks
+    SQLite (disk I/O error) and takes the service down.
+    """
+    log_path = get_usage_log_path()
+    try:
+        if log_path.is_file() and log_path.stat().st_size > _USAGE_LOG_ROTATE_BYTES:
+            with _USAGE_LOG_LOCK:
+                os.replace(log_path, log_path.with_suffix(log_path.suffix + ".1"))
+    except OSError:
+        pass
+
+
 def _append_usage_event_sync(event: Dict[str, Any]) -> None:
     log_path = get_usage_log_path()
     payload = _clean_event(event) or {}

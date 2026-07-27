@@ -88,6 +88,7 @@ from .usage_tracking import (
     infer_bibliography_source_kind,
     infer_paper_identity,
     infer_source_host,
+    rotate_usage_log_if_oversized,
     utcnow_sqlite,
 )
 from refchecker.utils.url_utils import validate_remote_fetch_url, extract_arxiv_id_from_url
@@ -403,7 +404,10 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
         db_path,
         log_path,
     )
-    log_handle = log_path.open("ab", buffering=0)
+    # "wb", not "ab": these logs previously appended across runs forever and
+    # reached gigabytes on disk-backed deployments; only the latest run's
+    # output is needed for debugging.
+    log_handle = log_path.open("wb", buffering=0)
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=str(repo_root),
@@ -1103,6 +1107,7 @@ async def _run_startup_tasks() -> None:
                 logger.error(f"  {size / 1e9:>8.2f}GB  {name}")
         except Exception as diag_err:
             logger.error(f"Could not read disk usage for diagnostics: {diag_err}")
+    rotate_usage_log_if_oversized()
     logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
     # Persist LLM token/cost counters across process restarts
     try:
