@@ -1056,15 +1056,21 @@ class TeamMemberAdd(BaseModel):
 
 
 # Create FastAPI app
+db_degraded = False
+
+
 async def _run_startup_tasks() -> None:
     """Initialize persistent services used by the API."""
+    global db_degraded
     try:
         _sweep_orphaned_refresh_tmpdirs()
     except Exception as e:
         logger.warning(f"Orphaned staging dir sweep failed: {e}")
     try:
         await db.init_db()
+        db_degraded = False
     except Exception as e:
+        db_degraded = True
         # A crash here turns a degraded data disk (full, bad WAL sidecars)
         # into a total outage: Render kills the instance, and SSH/Shell need
         # a running instance, so the disk can't even be inspected. Stay up
@@ -1174,7 +1180,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to start GROBID: {e}")
 
-    refresh_tasks = await _schedule_database_refreshes()
+    if db_degraded:
+        # The refreshes download multi-GB snapshots onto the same disk the
+        # degraded DB lives on; running them now can consume the very space
+        # an operator (or the startup sweep) just freed for recovery.
+        logger.warning("Skipping background database refreshes: DB is degraded")
+        refresh_tasks = {}
+    else:
+        refresh_tasks = await _schedule_database_refreshes()
     app.state.database_refresh_tasks = refresh_tasks
     app.state.semantic_scholar_refresh_task = refresh_tasks.get("s2")
     try:
