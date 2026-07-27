@@ -54,6 +54,10 @@ services:
         value: /data/semantic_scholar.db
       - key: SEMANTIC_SCHOLAR_API_KEY
         sync: false                  # Set in Render dashboard
+
+      # --- Paperclip secondary verification tier (optional) ---
+      - key: PAPERCLIP_API_KEY
+        sync: false                  # Set in Render dashboard
     disk:
       name: refchecker-data
       mountPath: /data

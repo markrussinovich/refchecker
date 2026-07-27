@@ -85,7 +85,19 @@ MS_CLIENT_SECRET=...
 # Optional
 REFCHECKER_ADMINS=github:you   # comma-separated; first sign-in is auto-admin
 MAX_CHECKS_PER_USER=3          # max concurrent checks per user (default: 3)
+
+# Optional shared keys — like env LLM keys, these serve every session; the
+# Settings panel shows them as server-provided, and users can override them
+# with a browser-cached key of their own.
+SEMANTIC_SCHOLAR_API_KEY=...   # raises Semantic Scholar rate limits
+PAPERCLIP_API_KEY=...          # enables the Paperclip secondary tier
 ```
+
+> **Docker Compose note:** `docker-compose.yml` passes environment variables
+> through an explicit `environment:` list. If you maintain your own compose
+> file or a task definition derived from an older copy, make sure
+> `SEMANTIC_SCHOLAR_API_KEY` and `PAPERCLIP_API_KEY` are included — variables
+> not in the list never reach the container even if set on the host.
 
 By default the callback URL is derived from `SITE_URL` as
 `<SITE_URL>/api/auth/callback/{google,github,microsoft}`; override per provider

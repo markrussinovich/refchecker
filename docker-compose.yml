@@ -25,6 +25,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # Shared verification keys — served to all sessions in multi-user mode
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
+      - PAPERCLIP_API_KEY=${PAPERCLIP_API_KEY:-}
       # Data directory (inside container)
       - REFCHECKER_DATA_DIR=/app/data
       # GROBID server (uses the grobid service below)
