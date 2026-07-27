@@ -1017,7 +1017,24 @@ class TeamMemberAdd(BaseModel):
 # Create FastAPI app
 async def _run_startup_tasks() -> None:
     """Initialize persistent services used by the API."""
-    await db.init_db()
+    try:
+        await db.init_db()
+    except Exception as e:
+        # A crash here turns a degraded data disk (full, bad WAL sidecars)
+        # into a total outage: Render kills the instance, and SSH/Shell need
+        # a running instance, so the disk can't even be inspected. Stay up
+        # in degraded mode instead — /api/health has no DB dependency.
+        logger.error(f"Database initialization failed, continuing in degraded mode: {e}")
+        try:
+            data_dir = get_data_dir()
+            usage = shutil.disk_usage(data_dir)
+            logger.error(
+                f"Disk usage for {data_dir}: "
+                f"total={usage.total / 1e9:.1f}GB used={usage.used / 1e9:.1f}GB "
+                f"free={usage.free / 1e9:.1f}GB"
+            )
+        except Exception as diag_err:
+            logger.error(f"Could not read disk usage for diagnostics: {diag_err}")
     logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
     # Persist LLM token/cost counters across process restarts
     try:
