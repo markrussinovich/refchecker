@@ -183,7 +183,47 @@ jobs:
           type=raw,value=latest
           type=raw,value=${{ needs.test-and-release.outputs.version }}
     
+    # GHCR intermittently returns HTTP 403 "secondary rate limit" while pushing.
+    # The build itself is cached, so retrying only re-runs the export/push.
     - name: Build and push standard image (multi-arch)
+      id: docker_push_1
+      continue-on-error: true
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Wait before push retry 1
+      if: steps.docker_push_1.outcome == 'failure'
+      run: sleep 120
+
+    - name: Build and push standard image (retry 1)
+      id: docker_push_2
+      if: steps.docker_push_1.outcome == 'failure'
+      continue-on-error: true
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Wait before push retry 2
+      if: steps.docker_push_1.outcome == 'failure' && steps.docker_push_2.outcome == 'failure'
+      run: sleep 300
+
+    - name: Build and push standard image (retry 2)
+      if: steps.docker_push_1.outcome == 'failure' && steps.docker_push_2.outcome == 'failure'
       uses: docker/build-push-action@v7
       with:
         context: .
