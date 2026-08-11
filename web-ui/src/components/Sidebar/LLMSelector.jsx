@@ -28,7 +28,11 @@ export default function LLMSelector({ mode = 'extraction' }) {
     isLoading,
   } = useConfigStore()
   const multiuser = useAuthStore(state => state.multiuser)
-  const hasKeyInBrowser = useKeyStore(state => state.hasKey)
+  // Subscribe to the actual `keys` map (not the stable `hasKey` function
+  // reference) so this component re-renders whenever a key is added/removed
+  // in another part of the UI (e.g. saving a key in LLMConfigModal).
+  const browserKeys = useKeyStore(state => state.keys)
+  const hasKeyInBrowser = (id) => Boolean(browserKeys[id])
   const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
   const isHallucinationMode = mode === 'hallucination'
   const isChatMode = mode === 'chat'
