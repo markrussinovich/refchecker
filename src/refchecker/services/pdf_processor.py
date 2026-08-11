@@ -436,8 +436,12 @@ class PDFProcessor:
             )
             title_continuation_endings = (
                 'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'into',
-                'of', 'on', 'or', 'the', 'through', 'to', 'toward', 'using', 'via',
-                'with', 'without'
+                'of', 'on', 'or', 'the', 'through', 'to', 'toward', 'towards',
+                'using', 'via', 'with', 'without', 'against', 'about', 'above',
+                'across', 'after', 'among', 'around', 'before', 'behind',
+                'below', 'beneath', 'beside', 'between', 'beyond', 'during',
+                'over', 'under', 'within', 'up', 'down', 'off', 'out', 'per',
+                'so', 'that', 'than', 'not', 'no', 'nor', 'but',
             )
             last_title_word = re.sub(r'[^A-Za-z]+', '', title.split()[-1]).lower() if title.split() else ''
             # If the next candidate is adjacent and short, it is often the rest of

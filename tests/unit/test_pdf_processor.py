@@ -33,6 +33,25 @@ https://www.usenix.org/conference/usenixsecurity21/presentation/aafer
             "Android SmartTVs Vulnerability Discovery via Log-Guided Fuzzing",
         )
 
+    def test_extract_title_continues_wrapped_line_ending_in_against(self):
+        # Regression: titles wrapping after a preposition like "Against" were
+        # truncated because "against" (and several other common prepositions)
+        # were missing from the continuation-word allowlist, so the second
+        # physical line of the title was dropped.
+        first_page_text = """
+Fool's Gold: Defensive Deception Against
+Coordinated Cyber-Physical Attacks
+
+Jane Doe, Some University
+"""
+
+        title = self.processor._extract_title_from_text(first_page_text)
+
+        self.assertEqual(
+            title,
+            "Fool's Gold: Defensive Deception Against Coordinated Cyber-Physical Attacks",
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
