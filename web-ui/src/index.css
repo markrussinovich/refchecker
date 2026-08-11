@@ -83,6 +83,8 @@
 
 .dark {
   --color-bg-primary: #212121;
+  /* Dark surfaces need a lightening tint (see the hover baseline below). */
+  --hover-tint: rgba(255, 255, 255, 0.12);
   --color-bg-secondary: #2f2f2f;
   --color-bg-tertiary: #424242;
   --color-bg-hover: #525252;
@@ -281,6 +283,50 @@ button:disabled,
     width: auto;
     min-width: 0;
     max-width: 160px;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Global affordance baseline: EVERY clickable control gets a hover
+   treatment so the user can always tell it is clickable.
+
+   Much of this app styles controls with inline `style={{...}}` (needed for
+   the CSS-variable-driven theming), and inline styles beat any stylesheet
+   rule — so a plain `background-color` hover rule silently loses on those
+   controls. This tints via `background-image` instead: it composites ON TOP
+   of whatever background-color the element already has (inline or not), so
+   it works everywhere without overriding the control's own colors.
+
+   The tint is `!important` because an inline `background:` shorthand (used
+   widely here, e.g. `background: var(--color-bg-tertiary)`) also sets
+   `background-image: none` inline, which would otherwise win. No clickable
+   control in this app uses an inline gradient background, so nothing can be
+   clobbered by this — only the flat tint layer is forced.
+
+   Wrapped in `:where()` so it carries ZERO specificity for every OTHER
+   property — a component's own hover colors always still apply underneath.
+   Opt out entirely with `.no-hover-fx`.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  --hover-tint: rgba(0, 0, 0, 0.10);
+}
+:where(
+  button,
+  select,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"]
+):not(:disabled):not([aria-disabled="true"]):not(.no-hover-fx):hover {
+  background-image: linear-gradient(var(--hover-tint), var(--hover-tint)) !important;
+  cursor: pointer;
+}
+
+/* Touch devices have no real hover — don't leave a tint stuck after a tap. */
+@media (hover: none) {
+  :where(button, select, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"]):hover {
+    background-image: none !important;
   }
 }
 

@@ -5749,8 +5749,27 @@ async def validate_semantic_scholar_key(
         
         if response.status_code == 200:
             return {"valid": True, "message": "API key is valid"}
-        elif response.status_code == 401 or response.status_code == 403:
+        elif response.status_code == 401:
             raise HTTPException(status_code=400, detail="Invalid API key")
+        elif response.status_code == 403:
+            # S2 fronts its API with AWS API Gateway, which answers 403
+            # ForbiddenException for a key that is syntactically fine but not
+            # currently active on a usage plan. In practice that means the key
+            # was revoked (S2 prunes unused keys), regenerated, or has not
+            # finished activating yet — NOT that the user mistyped it. Saying
+            # "Invalid API key" here sends people off hunting for a typo that
+            # isn't there, so be explicit about what to check instead.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Semantic Scholar rejected this key (HTTP 403). The key format looks "
+                    "fine, so it is most likely not active: newly issued keys can take up "
+                    "to a day to start working, and S2 revokes keys that go unused or that "
+                    "have been regenerated. Verify the current key on your S2 account page, "
+                    "or request a new one at semanticscholar.org/product/api. RefChecker "
+                    "works without this key — it just runs slower."
+                ),
+            )
         elif response.status_code == 429:
             # Rate limited but key is valid
             return {"valid": True, "message": "API key is valid (rate limited)"}

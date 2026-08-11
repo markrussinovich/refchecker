@@ -66,8 +66,13 @@ function buildCitationViewerSpans(citationTarget) {
 // It locates and highlights AI-flagged passages on the native pages and supports
 // Find. The inline-citation → reference-list jump (R28/R29/R30) lives in the
 // native pdf.js stack (DocumentViewer → NativePdfViewer), NOT here.
-function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onClose }) {
-  const [pageCount, setPageCount] = useState(null)
+function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, initialPageCount, onClose }) {
+  // Seeded from the parent's prefetched probe when available so the overlay
+  // opens directly in its final layout instead of rendering the fit-to-height
+  // single image first and then jumping to the full-width multi-page column.
+  const [pageCount, setPageCount] = useState(
+    typeof initialPageCount === 'number' ? initialPageCount : null
+  )
   const [activePage, setActivePage] = useState(0)
   const [highlights, setHighlights] = useState({}) // pageIndex -> [{rects,band,score,reason,key}]
   const [findHl, setFindHl] = useState({})         // pageIndex -> [rects] for the query
@@ -97,9 +102,13 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
 
   useEffect(() => {
     let cancelled = false
-    setPageCount(null)
+    const seeded = typeof initialPageCount === 'number'
+    // Keep the seeded count so the first paint is already the final layout;
+    // only fall back to the "probing" state when the parent had no prefetch.
+    if (!seeded) setPageCount(null)
     setActivePage(0)
     if (!checkId || checkId === -1) return undefined
+    if (seeded) return undefined
     ;(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/preview/${checkId}/page-count`, {
@@ -114,7 +123,7 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
       }
     })()
     return () => { cancelled = true }
-  }, [checkId])
+  }, [checkId, initialPageCount])
 
   // Locate AI-flagged passages on the native pages (PyMuPDF search -> rects),
   // so we can overlay real highlights on the page images with hover AI data.
@@ -366,7 +375,18 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, onCl
         style={{ scrollBehavior: 'smooth' }}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
-        {multiPage ? (
+        {pageCount === null ? (
+          // Still probing the page count. Rendering the single fit-to-height
+          // image here and then swapping to the full-width multi-page column
+          // caused a visible "open small, then jump to fill window" flash.
+          <div className="w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="w-8 h-8 rounded-full border-2 border-white/25 border-t-white/80 animate-spin"
+              role="status"
+              aria-label="Loading document"
+            />
+          </div>
+        ) : multiPage ? (
           <div
             className="flex flex-col items-center gap-3 py-8 px-4"
             onClick={(e) => e.stopPropagation()}
@@ -860,6 +880,11 @@ export default function StatusSection() {
   const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
+  // Prefetched page count for the thumbnail overlay. Probing it up-front lets
+  // the overlay paint its final (multi-page, full-window) layout on the very
+  // first frame instead of opening at the fit-to-height single-image size and
+  // then visibly jumping once the probe resolves.
+  const [previewPageCount, setPreviewPageCount] = useState(null)
   const [citationTarget, setCitationTarget] = useState(null)
 
   // R02 (O3): a ReferenceCard can request "show this citation context in the
@@ -899,6 +924,7 @@ export default function StatusSection() {
     if (!selectedCheckId || selectedCheckId === -1) {
       setThumbnailUrl(null)
       setPreviewUrl(null)
+      setPreviewPageCount(null)
       setThumbnailError(false)
       return
     }
@@ -906,6 +932,7 @@ export default function StatusSection() {
     // Reset state for new check
     setThumbnailUrl(null)
     setPreviewUrl(null)
+    setPreviewPageCount(null)
     setThumbnailError(false)
     setThumbnailLoading(true)
     
@@ -915,6 +942,26 @@ export default function StatusSection() {
     // Set the high-resolution preview URL for overlay
     setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}?phase=${thumbnailRetryPhase}`)
     
+  }, [selectedCheckId, thumbnailRetryPhase])
+
+  // Prefetch the page count so the overlay opens straight into its final layout.
+  useEffect(() => {
+    if (!selectedCheckId || selectedCheckId === -1) return undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/preview/${selectedCheckId}/page-count`, {
+          credentials: 'include',
+        })
+        if (cancelled) return
+        if (!res.ok) { setPreviewPageCount(0); return }
+        const data = await res.json()
+        if (!cancelled) setPreviewPageCount(Number(data?.count || 0))
+      } catch {
+        if (!cancelled) setPreviewPageCount(0)
+      }
+    })()
+    return () => { cancelled = true }
   }, [selectedCheckId, thumbnailRetryPhase])
 
   // Thumbnail component showing actual PDF first page
@@ -1552,6 +1599,7 @@ export default function StatusSection() {
       {showThumbnailOverlay && (previewUrl || thumbnailUrl) && (
         <ThumbnailOverlay
           checkId={selectedCheckId}
+          initialPageCount={previewPageCount}
           previewUrl={previewUrl}
           thumbnailUrl={thumbnailUrl}
           aiDetection={selectedCheck?.ai_detection || (isCurrentSessionCheck ? checkStoreAiDetection : null)}

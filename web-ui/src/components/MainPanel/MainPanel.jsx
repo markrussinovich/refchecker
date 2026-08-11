@@ -29,6 +29,80 @@ import { applyStatusFilter } from '../../utils/referenceStatus'
 import { filterIssuesForStyle } from '../../utils/formatters'
 
 /**
+ * Segmented toggle for the panel-level view switch (Current check / Seen
+ * References). Hover is applied via JS handlers rather than CSS `:hover`
+ * because the themed colors are inline styles, which always beat a
+ * stylesheet rule.
+ */
+function ViewToggleButton({ active, onClick, title, children }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="px-2 py-1 rounded border transition-colors"
+      style={{
+        borderColor: active || hover ? 'var(--color-accent, #3b82f6)' : 'var(--color-border)',
+        color: active || hover ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+        backgroundColor: active || hover ? 'var(--color-bg-secondary)' : 'transparent',
+        fontWeight: active ? 600 : 400,
+        cursor: 'pointer',
+      }}
+    >{children}</button>
+  )
+}
+
+/**
+ * A results-strip tab. Hovering an inactive tab previews the active
+ * treatment (accent text + a faint accent underline) so it reads as
+ * clickable. The generic background tint from the global hover baseline is
+ * suppressed (`no-hover-fx`) to keep the tab strip clean.
+ */
+function ResultsTabButton({ active, onClick, label, count }) {
+  const [hover, setHover] = useState(false)
+  const accent = 'var(--color-accent, #3b82f6)'
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="no-hover-fx px-3 py-1.5 text-sm font-medium transition-colors"
+      style={{
+        color: active || hover ? accent : 'var(--color-text-secondary)',
+        borderBottom: active
+          ? `2px solid ${accent}`
+          : hover
+            ? '2px solid var(--color-accent-muted, rgba(16,163,127,0.35))'
+            : '2px solid transparent',
+        marginBottom: '-1px',
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+      {count != null && (
+        <span
+          className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full transition-colors"
+          style={{
+            backgroundColor: active
+              ? 'var(--color-accent-muted, rgba(59,130,246,0.15))'
+              : 'var(--color-bg-tertiary)',
+            color: active || hover ? accent : 'var(--color-text-secondary)',
+          }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/**
  * Main panel containing input, status, stats, and references
  * All checks are treated as peers - no special handling for "current" vs "history"
  */
@@ -254,29 +328,15 @@ export default function MainPanel() {
         {/* Global view toggle — switches the whole panel between the
             check view and the Seen References library. */}
         <div className="flex items-center gap-2 text-xs">
-          <button
+          <ViewToggleButton
+            active={globalView == null}
             onClick={() => setGlobalView(null)}
-            className="px-2 py-1 rounded border"
-            style={{
-              borderColor: 'var(--color-border)',
-              color: globalView == null ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
-              backgroundColor: globalView == null ? 'var(--color-bg-secondary)' : 'transparent',
-              fontWeight: globalView == null ? 600 : 400,
-            }}
-            type="button"
-          >Current check</button>
-          <button
+          >Current check</ViewToggleButton>
+          <ViewToggleButton
+            active={globalView === 'seen'}
             onClick={() => setGlobalView('seen')}
-            className="px-2 py-1 rounded border"
-            style={{
-              borderColor: 'var(--color-border)',
-              color: globalView === 'seen' ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
-              backgroundColor: globalView === 'seen' ? 'var(--color-bg-secondary)' : 'transparent',
-              fontWeight: globalView === 'seen' ? 600 : 400,
-            }}
-            type="button"
             title="Every reference RefChecker has ever verified, across all checks"
-          >Seen References (library)</button>
+          >Seen References (library)</ViewToggleButton>
         </div>
 
         {globalView === 'seen' ? (
@@ -421,37 +481,15 @@ export default function MainPanel() {
                   ['graph', 'Graph', refsForCount.length],
                   ['similar', 'Similar Papers', null],
                 ]
-              })().map(([key, label, count]) => {
-                const active = resultsTab === key
-                return (
-                  <button
-                    key={key}
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setResultsTab(key)}
-                    className="px-3 py-1.5 text-sm font-medium transition-colors"
-                    style={{
-                      color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
-                      borderBottom: active ? '2px solid var(--color-accent, #3b82f6)' : '2px solid transparent',
-                      marginBottom: '-1px',
-                    }}
-                    type="button"
-                  >
-                    {label}
-                    {count != null && (
-                      <span
-                        className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
-                        style={{
-                          backgroundColor: active ? 'var(--color-accent-muted, rgba(59,130,246,0.15))' : 'var(--color-bg-tertiary)',
-                          color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
-                        }}
-                      >
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
+              })().map(([key, label, count]) => (
+                <ResultsTabButton
+                  key={key}
+                  active={resultsTab === key}
+                  onClick={() => setResultsTab(key)}
+                  label={label}
+                  count={count}
+                />
+              ))}
             </div>
             {/*
              * Tabs render with display:none rather than unmount/remount,

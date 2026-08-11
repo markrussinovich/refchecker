@@ -205,8 +205,29 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(within(container).queryByText('et al.')).toBeNull()
   })
 
-  it('R09: a short "et al." cited list shows the full enriched author list directly, with no show-more button', () => {
+  it('never substitutes the matched record\'s author for the cited one (mismatch case)', () => {
+    // Mirrors a real report: the card header read "Fan Yang" (the matched
+    // record) while its own error said `cited: F. Li` — the card contradicted
+    // itself. The displayed reference must always be the extracted one.
     const reference = {
+      status: 'error',
+      title: 'The cost of thinking',
+      authors: ['F. Li', 'et al.'],
+      year: 2025,
+      enrichment: { authors: [{ name: 'Fan Yang' }] },
+      errors: [{ error_type: 'author', error_details: 'Author 1 mismatch' }],
+      warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    expect(screen.getByText(/F\. Li/)).toBeTruthy()
+    // The corrected name must NOT appear in the reference display itself.
+    expect(screen.queryByText(/^Fan Yang$/)).toBeNull()
+    // The citation's own truncation marker stays visible.
+    expect(screen.getByText(/et al\./)).toBeTruthy()
+  })
+
+  it('R09: an "et al." cited list still shows what was CITED, with an opt-in toggle to the resolved list', () => {    const reference = {
       status: 'verified',
       title: 'Et-al expandable paper',
       authors: ['Jane Smith', 'et al.'],
@@ -222,15 +243,25 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     }
     render(<ReferenceCard reference={reference} index={0} />)
 
-    // The fuller enriched list (3 authors) is short enough to never wrap
-    // beyond two rows, so it's rendered directly — no show-more/less toggle.
+    // The card shows the reference AS EXTRACTED — it must never silently
+    // substitute the matched record's author list for what the paper cited.
+    expect(screen.queryByText(/Alice Wong/)).toBeNull()
+    expect(screen.queryByText(/John Doe/)).toBeNull()
+
+    // The fuller resolved list is offered explicitly instead.
+    const toggle = screen.getByRole('button', { name: /show all 3 authors/i })
+    fireEvent.click(toggle)
     expect(screen.getByText(/Alice Wong/)).toBeTruthy()
     expect(screen.getByText(/John Doe/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /show all/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /show less/i })).toBeNull()
+    // ...and is clearly labelled as coming from the matched record.
+    expect(screen.getByText(/from matched record/i)).toBeTruthy()
+
+    // The user can always get back to the cited text.
+    fireEvent.click(screen.getByRole('button', { name: /show as cited/i }))
+    expect(screen.queryByText(/Alice Wong/)).toBeNull()
   })
 
-  it('AuthorsLine: a very long author list gets a show-all/show-less toggle', () => {
+  it('AuthorsLine: a very long author list gets a show-more/show-less toggle', () => {
     const authors = Array.from({ length: 25 }, (_, i) => `Author${i} Surname${i}`)
     const reference = {
       status: 'verified',
@@ -242,7 +273,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     render(<ReferenceCard reference={reference} index={0} />)
 
     // Collapsed: line-clamped, but the toggle offers to reveal the rest.
-    const expand = screen.getByRole('button', { name: /show all 25 authors/i })
+    const expand = screen.getByRole('button', { name: /show more/i })
     expect(screen.queryByText(/Author24 Surname24/)).toBeTruthy() // still in DOM (CSS-clamped, not removed)
     fireEvent.click(expand)
     expect(screen.getByRole('button', { name: /show less/i })).toBeTruthy()

@@ -1415,11 +1415,15 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
   // an early return here would skip the useState below and flip the hook count,
   // crashing the whole tree with React #310 (blank page).
-  // R09/R-row-wrap: the full author list is always shown (preferring the
-  // enriched, DB-resolved list when it's more complete than what was cited);
-  // "expanded" only controls whether a show-more/less toggle is revealed
-  // when that full list would otherwise wrap beyond two rows.
+  // R09/R-row-wrap: the card ALWAYS displays the reference as it was
+  // extracted from the paper — that is the thing being checked, and the
+  // Verification section below reports what the matched record actually says.
+  // Silently substituting the database's author list here made the card
+  // contradict its own error ("cited: F. Li" while the header read "Fan
+  // Yang"). The fuller, DB-resolved list is still available, but only behind
+  // an explicit, labelled toggle.
   const [expanded, setExpanded] = useState(false)
+  const [showResolved, setShowResolved] = useState(false)
   const [needsExpand, setNeedsExpand] = useState(false)
   const measureRef = useRef(null)
 
@@ -1430,11 +1434,15 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
     .filter(Boolean)
   const etAlSentinel = hasEtAlSentinel(authors)
   const canExpandEnriched = enrichedNames.length > citedList.length
+  // Is there a fuller resolved list worth offering as an opt-in?
   const hasFullerEnriched = (etAlSentinel || canExpandEnriched) && enrichedNames.length > 0
 
-  // Always render the fullest, most accurate list we have; whether a
-  // show-more/less control appears depends only on whether it wraps.
-  const list = hasFullerEnriched ? enrichedNames : citedList
+  // Nothing was extracted at all → there is no cited text to contradict, so
+  // fall back to the resolved names rather than showing an empty line (still
+  // labelled as coming from the matched record).
+  const citedEmpty = citedList.length === 0 && enrichedNames.length > 0
+  const showingResolved = (showResolved && hasFullerEnriched) || citedEmpty
+  const list = showingResolved ? enrichedNames : citedList
 
   // Measure whether the full name list wraps beyond two lines at its actual
   // rendered width, and only offer a show-more/less toggle in that case.
@@ -1599,20 +1607,55 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
           </span>
         )
       })}
+      {/* The citation's own "et al." truncation is part of what was extracted,
+          so keep it visible — dropping it made a truncated citation look like
+          a complete one-author list. */}
+      {!showingResolved && etAlSentinel && (
+        <span style={{ color: 'var(--color-text-muted)' }}>, et al.</span>
+      )}
       </span>
-      {/* Show-more/less only appears when the full list actually wraps
+      {/* Show-more/less only appears when the displayed list actually wraps
           beyond two rows (measured above) — short lists never get a button. */}
       {needsExpand && !expanded && (
         <button type="button" onClick={() => setExpanded(true)}
           className="ml-1 underline hover:opacity-70 transition-opacity" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
-          title={hasFullerEnriched ? 'Show the full author list resolved from the matched record' : 'Show all authors'}>
-          {' '}show all {list.length} authors
+          title="Show the rest of this author list">
+          {' '}show more
         </button>
       )}
       {needsExpand && expanded && (
         <button type="button" onClick={() => setExpanded(false)}
           className="ml-1 underline hover:opacity-70 transition-opacity" style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}>show less</button>
       )}
+      {/* Opt-in swap to the matched record's full author list. Kept explicit
+          (and labelled) so the card never silently shows corrected data in
+          place of what the paper actually cited. */}
+      {showingResolved ? (
+        <>
+          <span className="ml-1" style={{ color: 'var(--color-text-muted)', fontSize: '0.85em' }}>
+            (from matched record)
+          </span>
+          {!citedEmpty && (
+            <button type="button"
+              onClick={() => { setShowResolved(false); setExpanded(false) }}
+              className="ml-1 underline hover:opacity-70 transition-opacity"
+              style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+              title="Show the authors exactly as they were cited in the paper">
+              show as cited
+            </button>
+          )}
+        </>
+      ) : hasFullerEnriched ? (
+        <button type="button"
+          onClick={() => { setShowResolved(true); setExpanded(false) }}
+          className="ml-1 underline hover:opacity-70 transition-opacity"
+          style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
+          title="Show the full author list resolved from the matched record">
+          {canExpandEnriched
+            ? `show all ${enrichedNames.length} author${enrichedNames.length === 1 ? '' : 's'}`
+            : 'show matched authors'}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -1766,12 +1809,18 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
     if (!e) return
     enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
-  const onLeave = () => {
+  // Moving the pointer off BOTH the author name and the popover always
+  // dismisses it — including when it was clicked open ("pinned"). The card is
+  // still fully interactive while the pointer is on it (the popover's own
+  // onMouseEnter cancels this pending close), but it must never be left
+  // stranded on screen after the pointer has moved away.
+  const scheduleClose = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
-    // R11: when pinned, leaving the chip must NOT close the popover.
-    if (pinned) return
-    leaveTimer.current = setTimeout(() => setOpen(false), 120)
+    if (leaveTimer.current) clearTimeout(leaveTimer.current)
+    // 180ms is enough to cross the small gap between the name and the popover.
+    leaveTimer.current = setTimeout(() => { setPinned(false); setOpen(false) }, 180)
   }
+  const onLeave = scheduleClose
   // R11: pin the popover open (stays open off-hover). Clears any pending
   // hover-leave close, opens immediately, and loads the rich profile.
   const pin = () => {
@@ -1784,7 +1833,31 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   }
   const closePinned = () => { setPinned(false); setOpen(false) }
 
-  // R11: while pinned, dismiss on outside-click (mousedown) or Escape — mirrors
+  // Safety net: a `mouseleave` can be missed entirely (pointer moved very fast,
+  // the anchor re-rendered/scrolled out from under the cursor, the window lost
+  // focus), which is what leaves a popover stranded on screen. While it is
+  // open, watch the real pointer position and close as soon as it is over
+  // neither the author name nor the popover.
+  useEffect(() => {
+    if (!open) return undefined
+    const isInside = (target) => (
+      (wrapperRef.current && wrapperRef.current.contains(target)) ||
+      (popoverRef.current && popoverRef.current.contains(target))
+    )
+    const onMove = (ev) => { if (!isInside(ev.target)) scheduleClose() }
+    // Pointer left the document/window entirely.
+    const onWindowOut = () => scheduleClose()
+    document.addEventListener('mousemove', onMove, true)
+    window.addEventListener('blur', onWindowOut)
+    document.addEventListener('mouseleave', onWindowOut)
+    return () => {
+      document.removeEventListener('mousemove', onMove, true)
+      window.removeEventListener('blur', onWindowOut)
+      document.removeEventListener('mouseleave', onWindowOut)
+    }
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dismiss on outside-click (mousedown) or Escape while pinned — mirrors
   // the export-menu outside-click pattern elsewhere in this file.
   useEffect(() => {
     if (!pinned) return undefined
