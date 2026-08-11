@@ -205,7 +205,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(within(container).queryByText('et al.')).toBeNull()
   })
 
-  it('R09: "et al. (show N authors)" toggle swaps in the enriched author list', () => {
+  it('R09: a short "et al." cited list shows the full enriched author list directly, with no show-more button', () => {
     const reference = {
       status: 'verified',
       title: 'Et-al expandable paper',
@@ -222,18 +222,30 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     }
     render(<ReferenceCard reference={reference} index={0} />)
 
-    // Collapsed: enriched-only names are not visible yet.
-    expect(screen.queryByText(/Alice Wong/)).toBeNull()
-    const expand = screen.getByRole('button', { name: /et al\. \(show 3 authors\)/i })
-    fireEvent.click(expand)
-
-    // Expanded: the full enriched list now renders.
+    // The fuller enriched list (3 authors) is short enough to never wrap
+    // beyond two rows, so it's rendered directly — no show-more/less toggle.
     expect(screen.getByText(/Alice Wong/)).toBeTruthy()
     expect(screen.getByText(/John Doe/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /show all/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /show less/i })).toBeNull()
+  })
 
-    // And it collapses back.
-    fireEvent.click(screen.getByRole('button', { name: /show less/i }))
-    expect(screen.queryByText(/Alice Wong/)).toBeNull()
+  it('AuthorsLine: a very long author list gets a show-all/show-less toggle', () => {
+    const authors = Array.from({ length: 25 }, (_, i) => `Author${i} Surname${i}`)
+    const reference = {
+      status: 'verified',
+      title: 'Many-author paper',
+      authors,
+      year: 2021,
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    // Collapsed: line-clamped, but the toggle offers to reveal the rest.
+    const expand = screen.getByRole('button', { name: /show all 25 authors/i })
+    expect(screen.queryByText(/Author24 Surname24/)).toBeTruthy() // still in DOM (CSS-clamped, not removed)
+    fireEvent.click(expand)
+    expect(screen.getByRole('button', { name: /show less/i })).toBeTruthy()
   })
 
   it('R11: clicking the name pins the popover; ×, Escape, and outside-click close it; shows >3 papers', async () => {
