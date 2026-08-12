@@ -332,3 +332,35 @@ def test_status_endpoint_accepts_a_recent_snapshot(backend_main, tmp_path, monke
     )
     assert s2["snapshot_stale"] is False
     assert s2["snapshot_age_days"] < 4
+
+
+def test_refreshes_do_not_run_concurrently(backend_main, tmp_path, monkeypatch):
+    """Each refresh stages multi-GB downloads onto the same disk, so overlapping
+    them multiplies the peak free space needed and fills the data disk."""
+    api_main = backend_main
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    for name in ("semantic_scholar.db", "dblp.db", "acl_anthology.db"):
+        _make_s2_db(data_dir / name)
+    monkeypatch.setenv("REFCHECKER_DATABASE_DIRECTORY", str(data_dir))
+
+    live = 0
+    max_live = 0
+
+    async def _slow_refresh(db_name, db_path):
+        nonlocal live, max_live
+        live += 1
+        max_live = max(max_live, live)
+        await asyncio.sleep(0)
+        live -= 1
+
+    monkeypatch.setattr(api_main, "_run_database_refresh_subprocess", _slow_refresh)
+
+    async def _drive():
+        tasks = await api_main._schedule_database_refreshes()
+        await asyncio.gather(*tasks.values())
+        return tasks
+
+    tasks = _run(_drive())
+    assert len(tasks) >= 2
+    assert max_live == 1

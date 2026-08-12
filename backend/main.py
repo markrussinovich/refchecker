@@ -675,6 +675,13 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
 
     tasks: Dict[str, asyncio.Task] = {}
 
+    # Every refresh stages multi-GB downloads onto the same data disk, so running
+    # them concurrently multiplies the peak free space required and makes them
+    # compete for the same I/O. On a disk sized for the Semantic Scholar database
+    # alone that is how the disk fills. Refreshes therefore take turns; the
+    # dependency ordering below still decides who goes first.
+    refresh_gate = asyncio.Lock()
+
     async def run_with_dependencies(
         db_name: str,
         db_path: str,
@@ -693,7 +700,8 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
                     db_name,
                     exc,
                 )
-        await _run_database_refresh_subprocess(db_name, Path(db_path))
+        async with refresh_gate:
+            await _run_database_refresh_subprocess(db_name, Path(db_path))
 
     scheduled_names = set()
     for db_name in DATABASE_UPDATE_ORDER:
