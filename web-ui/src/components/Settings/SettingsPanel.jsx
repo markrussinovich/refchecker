@@ -1515,6 +1515,22 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                   ? `Refreshing every ${dbStatus.refresh_interval_hours} h`
                   : 'Automatic refresh disabled'}
               </div>
+              {dbStatus.disk && (
+                <div
+                  className="text-xs"
+                  style={{
+                    color: dbStatus.disk.free_bytes < 5e9
+                      ? 'var(--color-error, #ef4444)'
+                      : 'var(--color-text-secondary)',
+                  }}
+                >
+                  Disk {(dbStatus.disk.free_bytes / 1e9).toFixed(1)} GB free of{' '}
+                  {(dbStatus.disk.total_bytes / 1e9).toFixed(0)} GB
+                  {dbStatus.disk.orphaned_staging_dirs?.length > 0
+                    ? ` — ${dbStatus.disk.orphaned_staging_dirs.length} leftover refresh staging dir(s)`
+                    : ''}
+                </div>
+              )}
             </div>
           )}
         </div>

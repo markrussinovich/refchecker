@@ -364,3 +364,23 @@ def test_refreshes_do_not_run_concurrently(backend_main, tmp_path, monkeypatch):
     tasks = _run(_drive())
     assert len(tasks) >= 2
     assert max_live == 1
+
+
+def test_status_endpoint_reports_disk_and_refresh_leftovers(backend_main, tmp_path, monkeypatch):
+    """Refreshes stop landing when the disk fills, and a killed refresh leaves a
+    staging dir behind -- neither is visible without shell access to the host."""
+    api_main = backend_main
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_file = data_dir / "semantic_scholar.db"
+    _make_s2_db(db_file)
+    (data_dir / "tmpabcd1234").mkdir()
+    monkeypatch.setenv("REFCHECKER_DB_PATH", str(db_file))
+    admin = api_main.UserInfo(
+        id=1, email="a@example.com", name="a", provider="github", is_admin=True
+    )
+
+    disk = _run(api_main.get_local_database_status(admin))["disk"]
+    assert disk["total_bytes"] > 0
+    assert disk["free_bytes"] >= 0
+    assert disk["orphaned_staging_dirs"] == ["tmpabcd1234"]

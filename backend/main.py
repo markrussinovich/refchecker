@@ -9763,6 +9763,49 @@ async def trigger_database_download(req: _DBDownloadRequest, current_user: UserI
     }
 
 
+def _describe_data_disk(statuses: List[Dict[str, object]]) -> Optional[Dict[str, object]]:
+    """Free space on the disk holding the local databases, plus refresh leftovers.
+
+    A refresh killed part-way (a redeploy, or the process being restarted) leaves
+    its staging directory behind; enough of those and the disk fills, at which
+    point every later refresh fails too. Neither is visible without shell access.
+    """
+    directory = None
+    for entry in statuses:
+        path = entry.get("path")
+        if path:
+            directory = os.path.dirname(str(path)) or "."
+            break
+    if not directory or not os.path.isdir(directory):
+        return None
+
+    try:
+        usage = shutil.disk_usage(directory)
+    except OSError as e:
+        logger.warning("Could not read disk usage for %s: %s", directory, e)
+        return None
+
+    staging = []
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = entry.name
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                if name.startswith("tmp") or name.startswith(_ORPHAN_SWEEP_PREFIX):
+                    staging.append(name)
+    except OSError as e:
+        logger.warning("Could not scan %s for refresh staging dirs: %s", directory, e)
+
+    return {
+        "path": directory,
+        "total_bytes": usage.total,
+        "free_bytes": usage.free,
+        "used_bytes": usage.used,
+        "orphaned_staging_dirs": sorted(staging),
+    }
+
+
 @app.get("/api/databases/status")
 async def get_local_database_status(current_user: UserInfo = Depends(require_user)):
     """Report whether the local reference DBs actually exist and are current.
@@ -9826,8 +9869,14 @@ async def get_local_database_status(current_user: UserInfo = Depends(require_use
         lambda: [_describe(name, path, exists) for name, path, exists in targets]
     )
 
+    # A refresh needs room to stage a download beside a database that already
+    # fills most of the disk, so free space is the first thing to check when
+    # refreshes stop landing — and it is otherwise only visible over SSH.
+    disk = await asyncio.to_thread(_describe_data_disk, statuses)
+
     return {
         "databases": statuses,
+        "disk": disk,
         "active": sorted(active_paths.keys()),
         "using_local_s2": "s2" in active_paths,
         "refresh_interval_hours": (
