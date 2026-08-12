@@ -234,6 +234,65 @@ describe('SettingsPanel local database status', () => {
 
     expect(await screen.findByText(/Semantic Scholar — missing/)).toBeInTheDocument()
   })
+
+  it('names a missing API key as the reason refreshes are failing', async () => {
+    // The hosted deployment sat five months on a stale snapshot because the
+    // datasets API 401s without a key and nothing ever said so.
+    mocks.getDatabaseStatus.mockResolvedValue({
+      data: {
+        databases: [
+          {
+            database: 's2',
+            label: 'Semantic Scholar',
+            path: '/data/semantic_scholar.db',
+            exists: true,
+            size_bytes: 90_000_000_000,
+            snapshot: '2026-03-10',
+            snapshot_age_days: 155,
+            snapshot_stale: true,
+            ingest_complete: true,
+            api_key_configured: false,
+          },
+        ],
+        active: ['s2'],
+        using_local_s2: true,
+        refresh_interval_hours: 24,
+      },
+    })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+
+    expect(await screen.findByText(/SEMANTIC_SCHOLAR_API_KEY is not set/)).toBeInTheDocument()
+  })
+
+  it('stays quiet about the API key when one is configured', async () => {
+    mocks.getDatabaseStatus.mockResolvedValue({
+      data: {
+        databases: [
+          {
+            database: 's2',
+            label: 'Semantic Scholar',
+            path: '/data/semantic_scholar.db',
+            exists: true,
+            size_bytes: 90_000_000_000,
+            snapshot: '2026-08-05',
+            snapshot_age_days: 2,
+            snapshot_stale: false,
+            ingest_complete: true,
+            api_key_configured: true,
+          },
+        ],
+        active: ['s2'],
+        using_local_s2: true,
+        refresh_interval_hours: 24,
+      },
+    })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+
+    expect(await screen.findByText(/Semantic Scholar — present/)).toBeInTheDocument()
+    expect(screen.queryByText(/SEMANTIC_SCHOLAR_API_KEY is not set/)).not.toBeInTheDocument()
+  })
 })
 
 describe('SettingsPanel local database disk', () => {
