@@ -1495,6 +1495,19 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       Ingest incomplete — lookups still fall back to the API
                     </div>
                   )}
+                  {entry.last_refresh?.status && (
+                    <div
+                      className="mt-0.5"
+                      style={{
+                        color: entry.last_refresh.status === 'failed'
+                          ? 'var(--color-error, #ef4444)'
+                          : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      Last refresh: {entry.last_refresh.status}
+                      {entry.last_refresh.detail ? ` (${entry.last_refresh.detail})` : ''}
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
