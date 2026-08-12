@@ -6,6 +6,7 @@ import LiveWebSocketManager from './components/LiveWebSocketManager'
 import SettingsPanel from './components/Settings/SettingsPanel'
 import LoginPage from './components/Auth/LoginPage'
 import UserMenu from './components/Auth/UserMenu'
+import AdminPanel from './components/Admin/AdminPanel'
 import TeamMenu from './components/Auth/TeamMenu'
 import SupportMenu from './components/common/SupportMenu'
 import { logger } from './utils/logger'
@@ -29,6 +30,9 @@ function App() {
   // Lets the header open Settings straight to the Accounts & Teams pane — the
   // canonical entry point for sign-in/teams, reachable even in single-user mode.
   const openSettings = useSettingsStore(s => s.openSettings)
+  // Admin dashboard visibility. Kept in App rather than a store because the
+  // user menu is the only thing that opens it.
+  const [adminOpen, setAdminOpen] = useState(false)
 
   // Initialise auth once on mount
   useEffect(() => {
@@ -213,8 +217,25 @@ function App() {
                 )}
               </button>
             )}
+            {/* Admin dashboard. In hosted mode this lives in the user menu; in
+                single-user mode there is no user menu, and the local operator
+                already has unrestricted access to the same database, so expose
+                it directly. */}
+            {!authRequired && (
+              <button
+                type="button"
+                onClick={() => setAdminOpen(true)}
+                className="text-gray-400 hover:text-gray-200 transition-colors"
+                aria-label="Admin dashboard"
+                title="Admin dashboard"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v18h18M7 15l3-4 3 3 5-7" />
+                </svg>
+              </button>
+            )}
             {/* User menu (only visible when auth is enabled + signed in) */}
-            <UserMenu />
+            <UserMenu onOpenAdmin={() => setAdminOpen(true)} />
           </div>
         </header>
         
@@ -227,6 +248,9 @@ function App() {
 
       {/* Settings Panel Modal */}
       <SettingsPanel theme={theme} onThemeChange={handleThemeChange} />
+
+      {/* Admin dashboard (opened from the user menu; admin-only) */}
+      <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} />
     </div>
   )
 }

@@ -137,6 +137,19 @@ export const recheck = (id) => api.post(`/recheck/${id}`)
 export const clearCache = () => api.delete('/admin/cache')
 export const clearDatabase = () => api.delete('/admin/database')
 
+// Admin analytics panel. `days = 0` means "all time" for every one of these.
+// Sessions are synthesized from check timestamps (there is no sessions table),
+// so the user drill-down is scoped by user id rather than a session id.
+export const getAdminOverview = (days = 30) =>
+  api.get('/admin/insights/overview', { params: { days } })
+export const getAdminUsers = (days = 30, limit = 100) =>
+  api.get('/admin/insights/users', { params: { days, limit } })
+export const getAdminUserSessions = (userId, days = 30, gapMinutes = 30) =>
+  api.get(`/admin/insights/users/${userId}/sessions`, {
+    params: { days, gap_minutes: gapMinutes },
+  })
+export const getAdminCheckDetail = (checkId) => api.get(`/admin/insights/checks/${checkId}`)
+
 // Local database downloader (used by the desktop app's first-run flow)
 export const triggerDatabaseDownload = (payload) => api.post('/databases/download', payload)
 export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')

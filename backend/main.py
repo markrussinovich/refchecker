@@ -38,6 +38,7 @@ if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST") and "py
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import aiosqlite
+from . import admin_insights
 from .database import db, get_data_dir, get_logs_dir
 from .websocket_manager import manager, presence
 from .refchecker_wrapper import ProgressRefChecker
@@ -6550,6 +6551,73 @@ async def get_admin_activity(
     except Exception as e:
         logger.error(f"Error getting admin activity: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/insights/overview")
+async def get_admin_insights_overview(
+    days: int = 30,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Fleet-wide usage totals, a daily series, and headline breakdowns.
+
+    `days=0` means all time.
+    """
+    _require_admin(current_user)
+    try:
+        return await admin_insights.get_overview(db.db_path, days=days)
+    except Exception as e:
+        logger.error(f"Error building admin overview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/insights/users")
+async def get_admin_insights_users(
+    days: int = 0,
+    limit: int = 100,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Per-user activity rollup, busiest first."""
+    _require_admin(current_user)
+    try:
+        return await admin_insights.get_users(db.db_path, days=days, limit=limit)
+    except Exception as e:
+        logger.error(f"Error building admin user rollup: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/insights/users/{user_id}/sessions")
+async def get_admin_insights_user_sessions(
+    user_id: int,
+    days: int = 0,
+    gap_minutes: int = admin_insights.DEFAULT_SESSION_GAP_MINUTES,
+    current_user: UserInfo = Depends(require_user),
+):
+    """One user's checks grouped into sessions (sittings), newest first."""
+    _require_admin(current_user)
+    try:
+        return await admin_insights.get_user_sessions(
+            db.db_path, user_id=user_id, days=days, gap_minutes=gap_minutes
+        )
+    except Exception as e:
+        logger.error(f"Error building admin session view: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/insights/checks/{check_id}")
+async def get_admin_insights_check(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """A single check with its per-reference results, regardless of owner."""
+    _require_admin(current_user)
+    try:
+        detail = await admin_insights.get_check_detail(db.db_path, check_id)
+    except Exception as e:
+        logger.error(f"Error loading admin check detail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+    return detail
 
 
 @app.delete("/api/admin/cache")

@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/useAuthStore'
  * User avatar + dropdown menu shown in the header when authenticated.
  * Only rendered when auth is enabled.
  */
-export default function UserMenu() {
+export default function UserMenu({ onOpenAdmin }) {
   const { user, authRequired, logout } = useAuthStore()
   const [open, setOpen] = useState(false)
   const menuRef = useRef(null)
@@ -94,6 +94,15 @@ export default function UserMenu() {
           </div>
 
           {/* Actions */}
+          {user.is_admin && onOpenAdmin && (
+            <button
+              onClick={() => { setOpen(false); onOpenAdmin() }}
+              className="w-full text-left px-4 py-2 text-sm transition-colors"
+              style={{ color: 'var(--color-text-primary)' }}
+            >
+              Admin dashboard
+            </button>
+          )}
           <button
             onClick={() => { setOpen(false); logout() }}
             className="w-full text-left px-4 py-2 text-sm transition-colors hover:bg-red-800 hover:text-white"
