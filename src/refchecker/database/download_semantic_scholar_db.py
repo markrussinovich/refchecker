@@ -40,6 +40,7 @@ import concurrent.futures
 import gzip
 import hashlib
 import re
+import shutil
 import urllib.parse
 import dateutil.parser
 from datetime import datetime, timezone, timedelta
@@ -57,6 +58,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 LATEST_SNAPSHOT_FILENAME = "latest_snapshot.txt"
+
+# The datasets API often reports size 0, so assume a typical papers shard.
+DEFAULT_ARCHIVE_SIZE_BYTES = 2 * 1024 ** 3
+# Rows inserted from an archive occupy several times its compressed size.
+ARCHIVE_EXPANSION_FACTOR = 4
+# Never let ingest drive the volume to zero: SQLite fails hard on a full disk.
+MIN_FREE_DISK_BYTES = 5 * 1024 ** 3
 
 class SemanticScholarDownloader:
     """
@@ -87,6 +95,13 @@ class SemanticScholarDownloader:
         
         # Create output directory if it doesn't exist
         os.makedirs(self.output_dir, exist_ok=True)
+
+        # Dataset archives are transient input: they are ingested into the DB
+        # and are tens of GB, so keeping them doubles the disk requirement.
+        # Operators who reprocess archives offline can opt back in.
+        self.keep_dataset_files = os.environ.get(
+            "REFCHECKER_S2_KEEP_ARCHIVES", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
         
         # Initialize database
         self.db_path = os.path.abspath(db_path) if db_path else os.path.join(self.output_dir, "semantic_scholar.db")
@@ -499,12 +514,11 @@ class SemanticScholarDownloader:
                     logger.info(f"Full dataset update recommended: {diff.get('message')}")
                     logger.info("Automatically downloading full dataset...")
                     
-                    # Download the full dataset
+                    # Download the full dataset (each archive is ingested as it
+                    # arrives, so there is nothing left to process afterwards)
                     success = self.download_dataset_files()
                     if success:
-                        logger.info("Full dataset download completed, processing files...")
-                        # Process the downloaded files
-                        self.process_local_files(force_reprocess=False, incremental=False)
+                        logger.info("Full dataset download and ingest completed")
                         
                         # After processing, check for any remaining incremental updates
                         logger.info("Checking for additional incremental updates after full dataset processing...")
@@ -1152,11 +1166,13 @@ class SemanticScholarDownloader:
 
         if not db_exists:
             logger.info("No database found - performing full download")
+            # download_dataset_files ingests each archive as it lands, so the
+            # peak disk cost is one archive plus the database rather than the
+            # entire compressed dataset plus the database.
             success = self.download_dataset_files()
             if not success:
                 logger.error("Failed to download dataset files")
                 return False
-            self.process_local_files(incremental=False)
             return True
 
         logger.info("Database exists - checking for new or updated data (incremental update)")
@@ -1176,7 +1192,6 @@ class SemanticScholarDownloader:
                 if not success:
                     logger.error("Failed to download dataset files")
                     return False
-                self.process_local_files(incremental=True)
 
         effective_snapshot = self.get_last_release_id() or self.current_snapshot_id
         if effective_snapshot:
@@ -1398,8 +1413,15 @@ class SemanticScholarDownloader:
 
     def download_dataset_files(self):
         """
-        Download the official Semantic Scholar dataset files
-        
+        Download and ingest the official Semantic Scholar dataset files.
+
+        Files are downloaded one at a time and each is ingested (and, unless
+        archives are being kept, deleted) before the next download starts. The
+        full papers dataset is tens of GB compressed and the database it builds
+        is ~90GB; downloading everything up front needs both at once, which does
+        not fit on a disk sized for the database alone. Streaming keeps the peak
+        at one archive plus the database.
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -1421,24 +1443,99 @@ class SemanticScholarDownloader:
             
             # Download files
             downloaded_count = 0
-            for file_meta in files:
+            total_records = 0
+            for index, file_meta in enumerate(files, 1):
+                if not self._has_room_for_next_archive(file_meta):
+                    logger.error(
+                        "Stopping dataset download: not enough free disk space on "
+                        f"{self.output_dir}. Processed {downloaded_count} of {len(files)} files."
+                    )
+                    break
                 try:
                     path, updated = self.download_file(file_meta)
                     if updated:
                         downloaded_count += 1
-                        logger.info(f"Downloaded: {path}")
+                        logger.info(f"Downloaded [{index}/{len(files)}]: {path}")
                     else:
                         logger.info(f"Skipped (not modified): {path}")
+                        continue
                 except Exception as e:
                     logger.error(f"Error downloading {file_meta.get('path', 'unknown')}: {e}")
                     continue
-            
+
+                local_path = os.path.join(self.output_dir, file_meta["path"])
+                try:
+                    records = self._process_gz_file(local_path)
+                    total_records += records
+                    logger.info(
+                        f"Processed [{index}/{len(files)}] {records:,} records from "
+                        f"{os.path.basename(local_path)}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error processing {local_path}: {e}")
+                    continue
+                self._discard_processed_archive(local_path)
+
             logger.info(f"Downloaded {downloaded_count} files out of {len(files)} total files")
+            if total_records > 0:
+                self._record_processing_metadata(total_records)
             return downloaded_count > 0
             
         except Exception as e:
             logger.error(f"Error downloading dataset files: {e}")
             return False
+
+    def _has_room_for_next_archive(self, file_meta) -> bool:
+        """Refuse to download when the disk can't absorb the archive plus growth.
+
+        Running the disk to zero mid-ingest is worse than stopping: SQLite
+        starts raising "disk I/O error" and the database can be left unusable.
+        """
+        try:
+            free = shutil.disk_usage(self.output_dir).free
+        except OSError:
+            return True
+        archive_size = int(file_meta.get("size") or 0) or DEFAULT_ARCHIVE_SIZE_BYTES
+        # The archive itself, the rows it expands into, and WAL headroom.
+        needed = archive_size + int(archive_size * ARCHIVE_EXPANSION_FACTOR) + MIN_FREE_DISK_BYTES
+        if free >= needed:
+            return True
+        logger.error(
+            f"Only {self._format_size(free)} free on {self.output_dir}; "
+            f"need about {self._format_size(needed)} for the next dataset file."
+        )
+        return False
+
+    def _discard_processed_archive(self, local_path: str) -> None:
+        """Delete an ingested archive unless the operator asked to keep it."""
+        if self.keep_dataset_files:
+            return
+        for path in (local_path, local_path + ".meta"):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError as e:
+                logger.warning(f"Could not remove processed archive {path}: {e}")
+
+    def _record_processing_metadata(self, total_records: int) -> None:
+        """Persist the snapshot/timestamp after ingesting dataset files."""
+        current_time = datetime.now(timezone.utc).isoformat()
+        self.set_last_update_time(current_time)
+        try:
+            release_id = (
+                self.current_snapshot_id
+                or self.get_last_release_id()
+                or self.get_latest_release_id()
+            )
+            self.current_snapshot_id = release_id
+            self.set_last_release_id(release_id)
+            logger.info(
+                f"Updated metadata - last update: {current_time}, release: {release_id}, "
+                f"records: {total_records:,}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not update release ID: {e}")
+
     
     def list_files(self, release_id: str, dataset: str = "papers") -> list[dict]:
         """

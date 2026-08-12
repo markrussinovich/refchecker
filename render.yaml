@@ -66,7 +66,9 @@ services:
     disk:
       name: refchecker-data
       mountPath: /data
-      sizeGB: 100                    # Fits ~90 GB slim DB ($25/month on Render)
+      sizeGB: 100                    # Fits ~90 GB slim DB ($25/month on Render).
+                                     # Dataset shards are ingested and deleted
+                                     # one at a time, so only the DB needs room.
 
     healthCheckPath: /api/health
 

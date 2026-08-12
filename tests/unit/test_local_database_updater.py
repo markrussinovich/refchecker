@@ -1,3 +1,4 @@
+import collections
 import gzip
 import io
 import json
@@ -702,3 +703,94 @@ def test_corr_venue_skipped_in_venue_missing_check(tmp_path):
 
     venue_errors = [e for e in errors if e.get('error_type') == 'venue']
     assert venue_errors == [], f"CoRR should NOT trigger venue missing error: {venue_errors}"
+
+def _make_papers_archive(path, paper_id, title):
+    """Write a one-record gzipped S2 papers shard."""
+    record = {
+        'corpusid': 1,
+        'paperId': paper_id,
+        'title': title,
+        'authors': [{'name': 'Author One'}],
+        'year': 2024,
+        'externalIds': {'DOI': f'10.1000/{paper_id}'},
+        'venue': 'Test Venue',
+    }
+    with gzip.open(path, 'wt', encoding='utf-8') as handle:
+        handle.write(json.dumps(record) + '\n')
+
+
+def test_bootstrap_deletes_each_archive_after_ingest(tmp_path, monkeypatch):
+    """Archives must not accumulate: the dataset plus the DB does not fit on a
+    disk sized for the DB, which is what stalls a server bootstrap."""
+    db_path = tmp_path / 'semantic_scholar.db'
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        files = [{'path': f'papers-{i}.gz', 'url': f'https://example/{i}', 'size': 10} for i in range(3)]
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-01-01')
+        monkeypatch.setattr(downloader, 'list_files', lambda release, dataset='papers': files)
+
+        def _fake_download(file_meta):
+            target = tmp_path / file_meta['path']
+            _make_papers_archive(target, file_meta['path'], f"Paper {file_meta['path']}")
+            return file_meta['path'], True
+
+        monkeypatch.setattr(downloader, 'download_file', _fake_download)
+
+        assert downloader.download_dataset_files() is True
+
+        assert list(tmp_path.glob('*.gz')) == []
+        count = downloader.conn.execute('SELECT COUNT(*) FROM papers').fetchone()[0]
+        assert count == 3
+        assert downloader.get_last_release_id() == '2026-01-01'
+    finally:
+        downloader.close()
+
+
+def test_bootstrap_keeps_archives_when_opted_in(tmp_path, monkeypatch):
+    monkeypatch.setenv('REFCHECKER_S2_KEEP_ARCHIVES', 'true')
+    db_path = tmp_path / 'semantic_scholar.db'
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        files = [{'path': 'papers-0.gz', 'url': 'https://example/0', 'size': 10}]
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-01-01')
+        monkeypatch.setattr(downloader, 'list_files', lambda release, dataset='papers': files)
+
+        def _fake_download(file_meta):
+            _make_papers_archive(tmp_path / file_meta['path'], file_meta['path'], 'Kept')
+            return file_meta['path'], True
+
+        monkeypatch.setattr(downloader, 'download_file', _fake_download)
+        assert downloader.download_dataset_files() is True
+        assert (tmp_path / 'papers-0.gz').exists()
+    finally:
+        downloader.close()
+
+
+def test_bootstrap_stops_before_filling_the_disk(tmp_path, monkeypatch):
+    """Running the volume to zero corrupts SQLite; stop while there is room."""
+    db_path = tmp_path / 'semantic_scholar.db'
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        files = [{'path': f'papers-{i}.gz', 'url': f'https://example/{i}', 'size': 10} for i in range(3)]
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-01-01')
+        monkeypatch.setattr(downloader, 'list_files', lambda release, dataset='papers': files)
+
+        downloaded = []
+
+        def _fake_download(file_meta):
+            downloaded.append(file_meta['path'])
+            _make_papers_archive(tmp_path / file_meta['path'], file_meta['path'], 'X')
+            return file_meta['path'], True
+
+        monkeypatch.setattr(downloader, 'download_file', _fake_download)
+
+        usage = collections.namedtuple('usage', 'total used free')
+        monkeypatch.setattr(
+            'refchecker.database.download_semantic_scholar_db.shutil.disk_usage',
+            lambda path: usage(100, 100, 0),
+        )
+
+        assert downloader.download_dataset_files() is False
+        assert downloaded == []
+    finally:
+        downloader.close()

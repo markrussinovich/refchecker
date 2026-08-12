@@ -384,7 +384,13 @@ async def _get_planned_s2_bootstrap_path() -> Optional[Path]:
 
 
 def _has_room_for_s2_bootstrap(db_path: Path) -> bool:
-    """Refuse to start a full S2 download that obviously cannot fit on disk."""
+    """Refuse to start a full S2 download that obviously cannot fit on disk.
+
+    The finished database is ~90GB and the downloader ingests one compressed
+    archive at a time, so the requirement is the database plus a few GB of
+    working room -- not the database plus the whole compressed dataset, which
+    is what an up-front download of every archive would have needed.
+    """
     try:
         target_dir = db_path.parent
         target_dir.mkdir(parents=True, exist_ok=True)
