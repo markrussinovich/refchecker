@@ -150,6 +150,14 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   const canvasRefs = useRef({})               // pageNumber -> canvas el
   const paintedScaleRef = useRef({})          // pageNumber -> scale it was last painted at
   const renderTasksRef = useRef({})           // pageNumber -> in-flight pdf.js RenderTask
+  // pageNumber -> monotonically increasing paint id, bumped synchronously when a
+  // paint starts. `paintPage` awaits (getPage, and the cancellation of the task it
+  // supersedes) before it touches the canvas, and during those awaits another
+  // scale change can start a newer paint for the same page. Without this token
+  // both would draw onto the same canvas concurrently, which pdf.js renders as a
+  // torn/half-drawn page, and whichever settled last would record its scale as
+  // painted so nothing ever repainted it.
+  const paintSeqRef = useRef({})
   const containerRef = useRef(null)
   // Base scale that makes a page fit the modal width at zoom=1. Measured from
   // the scroll container once mounted; falls back to a SMALL scale until then
@@ -294,6 +302,9 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
     let cancelled = false
     let task = null
     setStatus('loading'); setRawPages([]); paintedScaleRef.current = {}
+    // Invalidate paints already in flight for the previous document so they can
+    // never draw onto a canvas that now belongs to a different PDF.
+    Object.keys(paintSeqRef.current).forEach((p) => { paintSeqRef.current[p] += 1 })
     Object.values(renderTasksRef.current).forEach((t) => { try { t?.cancel() } catch { /* ignore */ } })
     renderTasksRef.current = {}
     ;(async () => {
@@ -365,17 +376,37 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
   // measurement (or a zoom) changes SCALE right after the first paint, which would
   // otherwise start a second `render()` on the same canvas while the first is still
   // in flight — pdf.js then blanks/tears the canvas (blank page with floating
-  // highlights, or upside-down content). We cancel any in-flight task for the page
-  // before starting a new one, and skip repaint when already crisp at this scale.
+  // highlights, upside-down content, or a page that stops drawing part-way down).
+  // Cancelling alone is not enough: cancel() is observed asynchronously, and this
+  // function awaits before it touches the canvas, so a paint can be superseded
+  // while suspended. Each paint therefore claims the page with a sequence number
+  // before its first await and stands down if a newer paint has claimed it.
   const paintPage = useCallback(async (pageNumber) => {
     const pdf = docRef.current
     const canvas = canvasRefs.current[pageNumber]
     if (!pdf || !canvas) return
     if (paintedScaleRef.current[pageNumber] === SCALE) return
-    try { renderTasksRef.current[pageNumber]?.cancel() } catch { /* ignore */ }
+
+    // Claim this page synchronously, before the first await, so a paint started
+    // while we are suspended can tell us to stand down.
+    const mySeq = (paintSeqRef.current[pageNumber] || 0) + 1
+    paintSeqRef.current[pageNumber] = mySeq
+    const superseded = () => paintSeqRef.current[pageNumber] !== mySeq
+
+    // Cancelling is not instantaneous: pdf.js keeps drawing until it observes the
+    // cancellation, so wait for the old task to actually settle before resizing
+    // the canvas out from under it. A cancelled task rejects; that is expected.
+    const previous = renderTasksRef.current[pageNumber]
+    if (previous) {
+      try { previous.cancel() } catch { /* ignore */ }
+      try { await previous.promise } catch { /* expected on cancel */ }
+    }
+    if (superseded()) return
+
     let task = null
     try {
       const page = await pdf.getPage(pageNumber)
+      if (superseded()) return
       const vp = page.getViewport({ scale: SCALE })
       const ctx = canvas.getContext('2d')
       canvas.width = vp.width
@@ -383,8 +414,13 @@ export default function NativePdfViewer({ checkId, spans = [], focusSpanIndex = 
       task = page.render({ canvasContext: ctx, viewport: vp })
       renderTasksRef.current[pageNumber] = task
       await task.promise
+      if (superseded()) return
       paintedScaleRef.current[pageNumber] = SCALE
     } catch (e) {
+      // A cancelled paint leaves the canvas half-drawn, so make sure it is not
+      // recorded as painted at any scale -- otherwise the repaint that should
+      // finish the page is skipped and the half-drawn state becomes permanent.
+      delete paintedScaleRef.current[pageNumber]
       // RenderingCancelledException is expected when a newer scale supersedes this
       // paint; only surface genuine failures.
       if (e?.name !== 'RenderingCancelledException') {
