@@ -7,7 +7,10 @@ import tarfile
 
 import pytest
 
-from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from refchecker.checkers.local_semantic_scholar import (
+    FULL_SNAPSHOT_MIN_ROWS,
+    LocalNonArxivReferenceChecker,
+)
 from refchecker.database import local_database_updater as updater
 from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
 from refchecker.database.local_database_updater import (
@@ -882,3 +885,92 @@ def test_interrupted_bootstrap_resumes_without_redownloading(tmp_path, monkeypat
 
     # Only the shard that was missing is fetched on the retry.
     assert downloaded == ['papers-0.gz', 'papers-1.gz', 'papers-2.gz']
+
+
+def _make_repaired_s2_db(path):
+    """A database with the full expected schema, as a finished build leaves it."""
+    _make_minimal_s2_db(path, release_id='2026-08-05')
+    report = repair_local_database_schema(str(path))
+    assert not report['missing_columns'], report
+    assert not report['missing_indexes'], report
+
+
+def test_opening_healthy_database_performs_no_writes(tmp_path, monkeypatch):
+    """Every check opens this file; writing on open serializes concurrent checks
+    against each other on a database that can be ~90GB."""
+    db_path = tmp_path / 'healthy.db'
+    _make_repaired_s2_db(db_path)
+
+    def _fail_on_repair(*args, **kwargs):
+        raise AssertionError('schema repair ran against an already-healthy database')
+
+    monkeypatch.setattr(
+        'refchecker.checkers.local_semantic_scholar.repair_local_database_schema',
+        _fail_on_repair,
+    )
+
+    before = db_path.stat().st_mtime_ns
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        assert checker.conn.execute('PRAGMA busy_timeout').fetchone()[0] > 0
+    finally:
+        checker.close()
+    assert db_path.stat().st_mtime_ns == before
+
+
+def test_opening_damaged_database_still_repairs(tmp_path):
+    """A genuinely missing index must still be created."""
+    db_path = tmp_path / 'damaged.db'
+    _make_repaired_s2_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute('DROP INDEX idx_papers_doi')
+    conn.commit()
+    conn.close()
+
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        indexes = {
+            row[0]
+            for row in checker.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_papers_%'"
+            ).fetchall()
+        }
+    finally:
+        checker.close()
+    assert 'idx_papers_doi' in indexes
+
+
+def test_legacy_full_database_without_marker_reports_complete(tmp_path):
+    """A database built before the completion marker existed must not be treated
+    as a partial bootstrap, which would keep the S2 API in the hot path."""
+    db_path = tmp_path / 'legacy-full.db'
+    _make_repaired_s2_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM metadata WHERE key='last_release_id'")
+    conn.execute(
+        "INSERT INTO papers (rowid, title) VALUES (?, ?)",
+        (FULL_SNAPSHOT_MIN_ROWS, 'a paper deep into a full snapshot'),
+    )
+    conn.commit()
+    conn.close()
+
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        assert checker.has_complete_coverage() is True
+    finally:
+        checker.close()
+
+
+def test_small_database_without_marker_reports_incomplete(tmp_path):
+    db_path = tmp_path / 'partial.db'
+    _make_repaired_s2_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM metadata WHERE key='last_release_id'")
+    conn.commit()
+    conn.close()
+
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        assert checker.has_complete_coverage() is False
+    finally:
+        checker.close()

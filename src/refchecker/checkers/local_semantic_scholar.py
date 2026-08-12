@@ -42,7 +42,11 @@ from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_avail
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
 from refchecker.checkers.arxiv_citation import ArXivCitationChecker
-from refchecker.database.local_database_updater import repair_local_database_schema
+from refchecker.database.local_database_updater import (
+    LOCAL_DB_REQUIRED_COLUMNS,
+    LOCAL_DB_REQUIRED_INDEXES,
+    repair_local_database_schema,
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -51,6 +55,13 @@ logger = logging.getLogger(__name__)
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 _ARXIV_VERSION_SENSITIVE_TYPES = frozenset({"title", "author", "year"})
+# A papers table this large can only be a full Semantic Scholar snapshot
+# (the corpus is ~230M records); used to classify databases built before
+# the ingest-completion marker existed.
+FULL_SNAPSHOT_MIN_ROWS = 50_000_000
+# Lookups should wait for a concurrent writer (refresh/repair) rather than
+# raise "database is locked" and silently degrade to the remote APIs.
+LOCAL_DB_BUSY_TIMEOUT_MS = 15_000
 
 _SUBSCRIPT_DIGITS = str.maketrans({
     '₀': '0',
@@ -150,24 +161,66 @@ class LocalNonArxivReferenceChecker:
                 f"Ensure the configured path points to a valid local RefChecker database."
             )
         try:
-            repair_report = repair_local_database_schema(self.db_path, conn=self.conn)
-            if repair_report['added_columns'] or repair_report['added_indexes']:
-                logger.info(
-                    "Repaired local database schema for %s: columns=%s indexes=%s",
-                    self.db_path,
-                    ', '.join(repair_report['added_columns']) or 'none',
-                    ', '.join(repair_report['added_indexes']) or 'none',
-                )
+            self._repair_schema_if_needed()
         except Exception as exc:
             logger.warning("Failed to repair local database schema for %s: %s", self.db_path, exc)
-        # Optimise for read-heavy workloads (reference lookups are read-only)
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        # Optimise for read-heavy workloads (reference lookups are read-only).
+        # Setting journal_mode is a write that takes an exclusive lock, so only
+        # do it when the database isn't already in WAL: a server opens this
+        # database once per check, and those writes serialize against each
+        # other (and against a running refresh) on a multi-GB file.
+        try:
+            current_mode = self.conn.execute("PRAGMA journal_mode").fetchone()
+            if not current_mode or str(current_mode[0]).lower() != "wal":
+                self.conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error as exc:
+            logger.debug("Could not set journal_mode on %s: %s", self.db_path, exc)
+        # Wait out a concurrent writer (a refresh, or another check opening the
+        # same file) instead of failing the lookup and falling back to the APIs.
+        self.conn.execute(f"PRAGMA busy_timeout={LOCAL_DB_BUSY_TIMEOUT_MS}")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA cache_size=-64000")   # 64 MB page cache
         self.conn.execute("PRAGMA temp_store=MEMORY")
         self._arxiv_citation_checker: Optional[ArXivCitationChecker] = None
         self._log_prefix = f"Local DB [{self.database_label}]"
         self._coverage_is_complete: Optional[bool] = None
+
+    def _repair_schema_if_needed(self) -> None:
+        """Repair missing columns/indexes, but only when something is missing.
+
+        The repair issues CREATE INDEX/ALTER TABLE/PRAGMA optimize and commits,
+        so running it unconditionally turns every lookup session into a writer
+        on a database that can be ~90GB. SQLite allows one writer at a time, so
+        concurrent checks queue behind each other for no benefit in the normal
+        case where the schema is already correct.
+        """
+        columns = {
+            row[1] for row in self.conn.execute('PRAGMA table_info(papers)').fetchall()
+        }
+        indexes = {
+            row[0]
+            for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_papers_%'"
+            ).fetchall()
+            if row[0]
+        }
+        if LOCAL_DB_REQUIRED_COLUMNS <= columns and LOCAL_DB_REQUIRED_INDEXES <= indexes:
+            return
+
+        logger.info(
+            "Local database %s is missing schema objects (columns=%s indexes=%s); repairing",
+            self.db_path,
+            ', '.join(sorted(LOCAL_DB_REQUIRED_COLUMNS - columns)) or 'none',
+            ', '.join(sorted(LOCAL_DB_REQUIRED_INDEXES - indexes)) or 'none',
+        )
+        repair_report = repair_local_database_schema(self.db_path, conn=self.conn)
+        if repair_report['added_columns'] or repair_report['added_indexes']:
+            logger.info(
+                "Repaired local database schema for %s: columns=%s indexes=%s",
+                self.db_path,
+                ', '.join(repair_report['added_columns']) or 'none',
+                ', '.join(repair_report['added_indexes']) or 'none',
+            )
 
     def has_complete_coverage(self) -> bool:
         """Whether a miss in this DB is trustworthy evidence of absence.
@@ -176,11 +229,26 @@ class LocalNonArxivReferenceChecker:
         background) answers "not found" for papers it simply hasn't ingested
         yet. Callers use a miss to skip the remote Semantic Scholar API, which
         would turn those gaps into wrong verdicts, so only report complete
-        once the builder has recorded the snapshot it finished ingesting.
+        once the builder has recorded the snapshot it finished ingesting --
+        or once the table is far too large to be anything but a full snapshot,
+        so an older database without that marker is not needlessly demoted.
         """
         if self._coverage_is_complete is None:
-            self._coverage_is_complete = self._read_completed_snapshot() is not None
+            self._coverage_is_complete = (
+                self._read_completed_snapshot() is not None
+                or self._looks_like_full_snapshot()
+            )
         return self._coverage_is_complete
+
+    def _looks_like_full_snapshot(self) -> bool:
+        """Cheap size check for databases predating the snapshot marker."""
+        try:
+            # max(rowid) is O(1); COUNT(*) would scan hundreds of millions of rows.
+            row = self.conn.execute("SELECT max(rowid) FROM papers").fetchone()
+        except sqlite3.Error:
+            return False
+        approx_rows = row[0] if row else None
+        return bool(approx_rows and approx_rows >= FULL_SNAPSHOT_MIN_ROWS)
 
     def _read_completed_snapshot(self) -> Optional[str]:
         """Return the release id the builder recorded after a finished ingest."""
