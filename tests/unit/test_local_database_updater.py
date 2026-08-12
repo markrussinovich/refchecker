@@ -794,3 +794,49 @@ def test_bootstrap_stops_before_filling_the_disk(tmp_path, monkeypatch):
         assert downloaded == []
     finally:
         downloader.close()
+
+
+def _make_minimal_s2_db(path, release_id=None):
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE papers (
+                paperId TEXT PRIMARY KEY,
+                title TEXT,
+                normalized_paper_title TEXT,
+                venue TEXT,
+                year INTEGER,
+                externalIds_DOI TEXT,
+                externalIds_ArXiv TEXT,
+                authors TEXT
+            )
+            """
+        )
+        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        if release_id is not None:
+            conn.execute("INSERT INTO metadata VALUES ('last_release_id', ?)", (release_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_partial_database_does_not_claim_complete_coverage(tmp_path):
+    """A DB still being built must not be trusted to disprove a reference."""
+    db_path = tmp_path / 'partial.db'
+    _make_minimal_s2_db(db_path)
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        assert checker.has_complete_coverage() is False
+    finally:
+        checker.close()
+
+
+def test_finished_database_claims_complete_coverage(tmp_path):
+    db_path = tmp_path / 'complete.db'
+    _make_minimal_s2_db(db_path, release_id='2026-08-05')
+    checker = LocalNonArxivReferenceChecker(db_path=str(db_path))
+    try:
+        assert checker.has_complete_coverage() is True
+    finally:
+        checker.close()

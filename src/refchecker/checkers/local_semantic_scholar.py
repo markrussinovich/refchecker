@@ -167,6 +167,34 @@ class LocalNonArxivReferenceChecker:
         self.conn.execute("PRAGMA temp_store=MEMORY")
         self._arxiv_citation_checker: Optional[ArXivCitationChecker] = None
         self._log_prefix = f"Local DB [{self.database_label}]"
+        self._coverage_is_complete: Optional[bool] = None
+
+    def has_complete_coverage(self) -> bool:
+        """Whether a miss in this DB is trustworthy evidence of absence.
+
+        A database still being built (the server bootstraps one in the
+        background) answers "not found" for papers it simply hasn't ingested
+        yet. Callers use a miss to skip the remote Semantic Scholar API, which
+        would turn those gaps into wrong verdicts, so only report complete
+        once the builder has recorded the snapshot it finished ingesting.
+        """
+        if self._coverage_is_complete is None:
+            self._coverage_is_complete = self._read_completed_snapshot() is not None
+        return self._coverage_is_complete
+
+    def _read_completed_snapshot(self) -> Optional[str]:
+        """Return the release id the builder recorded after a finished ingest."""
+        try:
+            cursor = self.conn.execute(
+                "SELECT value FROM metadata WHERE key = 'last_release_id'"
+            )
+            row = cursor.fetchone()
+        except sqlite3.Error:
+            return None
+        if not row:
+            return None
+        value = row[0]
+        return str(value) if value else None
 
     def _get_arxiv_citation_checker(self) -> ArXivCitationChecker:
         if self._arxiv_citation_checker is None:

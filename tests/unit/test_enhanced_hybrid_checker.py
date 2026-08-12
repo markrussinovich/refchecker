@@ -286,3 +286,55 @@ def test_arxiv_title_search_precedes_loose_openreview_match():
     assert verified_data['_matched_database'] == 'ArXiv'
     assert verified_data['_matched_checker'] == 'arxiv_citation'
     assert checker.openreview.called is False
+
+
+class LocalMissChecker:
+    """Local S2 DB that finds nothing, with configurable ingest completeness."""
+
+    database_label = "Semantic Scholar"
+    database_key = "local_s2"
+
+    def __init__(self, complete):
+        self._complete = complete
+
+    def has_complete_coverage(self):
+        return self._complete
+
+    def verify_reference(self, reference):
+        return None, [], None
+
+
+class RecordingSemanticScholar:
+    def __init__(self):
+        self.calls = 0
+
+    def verify_reference(self, reference):
+        self.calls += 1
+        return None, [], None
+
+
+def test_incomplete_local_db_miss_still_queries_semantic_scholar():
+    """A DB mid-bootstrap answers 'not found' for papers it hasn't ingested;
+    trusting that would turn coverage gaps into wrong verdicts."""
+    checker = _build_checker()
+    checker.local_db = LocalMissChecker(complete=False)
+    checker.crossref = None
+    recorder = RecordingSemanticScholar()
+    checker.semantic_scholar = recorder
+
+    checker.verify_reference({"title": "Some uningested paper", "authors": []})
+
+    assert recorder.calls == 1
+
+
+def test_complete_local_db_miss_skips_semantic_scholar():
+    """The skip-SS optimization must survive for a fully ingested snapshot."""
+    checker = _build_checker()
+    checker.local_db = LocalMissChecker(complete=True)
+    checker.crossref = None
+    recorder = RecordingSemanticScholar()
+    checker.semantic_scholar = recorder
+
+    checker.verify_reference({"title": "Some uningested paper", "authors": []})
+
+    assert recorder.calls == 0

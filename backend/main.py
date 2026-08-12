@@ -9765,6 +9765,9 @@ async def get_local_database_status(current_user: UserInfo = Depends(require_use
             logger.warning("Could not stat local %s DB %s: %s", db_name, path_str, e)
         if db_name == "s2":
             info["snapshot"] = _read_semantic_scholar_db_snapshot(Path(path_str))
+            # No snapshot recorded means the builder has not finished a pass,
+            # so the file is a partial ingest and misses are not trustworthy.
+            info["ingest_complete"] = info["snapshot"] is not None
         return info
 
     active_paths = await _get_configured_database_paths()

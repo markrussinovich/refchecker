@@ -318,6 +318,29 @@ class EnhancedHybridReferenceChecker:
             return [('local_s2', 'Semantic Scholar', self.local_db)]
         return []
 
+    def _local_db_miss_is_authoritative(self, local_checker: Any) -> bool:
+        """Whether a local S2 miss may suppress the Semantic Scholar API call.
+
+        Skipping the API on a miss is only sound against a fully ingested
+        snapshot. A database that is still being built answers "not found" for
+        everything it hasn't reached yet, which would silently turn coverage
+        gaps into unverified references.
+        """
+        checker_reports_coverage = getattr(local_checker, 'has_complete_coverage', None)
+        if not callable(checker_reports_coverage):
+            return True
+        try:
+            if checker_reports_coverage():
+                return True
+        except Exception as e:
+            logger.debug("Could not read local DB coverage state: %s", e)
+            return True
+        logger.debug(
+            "Enhanced Hybrid: local S2 database is still being built; "
+            "querying the Semantic Scholar API instead of trusting the miss"
+        )
+        return False
+
     def _format_failure_detail(self, api_name: str, failure_type: str,
                                detail: Optional[str] = None) -> str:
         """Create a short, specific checker failure description."""
@@ -1654,7 +1677,7 @@ class EnhancedHybridReferenceChecker:
                     # Only S2 local DB is treated as "global coverage" for skip-SS optimization.
                     # Other local DBs (OpenAlex/CrossRef/DBLP) are partial and should not suppress
                     # Semantic Scholar API attempts when they return not_found.
-                    db_not_found = True
+                    db_not_found = self._local_db_miss_is_authoritative(local_checker)
                 elif failure_type not in ('none', 'not_found'):
                     failed_apis.append({
                         'name': local_key,
@@ -1684,7 +1707,7 @@ class EnhancedHybridReferenceChecker:
                     })
                 elif failure_type == 'not_found' and local_key == 'local_s2':
                     # See note above: only local_s2 controls skip_ss behavior.
-                    db_not_found = True
+                    db_not_found = self._local_db_miss_is_authoritative(local_checker)
             
             # Skip SS API when the 233M-paper local DB returned not_found —
             # if it's not in the DB, it's almost certainly not on SS either.
