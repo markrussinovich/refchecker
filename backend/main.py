@@ -675,6 +675,16 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
 
     tasks: Dict[str, asyncio.Task] = {}
 
+    if "s2" in db_paths and not os.environ.get("SEMANTIC_SCHOLAR_API_KEY"):
+        # The datasets API answers 401 without a key, so every refresh below
+        # will fail instantly and the snapshot will silently rot.
+        logger.warning(
+            "SEMANTIC_SCHOLAR_API_KEY is not set — the Semantic Scholar datasets "
+            "API requires it, so the local S2 database at %s cannot be built or "
+            "updated and will grow stale.",
+            db_paths["s2"],
+        )
+
     # Every refresh stages multi-GB downloads onto the same data disk, so running
     # them concurrently multiplies the peak free space required and makes them
     # compete for the same I/O. On a disk sized for the Semantic Scholar database
@@ -9847,6 +9857,12 @@ async def get_local_database_status(current_user: UserInfo = Depends(require_use
             # refreshes are not landing, regardless of what the logs claim.
             info["snapshot_stale"] = (
                 age_days is not None and age_days > S2_SNAPSHOT_STALE_DAYS
+            )
+            # The datasets API answers 401 without a key, so a missing key means
+            # every refresh fails on the first request no matter what else is
+            # healthy. This is the single most common reason a snapshot rots.
+            info["api_key_configured"] = bool(
+                os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
             )
         return info
 

@@ -22,7 +22,10 @@ from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, 
 
 import requests
 
-from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
+from refchecker.database.download_semantic_scholar_db import (
+    SemanticScholarAuthError,
+    SemanticScholarDownloader,
+)
 from refchecker.utils.database_config import DATABASE_FILE_ALIASES, DATABASE_LABELS
 from refchecker.utils.doi_utils import normalize_doi
 from refchecker.utils.text_utils import normalize_paper_title
@@ -443,6 +446,18 @@ def _prepare_s2_database(db_path: str, api_key: Optional[str] = None) -> Databas
             updated=True,
             skipped=False,
             message='Updated S2 database',
+        )
+    except SemanticScholarAuthError as exc:
+        # Without a valid key this fails identically on every run, so say so
+        # plainly instead of leaving an operator to guess at a transient error.
+        logger.error('%s', exc)
+        return DatabaseUpdateOutcome(
+            updated=False,
+            skipped=False,
+            message=(
+                'Semantic Scholar refresh failed: API key missing or invalid '
+                '(set SEMANTIC_SCHOLAR_API_KEY)'
+            ),
         )
     finally:
         downloader.close()

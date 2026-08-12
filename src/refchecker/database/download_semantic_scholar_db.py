@@ -66,6 +66,22 @@ ARCHIVE_EXPANSION_FACTOR = 4
 # Never let ingest drive the volume to zero: SQLite fails hard on a full disk.
 MIN_FREE_DISK_BYTES = 5 * 1024 ** 3
 
+
+class SemanticScholarAuthError(RuntimeError):
+    """The datasets API rejected our credentials.
+
+    The Semantic Scholar *datasets* API requires an API key and answers 401/403
+    without one. That is not "no updates available" and no amount of retrying or
+    falling back to a full download will fix it, so it has to be distinguishable
+    from a transient failure -- otherwise a deployment silently stops updating.
+    """
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    response = getattr(exc, 'response', None)
+    return getattr(response, 'status_code', None) in (401, 403)
+
+
 class SemanticScholarDownloader:
     """
     Class to download paper metadata from Semantic Scholar and store it in a SQLite database
@@ -351,6 +367,12 @@ class SemanticScholarDownloader:
             elif response.status_code == 429:
                 logger.warning("Rate limited on diffs API. Consider waiting or using a higher tier API key")
                 return None
+            elif response.status_code in (401, 403):
+                raise SemanticScholarAuthError(
+                    "The Semantic Scholar datasets API rejected the request "
+                    f"({response.status_code}). This API requires SEMANTIC_SCHOLAR_API_KEY; "
+                    "without a valid key the database can never be updated."
+                )
             
             response.raise_for_status()
             data = response.json()
@@ -365,6 +387,8 @@ class SemanticScholarDownloader:
             return None
             
         except Exception as e:
+            if isinstance(e, SemanticScholarAuthError) or _is_auth_error(e):
+                raise
             logger.info(f"Error checking incremental updates: {e}")
             logger.info("Falling back to alternative incremental check method")
             # Try to get end_release_id if it wasn't set yet
@@ -626,6 +650,13 @@ class SemanticScholarDownloader:
             return release_id
             
         except Exception as e:
+            if _is_auth_error(e):
+                raise SemanticScholarAuthError(
+                    "The Semantic Scholar datasets API rejected the request "
+                    f"({getattr(getattr(e, 'response', None), 'status_code', '401')}). "
+                    "This API requires SEMANTIC_SCHOLAR_API_KEY; without a valid key "
+                    "the database can never be updated."
+                ) from e
             logger.error(f"Error getting latest release ID: {e}")
             raise
     
@@ -1610,6 +1641,13 @@ class SemanticScholarDownloader:
             return structured_files
             
         except Exception as e:
+            if _is_auth_error(e):
+                raise SemanticScholarAuthError(
+                    "The Semantic Scholar datasets API rejected the request "
+                    f"({getattr(getattr(e, 'response', None), 'status_code', '401')}). "
+                    "This API requires SEMANTIC_SCHOLAR_API_KEY; without a valid key "
+                    "the database can never be downloaded or updated."
+                ) from e
             logger.error(f"Error listing files: {e}")
             return []
     

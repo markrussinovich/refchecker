@@ -1495,6 +1495,12 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       Ingest incomplete — lookups still fall back to the API
                     </div>
                   )}
+                  {entry.api_key_configured === false && (
+                    <div className="mt-0.5" style={{ color: 'var(--color-error, #ef4444)' }}>
+                      SEMANTIC_SCHOLAR_API_KEY is not set — the datasets API
+                      rejects every refresh without it
+                    </div>
+                  )}
                   {entry.last_refresh?.status && (
                     <div
                       className="mt-0.5"

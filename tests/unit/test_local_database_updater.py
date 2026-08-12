@@ -12,7 +12,10 @@ from refchecker.checkers.local_semantic_scholar import (
     LocalNonArxivReferenceChecker,
 )
 from refchecker.database import local_database_updater as updater
-from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
+from refchecker.database.download_semantic_scholar_db import (
+    SemanticScholarAuthError,
+    SemanticScholarDownloader,
+)
 from refchecker.database.local_database_updater import (
     build_acl_database_from_tarball,
     build_dblp_database_from_xml_gz,
@@ -974,3 +977,78 @@ def test_small_database_without_marker_reports_incomplete(tmp_path):
         assert checker.has_complete_coverage() is False
     finally:
         checker.close()
+
+def _http_error(status):
+    import requests
+    response = requests.Response()
+    response.status_code = status
+    response.url = 'https://api.semanticscholar.org/datasets/v1/release/latest'
+    error = requests.exceptions.HTTPError(f'{status} Client Error', response=response)
+    return error
+
+
+def test_unauthorized_release_lookup_raises_auth_error(tmp_path):
+    """A 401 from the datasets API must be distinguishable from a transient
+    failure: it means SEMANTIC_SCHOLAR_API_KEY is missing or invalid and every
+    future refresh will fail identically until an operator fixes it."""
+    downloader = SemanticScholarDownloader(
+        output_dir=str(tmp_path), db_path=str(tmp_path / 's2.db')
+    )
+    try:
+        class _Session:
+            def get(self, *args, **kwargs):
+                raise _http_error(401)
+
+            def close(self):
+                pass
+
+        downloader.session = _Session()
+        with pytest.raises(SemanticScholarAuthError):
+            downloader.get_latest_release_id()
+    finally:
+        downloader.close()
+
+
+def test_unauthorized_file_listing_raises_instead_of_reporting_no_files(tmp_path):
+    """list_files() previously swallowed the 401 and returned [], which the
+    caller reported as 'no files found for the latest release'."""
+    downloader = SemanticScholarDownloader(
+        output_dir=str(tmp_path), db_path=str(tmp_path / 's2.db')
+    )
+    try:
+        class _Session:
+            def get(self, *args, **kwargs):
+                raise _http_error(403)
+
+            def close(self):
+                pass
+
+        downloader.session = _Session()
+        with pytest.raises(SemanticScholarAuthError):
+            downloader.list_files('2026-08-05')
+    finally:
+        downloader.close()
+
+
+def test_refresh_reports_missing_api_key_instead_of_generic_failure(tmp_path, monkeypatch):
+    """The deployed message was 'Semantic Scholar refresh failed', which gave an
+    operator nothing to act on while the snapshot silently aged five months."""
+    db_path = tmp_path / 's2.db'
+    _make_minimal_s2_db(db_path, release_id='2026-03-10')
+
+    class _AuthFailingDownloader:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def refresh_database(self, *args, **kwargs):
+            raise SemanticScholarAuthError('401 Unauthorized')
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(updater, 'SemanticScholarDownloader', _AuthFailingDownloader)
+
+    outcome = updater._prepare_s2_database(str(db_path), api_key=None)
+
+    assert outcome.updated is False
+    assert 'SEMANTIC_SCHOLAR_API_KEY' in outcome.message
