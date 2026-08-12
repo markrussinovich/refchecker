@@ -69,6 +69,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const [editConfig, setEditConfig] = useState(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null)
   const [menuStyle, setMenuStyle] = useState(null)
+  const [hoveredConfigId, setHoveredConfigId] = useState(null)
   const dropdownRef = useRef(null)
 
   const selectedConfig = visibleConfigs.find(c => c.id === activeSelectedId && configHasKey(c))
@@ -238,18 +239,12 @@ export default function LLMSelector({ mode = 'extraction' }) {
                   style={{
                     backgroundColor: config.id === activeSelectedId 
                       ? 'var(--color-bg-tertiary)' 
-                      : 'transparent',
+                      : hoveredConfigId === config.id
+                        ? 'var(--color-bg-secondary)'
+                        : 'transparent',
                   }}
-                  onMouseEnter={(e) => {
-                    if (config.id !== activeSelectedId) {
-                      e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (config.id !== activeSelectedId) {
-                      e.currentTarget.style.backgroundColor = 'transparent'
-                    }
-                  }}
+                  onMouseEnter={() => setHoveredConfigId(config.id)}
+                  onMouseLeave={() => setHoveredConfigId(prev => (prev === config.id ? null : prev))}
                 >
                   <div 
                     className="flex-1 min-w-0"

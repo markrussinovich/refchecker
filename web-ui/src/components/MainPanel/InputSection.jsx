@@ -90,6 +90,7 @@ function sanitizeUrlInput(input) {
  */
 export default function InputSection() {
   const [inputMode, setInputMode] = useState('url') // url, file, text, bulk
+  const [hoveredMode, setHoveredMode] = useState(null)
   const [inputValue, setInputValue] = useState('')
   const [pendingAutoSubmit, setPendingAutoSubmit] = useState(false)
   const [textValue, setTextValue] = useState('')
@@ -504,40 +505,34 @@ export default function InputSection() {
           { id: 'file', label: 'Upload File' },
           { id: 'text', label: 'Paste Text' },
           { id: 'bulk', label: 'Bulk' },
-        ].map(mode => (
+        ].map(mode => {
+          const isActive = inputMode === mode.id
+          const isHovered = !isChecking && !isActive && hoveredMode === mode.id
+          return (
           <button
             key={mode.id}
             onClick={() => setInputMode(mode.id)}
             disabled={isChecking}
             className="px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-150 whitespace-nowrap flex-shrink-0"
             style={{
-              backgroundColor: inputMode === mode.id 
-                ? 'var(--color-bg-primary)' 
+              backgroundColor: isHovered
+                ? 'var(--color-bg-hover)'
                 : 'var(--color-bg-primary)',
-              color: inputMode === mode.id 
-                ? 'var(--color-text-primary)' 
+              color: isActive
+                ? 'var(--color-text-primary)'
                 : 'var(--color-text-secondary)',
-              border: inputMode === mode.id 
-                ? '1px solid var(--color-accent)' 
+              border: (isActive || isHovered)
+                ? '1px solid var(--color-accent)'
                 : '1px solid var(--color-border)',
               cursor: isChecking ? 'not-allowed' : 'pointer',
             }}
-            onMouseEnter={(e) => {
-              if (!isChecking && inputMode !== mode.id) {
-                e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
-                e.currentTarget.style.borderColor = 'var(--color-accent)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (inputMode !== mode.id) {
-                e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)'
-                e.currentTarget.style.borderColor = 'var(--color-border)'
-              }
-            }}
+            onMouseEnter={() => setHoveredMode(mode.id)}
+            onMouseLeave={() => setHoveredMode(prev => (prev === mode.id ? null : prev))}
           >
             {mode.label}
           </button>
-        ))}
+          )
+        })}
       </div>
 
       {/* Input area based on mode */}

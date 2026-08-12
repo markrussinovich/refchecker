@@ -187,3 +187,53 @@ describe('InputSection bulk mode', () => {
     expect(mocks.startCheck).toHaveBeenCalledWith('session-1', 42, '2401.12345', 'url', null)
   })
 })
+
+describe('InputSection mode tabs — hover state', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getSelectedConfig.mockReturnValue(null)
+    mocks.getSelectedExtractionConfig.mockReturnValue(null)
+    mocks.getSelectedHallucinationConfig.mockReturnValue(null)
+    mocks.getKey.mockReturnValue(null)
+  })
+
+  // Regression: hover used to be applied by mutating the DOM style directly and
+  // reset only when the tab was NOT selected. Clicking a hovered tab therefore
+  // left the grey hover fill stranded on it forever.
+  it('does not leave a stale hover background on a tab after it is selected then deselected', () => {
+    render(<InputSection />)
+
+    const fileTab = screen.getByRole('button', { name: 'Upload File' })
+    const urlTab = screen.getByRole('button', { name: 'URL / ArXiv ID' })
+
+    fireEvent.mouseEnter(fileTab)
+    expect(fileTab.style.backgroundColor).toBe('var(--color-bg-hover)')
+
+    // Select it while hovered, then move the pointer away.
+    fireEvent.click(fileTab)
+    fireEvent.mouseLeave(fileTab)
+    expect(fileTab.style.backgroundColor).toBe('var(--color-bg-primary)')
+
+    // Switching back must not leave the previously-hovered tab greyed out.
+    fireEvent.click(urlTab)
+    expect(fileTab.style.backgroundColor).toBe('var(--color-bg-primary)')
+    expect(fileTab.style.border).toBe('1px solid var(--color-border)')
+  })
+
+  it('keeps the active tab unhighlighted by hover and restores hover on re-enter', () => {
+    render(<InputSection />)
+
+    const urlTab = screen.getByRole('button', { name: 'URL / ArXiv ID' })
+    const textTab = screen.getByRole('button', { name: 'Paste Text' })
+
+    // Active tab never takes the hover fill.
+    fireEvent.mouseEnter(urlTab)
+    expect(urlTab.style.backgroundColor).toBe('var(--color-bg-primary)')
+    fireEvent.mouseLeave(urlTab)
+
+    fireEvent.mouseEnter(textTab)
+    expect(textTab.style.backgroundColor).toBe('var(--color-bg-hover)')
+    fireEvent.mouseLeave(textTab)
+    expect(textTab.style.backgroundColor).toBe('var(--color-bg-primary)')
+  })
+})

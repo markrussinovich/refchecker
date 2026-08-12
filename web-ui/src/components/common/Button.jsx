@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 /**
  * Reusable button component with variants — the SINGLE SOURCE OF TRUTH for the
  * article-level action controls (BUTTON_DESIGN §1.2). The five action panels
@@ -22,6 +24,10 @@ export default function Button({
   style: styleProp = {},
   ...props
 }) {
+  // Hover is state-driven, not an imperative DOM mutation: if the button
+  // becomes disabled/loading (or its variant changes) while the cursor is over
+  // it, mouseLeave never restores the base fill and the hover colour sticks.
+  const [isHovered, setIsHovered] = useState(false)
   // For non-pill sizes keep the existing Tailwind look. For pill, geometry comes
   // entirely from inline --control-* tokens so height/radius are fixed.
   const baseStyles = 'inline-flex items-center justify-center font-medium transition-colors rc-control'
@@ -109,7 +115,9 @@ export default function Button({
     <button
       className={`${baseStyles} ${legacyShape} ${sizes[size] ?? ''} ${className}`.trim()}
       style={{
-        backgroundColor: style.backgroundColor,
+        backgroundColor: (!disabled && !loading && isHovered)
+          ? style.hoverBg
+          : style.backgroundColor,
         // Disabled keeps the variant fill/text and only dims (BUTTON_DESIGN §1.3)
         // — swapping to grey makes a disabled pill read as a different chip (R52).
         color: style.color,
@@ -120,16 +128,8 @@ export default function Button({
         ...styleProp,
       }}
       disabled={disabled || loading}
-      onMouseEnter={(e) => {
-        if (!disabled && !loading) {
-          e.currentTarget.style.backgroundColor = style.hoverBg
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!disabled && !loading) {
-          e.currentTarget.style.backgroundColor = style.backgroundColor
-        }
-      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       {...props}
     >
       {/* Fixed 16×16 icon slot (BUTTON_DESIGN §1.4 / §3.1): holds the icon at

@@ -50,10 +50,15 @@ services:
         value: http://grobid:8070
 
       # --- Local Semantic Scholar database (optional, improves speed) ---
+      # If the file doesn't exist yet the server bootstraps it in the
+      # background, then keeps it current on REFCHECKER_DB_REFRESH_INTERVAL_HOURS.
+      # Until the first build finishes, checks use the (slower) remote S2 API.
       - key: REFCHECKER_DB_PATH
         value: /data/semantic_scholar.db
+      - key: REFCHECKER_DB_REFRESH_INTERVAL_HOURS
+        value: "24"
       - key: SEMANTIC_SCHOLAR_API_KEY
-        sync: false                  # Set in Render dashboard
+        sync: false                  # Required to build/refresh the local DB
 
       # --- Paperclip secondary verification tier (optional) ---
       - key: PAPERCLIP_API_KEY

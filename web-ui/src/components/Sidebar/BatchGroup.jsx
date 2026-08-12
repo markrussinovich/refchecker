@@ -20,6 +20,7 @@ export default function BatchGroup({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [editValue, setEditValue] = useState('')
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false)
   const { fetchHistory, deleteCheck, selectBatch } = useHistoryStore()
 
   const handleEditStart = (e) => {
@@ -152,22 +153,14 @@ export default function BatchGroup({
         onClick={handleHeaderClick}
         className="w-full px-3 pr-4 py-2 text-left transition-colors cursor-pointer history-item-hoverable"
         style={{
-          backgroundColor: hasSelectedItem 
+          backgroundColor: (hasSelectedItem || isHeaderHovered)
             ? 'var(--color-bg-hover)' 
             : 'var(--color-bg-secondary)',
           borderBottom: !isCollapsed ? '1px solid var(--color-border)' : 'none',
           minHeight: '72px',
         }}
-        onMouseEnter={(e) => {
-          if (!hasSelectedItem) {
-            e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!hasSelectedItem) {
-            e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
-          }
-        }}
+        onMouseEnter={() => setIsHeaderHovered(true)}
+        onMouseLeave={() => setIsHeaderHovered(false)}
       >
         {/* Top row: icon + label + edit/status icons */}
         <div className="flex items-center gap-2">

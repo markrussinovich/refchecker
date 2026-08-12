@@ -95,6 +95,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // 'corrected' = apply every verifier suggestion before exporting
   // 'diff' = side-by-side original-vs-corrected listing
   const [exportMode, setExportMode] = useState('original')
+  // Hovered filter chip id. Tracked in state (not imperative DOM writes) so a
+  // chip never keeps a stale hover fill when the selection changes under the
+  // cursor.
+  const [hoveredChip, setHoveredChip] = useState(null)
   const exportMenuRef = useRef(null)
 
   // Close export menu when clicking outside
@@ -486,19 +490,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           onClick={() => handleFilterClick('verified')}
           className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
           style={{ 
-            backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
+            backgroundColor: (isVerifiedSelected || hoveredChip === 'verified') ? 'var(--color-success-bg)' : 'transparent',
             borderColor: isVerifiedSelected ? 'var(--color-success)' : 'transparent',
           }}
-          onMouseEnter={(e) => {
-            if (!isVerifiedSelected) {
-              e.currentTarget.style.backgroundColor = 'var(--color-success-bg)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isVerifiedSelected) {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }
-          }}
+          onMouseEnter={() => setHoveredChip('verified')}
+          onMouseLeave={() => setHoveredChip(prev => (prev === 'verified' ? null : prev))}
           title={`${refsVerified} reference${refsVerified === 1 ? '' : 's'} fully verified`}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -516,19 +512,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             refsWithErrors > 0 ? 'cursor-pointer' : 'cursor-default opacity-50'
           }`}
           style={{ 
-            backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
+            backgroundColor: (isErrorSelected || (refsWithErrors > 0 && hoveredChip === 'error')) ? 'var(--color-error-bg)' : 'transparent',
             borderColor: isErrorSelected ? 'var(--color-error)' : 'transparent',
           }}
-          onMouseEnter={(e) => {
-            if (refsWithErrors > 0 && !isErrorSelected) {
-              e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (refsWithErrors > 0 && !isErrorSelected) {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }
-          }}
+          onMouseEnter={() => setHoveredChip('error')}
+          onMouseLeave={() => setHoveredChip(prev => (prev === 'error' ? null : prev))}
           title={refsWithErrors > 0 ? `${refsWithErrors} reference${refsWithErrors === 1 ? '' : 's'} with errors` : 'No references with errors'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -547,19 +535,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             refsWithWarningsOnly > 0 ? 'cursor-pointer' : 'cursor-default opacity-50'
           }`}
           style={{ 
-            backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
+            backgroundColor: (isWarningSelected || (refsWithWarningsOnly > 0 && hoveredChip === 'warning')) ? 'var(--color-warning-bg)' : 'transparent',
             borderColor: isWarningSelected ? 'var(--color-warning)' : 'transparent',
           }}
-          onMouseEnter={(e) => {
-            if (refsWithWarningsOnly > 0 && !isWarningSelected) {
-              e.currentTarget.style.backgroundColor = 'var(--color-warning-bg)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (refsWithWarningsOnly > 0 && !isWarningSelected) {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }
-          }}
+          onMouseEnter={() => setHoveredChip('warning')}
+          onMouseLeave={() => setHoveredChip(prev => (prev === 'warning' ? null : prev))}
           title={refsWithWarningsOnly > 0 ? `${refsWithWarningsOnly} reference${refsWithWarningsOnly === 1 ? '' : 's'} with warnings only` : 'No references with warnings only'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -576,19 +556,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             onClick={() => handleFilterClick('suggestion')}
             className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{
-              backgroundColor: isSuggestionSelected ? 'var(--color-suggestion-bg)' : 'transparent',
+              backgroundColor: (isSuggestionSelected || hoveredChip === 'suggestion') ? 'var(--color-suggestion-bg)' : 'transparent',
               borderColor: isSuggestionSelected ? 'var(--color-suggestion)' : 'transparent',
             }}
-            onMouseEnter={(e) => {
-              if (!isSuggestionSelected) {
-                e.currentTarget.style.backgroundColor = 'var(--color-suggestion-bg)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSuggestionSelected) {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
+            onMouseEnter={() => setHoveredChip('suggestion')}
+            onMouseLeave={() => setHoveredChip(prev => (prev === 'suggestion' ? null : prev))}
             title={`${refsWithSuggestionsOnly} reference${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions only`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-suggestion)' }}>
@@ -604,19 +576,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             onClick={() => handleFilterClick('unverified')}
             className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{ 
-              backgroundColor: isUnverifiedSelected ? 'var(--color-bg-tertiary)' : 'transparent',
+              backgroundColor: (isUnverifiedSelected || hoveredChip === 'unverified') ? 'var(--color-bg-tertiary)' : 'transparent',
               borderColor: isUnverifiedSelected ? 'var(--color-text-muted)' : 'transparent',
             }}
-            onMouseEnter={(e) => {
-              if (!isUnverifiedSelected) {
-                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isUnverifiedSelected) {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
+            onMouseEnter={() => setHoveredChip('unverified')}
+            onMouseLeave={() => setHoveredChip(prev => (prev === 'unverified' ? null : prev))}
             title={`${refsUnverified} reference${refsUnverified === 1 ? '' : 's'} could not be verified`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -633,19 +597,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             onClick={() => handleFilterClick('hallucination')}
             className="flex items-center gap-1 px-2 py-1 rounded border transition-colors cursor-pointer"
             style={{ 
-              backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
+              backgroundColor: (isHallucinationSelected || hoveredChip === 'hallucination') ? 'var(--color-hallucination-bg)' : 'transparent',
               borderColor: isHallucinationSelected ? 'var(--color-hallucination)' : 'transparent',
             }}
-            onMouseEnter={(e) => {
-              if (!isHallucinationSelected) {
-                e.currentTarget.style.backgroundColor = 'var(--color-hallucination-bg)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isHallucinationSelected) {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
+            onMouseEnter={() => setHoveredChip('hallucination')}
+            onMouseLeave={() => setHoveredChip(prev => (prev === 'hallucination' ? null : prev))}
             title={`${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
@@ -692,22 +648,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   fontSize: '14px',
                   lineHeight: '1.25rem',
                   borderRadius: 'var(--control-radius)',
-                  backgroundColor: isSelected ? filter.bgColor : 'transparent',
-                  borderColor: isSelected ? filter.color : 'var(--color-border)',
+                  backgroundColor: (isSelected || hoveredChip === `issue:${filter.id}`) ? filter.bgColor : 'transparent',
+                  borderColor: (isSelected || hoveredChip === `issue:${filter.id}`) ? filter.color : 'var(--color-border)',
                   color: filter.color,
                 }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.backgroundColor = filter.bgColor
-                    e.currentTarget.style.borderColor = filter.color
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.borderColor = 'var(--color-border)'
-                  }
-                }}
+                onMouseEnter={() => setHoveredChip(`issue:${filter.id}`)}
+                onMouseLeave={() => setHoveredChip(prev => (prev === `issue:${filter.id}` ? null : prev))}
                 title={`${filter.value} reference${filter.value === 1 ? '' : 's'} with ${filter.label.toLowerCase()}`}
               >
                 <span className="font-semibold">{filter.value}</span>

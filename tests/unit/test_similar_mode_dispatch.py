@@ -65,7 +65,7 @@ def _load_dispatch_namespace():
     functions reference, plus the doubles the dispatch leans on (logger,
     httpx, _find_similar_papers_impl).
     """
-    tree = ast.parse(_MAIN_PATH.read_text(), filename=str(_MAIN_PATH))
+    tree = ast.parse(_MAIN_PATH.read_text(encoding="utf-8"), filename=str(_MAIN_PATH))
     wanted = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _WANTED:

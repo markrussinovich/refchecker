@@ -89,6 +89,7 @@ export default function GraphView({ references, paperTitle }) {
   // controls) so the citation-graph fetch effect can re-run when it toggles,
   // letting first-degree nodes pick up their AI ring too.
   const [aiGenMode, setAiGenMode] = useState(false)
+  const [hoveredAiGenMode, setHoveredAiGenMode] = useState(null)
   const [graphTheme, setGraphTheme] = useState(() => ({
     background: '#f7f7f8',
     text: '#0d0d0d',
@@ -552,11 +553,15 @@ export default function GraphView({ references, paperTitle }) {
                 key={val}
                 type="button"
                 onClick={() => setAiGenMode(val === 'ai')}
-                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--color-bg-hover)' }}
-                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                onMouseEnter={() => setHoveredAiGenMode(val)}
+                onMouseLeave={() => setHoveredAiGenMode(prev => (prev === val ? null : prev))}
                 className="px-2 py-0.5 transition-colors"
                 style={{
-                  background: active ? 'var(--color-bg-tertiary)' : 'transparent',
+                  background: active
+                    ? 'var(--color-bg-tertiary)'
+                    : hoveredAiGenMode === val
+                      ? 'var(--color-bg-hover)'
+                      : 'transparent',
                   color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
                 }}
                 title={val === 'ai'

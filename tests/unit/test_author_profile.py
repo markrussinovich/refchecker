@@ -42,7 +42,7 @@ class _NullLogger:
 
 
 def _load_namespace():
-    tree = ast.parse(_MAIN_PATH.read_text(), filename=str(_MAIN_PATH))
+    tree = ast.parse(_MAIN_PATH.read_text(encoding="utf-8"), filename=str(_MAIN_PATH))
     wanted = {}
     pydantic_models = {}
     for node in tree.body:

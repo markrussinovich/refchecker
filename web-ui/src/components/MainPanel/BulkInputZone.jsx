@@ -14,6 +14,7 @@ export default function BulkInputZone({
   disabled,
 }) {
   const fileInputRef = useRef(null)
+  const [hoveredSubMode, setHoveredSubMode] = useState(null)
 
   const handleFileChange = useCallback((e) => {
     const files = Array.from(e.target.files || [])
@@ -100,66 +101,40 @@ export default function BulkInputZone({
     <div className="space-y-4">
       {/* Sub-mode toggle */}
       <div className="flex gap-2">
-        <button
-          onClick={() => setBulkMode('urls')}
-          disabled={disabled}
-          className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-          style={{
-            backgroundColor: bulkMode === 'urls' 
-              ? 'var(--color-accent-muted)' 
-              : 'var(--color-bg-tertiary)',
-            color: bulkMode === 'urls' 
-              ? 'var(--color-accent)' 
-              : 'var(--color-text-secondary)',
-            border: bulkMode === 'urls' 
-              ? '1px solid var(--color-accent)' 
-              : '1px solid transparent',
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled && bulkMode !== 'urls') {
-              e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
-              e.currentTarget.style.color = 'var(--color-text-primary)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (bulkMode !== 'urls') {
-              e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-              e.currentTarget.style.color = 'var(--color-text-secondary)'
-            }
-          }}
-        >
-          List of URLs
-        </button>
-        <button
-          onClick={() => setBulkMode('files')}
-          disabled={disabled}
-          className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-          style={{
-            backgroundColor: bulkMode === 'files' 
-              ? 'var(--color-accent-muted)' 
-              : 'var(--color-bg-tertiary)',
-            color: bulkMode === 'files' 
-              ? 'var(--color-accent)' 
-              : 'var(--color-text-secondary)',
-            border: bulkMode === 'files' 
-              ? '1px solid var(--color-accent)' 
-              : '1px solid transparent',
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled && bulkMode !== 'files') {
-              e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
-              e.currentTarget.style.color = 'var(--color-text-primary)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (bulkMode !== 'files') {
-              e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-              e.currentTarget.style.color = 'var(--color-text-secondary)'
-            }
-          }}
-        >
-          Multiple Files / ZIP
-        </button>
+        {[
+          { id: 'urls', label: 'List of URLs' },
+          { id: 'files', label: 'Multiple Files / ZIP' },
+        ].map(sub => {
+          const isActive = bulkMode === sub.id
+          const isHovered = !disabled && !isActive && hoveredSubMode === sub.id
+          return (
+            <button
+              key={sub.id}
+              onClick={() => setBulkMode(sub.id)}
+              disabled={disabled}
+              className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+              style={{
+                backgroundColor: isActive
+                  ? 'var(--color-accent-muted)'
+                  : isHovered
+                    ? 'var(--color-bg-hover)'
+                    : 'var(--color-bg-tertiary)',
+                color: isActive
+                  ? 'var(--color-accent)'
+                  : isHovered
+                    ? 'var(--color-text-primary)'
+                    : 'var(--color-text-secondary)',
+                border: isActive
+                  ? '1px solid var(--color-accent)'
+                  : '1px solid transparent',
+              }}
+              onMouseEnter={() => setHoveredSubMode(sub.id)}
+              onMouseLeave={() => setHoveredSubMode(prev => (prev === sub.id ? null : prev))}
+            >
+              {sub.label}
+            </button>
+          )
+        })}
       </div>
 
       {/* URLs input */}

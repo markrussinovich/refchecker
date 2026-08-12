@@ -961,6 +961,40 @@ RefChecker includes a [`render.yaml`](render.yaml) Blueprint for one-click deplo
 
 > **Note:** The persistent disk at `/data` stores the SQLite database and uploaded files, so data survives redeployments. For other PaaS hosts (Railway, Fly.io), the same Docker image works — set `PORT`, `REFCHECKER_DATA_DIR`, and the auth env vars.
 
+#### Local Semantic Scholar database on a server
+
+Reference verification is far faster against a local Semantic Scholar DB than
+against the remote S2 API. When `REFCHECKER_DB_PATH` (or
+`REFCHECKER_DATABASE_DIRECTORY`) points at a location that does not contain the
+DB yet, the server starts a full bootstrap download in the background and then
+keeps it current with incremental refreshes. Until that first build finishes,
+checks fall back to the remote S2 API and are correspondingly slower.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `REFCHECKER_DB_PATH` | *(unset)* | Path to `semantic_scholar.db` (or a directory containing local DBs). Setting it opts the deployment into local lookups. |
+| `SEMANTIC_SCHOLAR_API_KEY` | *(unset)* | Required for the S2 datasets API used to build/refresh the local DB. |
+| `REFCHECKER_DB_REFRESH_INTERVAL_HOURS` | `24` | How often to refresh local DBs. `0` refreshes once per process start only. |
+| `REFCHECKER_DB_AUTO_BOOTSTRAP` | `true` | Set `false` to never auto-download a missing DB (admin UI download still works). |
+| `REFCHECKER_S2_MIN_FREE_GB` | `95` | Refuse to start a bootstrap download without at least this much free disk. |
+
+Admins can confirm what a deployment is actually using at any time:
+
+```bash
+curl -s https://<your-url>/api/databases/status -H "Cookie: <admin session>"
+# {"using_local_s2": true, "databases": [{"database": "s2", "exists": true,
+#   "snapshot": "2026-01-20", "size_bytes": 91234567890, "last_refresh": {...}}], ...}
+```
+
+`using_local_s2: false` means every reference lookup is going to the remote API —
+check that the disk has room, that `SEMANTIC_SCHOLAR_API_KEY` is set, and read
+`last_refresh.detail` for the failure reason.
+
+A build that is killed mid-download (deploy, restart, OOM) strands a multi-GB
+staging directory on the data disk; enough of those fill the disk and break
+SQLite. The server sweeps those orphaned directories on startup, in the
+background so a slow disk can't delay the health check.
+
 ---
 
 ## Configuration

@@ -344,7 +344,7 @@ def test_run_check_finally_invokes_checker_close():
     called from the request path."""
     from pathlib import Path
 
-    src = (Path(__file__).resolve().parents[2] / "backend" / "main.py").read_text()
+    src = (Path(__file__).resolve().parents[2] / "backend" / "main.py").read_text(encoding="utf-8")
     assert "checker = ProgressRefChecker(" in src
     # After the (single) construction site there must be a finally that closes it.
     tail = src[src.index("checker = ProgressRefChecker("):]
