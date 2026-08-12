@@ -141,6 +141,9 @@ export const clearDatabase = () => api.delete('/admin/database')
 export const triggerDatabaseDownload = (payload) => api.post('/databases/download', payload)
 export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')
 export const cancelDatabaseDownload = (database) => api.post('/databases/download/cancel', { database })
+// Admin-only: whether the local databases exist and how stale they are. This is
+// the only view of the local DB in multi-user mode, where db_path is hidden.
+export const getDatabaseStatus = () => api.get('/databases/status')
 
 // AI-generated-text detection: local model management
 export const getAIDetectionModelStatus = () => api.get('/ai-detection/model/status')

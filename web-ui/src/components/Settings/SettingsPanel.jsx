@@ -250,6 +250,27 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [dbBuildStarting, setDbBuildStarting] = useState(false)
   const [dbBuildError, setDbBuildError] = useState(null)
 
+  // Admin view of the local reference databases. In multi-user mode db_path is
+  // hidden entirely, which left admins with no way to see whether the local S2
+  // database exists or how far behind its snapshot had fallen.
+  const [dbStatus, setDbStatus] = useState(null)
+  const [dbStatusError, setDbStatusError] = useState(null)
+  const showDbStatus = multiuser && authUser?.is_admin
+
+  useEffect(() => {
+    if (!isSettingsOpen || !showDbStatus) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data } = await api.getDatabaseStatus()
+        if (!cancelled) { setDbStatus(data); setDbStatusError(null) }
+      } catch (err) {
+        if (!cancelled) setDbStatusError(err?.response?.data?.detail || err?.message || 'unavailable')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isSettingsOpen, showDbStatus])
+
   // Sync local db path when settings are fetched from the server
   useEffect(() => {
     if (settings.db_path?.value !== undefined) {
@@ -1420,6 +1441,70 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           }}
         />
       </div>
+      )}
+
+      {/* Local reference database status (multi-user admins only). The db_path
+          editor below is single-user-only, so without this an admin on a
+          hosted deployment has no way to tell whether the local Semantic
+          Scholar database is present or how stale its snapshot is. */}
+      {showDbStatus && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            Local Reference Databases
+          </div>
+          <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            Local lookups avoid the Semantic Scholar API and are far faster.
+          </div>
+          {dbStatusError && (
+            <div className="text-xs mt-2" style={{ color: 'var(--color-error, #ef4444)' }}>
+              Could not load database status: {dbStatusError}
+            </div>
+          )}
+          {dbStatus && (
+            <div className="mt-2 space-y-2">
+              {dbStatus.databases.map((entry) => (
+                <div
+                  key={entry.database}
+                  className="text-xs rounded-lg border p-2"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                    {entry.label} — {entry.exists ? 'present' : 'missing'}
+                    {entry.exists && entry.size_bytes
+                      ? ` (${(entry.size_bytes / 1e9).toFixed(1)} GB)`
+                      : ''}
+                  </div>
+                  <div className="mt-0.5 break-all">{entry.path || 'not configured'}</div>
+                  {entry.exists && entry.snapshot && (
+                    <div
+                      className="mt-0.5"
+                      style={{
+                        color: entry.snapshot_stale
+                          ? 'var(--color-error, #ef4444)'
+                          : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      Snapshot {entry.snapshot}
+                      {entry.snapshot_age_days != null
+                        ? ` (${Math.round(entry.snapshot_age_days)} days old${entry.snapshot_stale ? ' — not updating' : ''})`
+                        : ''}
+                    </div>
+                  )}
+                  {entry.exists && entry.ingest_complete === false && (
+                    <div className="mt-0.5" style={{ color: 'var(--color-warning, #f59e0b)' }}>
+                      Ingest incomplete — lookups still fall back to the API
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {dbStatus.refresh_interval_hours
+                  ? `Refreshing every ${dbStatus.refresh_interval_hours} h`
+                  : 'Automatic refresh disabled'}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Local Database Directory (single-user only, rendered when setting exists in API response) */}

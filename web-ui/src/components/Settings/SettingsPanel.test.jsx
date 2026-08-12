@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getPaperclipKeyStatus: vi.fn(),
   setPaperclipKey: vi.fn(),
   deletePaperclipKey: vi.fn(),
+  getDatabaseStatus: vi.fn(),
 }))
 
 vi.mock('../../stores/useSettingsStore', () => ({
@@ -54,6 +55,7 @@ vi.mock('../../utils/api', () => ({
   getPaperclipKeyStatus: mocks.getPaperclipKeyStatus,
   setPaperclipKey: mocks.setPaperclipKey,
   deletePaperclipKey: mocks.deletePaperclipKey,
+  getDatabaseStatus: mocks.getDatabaseStatus,
 }))
 
 vi.mock('../../utils/logger', () => ({
@@ -167,5 +169,69 @@ describe('SettingsPanel Semantic Scholar key storage', () => {
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Remove' }).length).toBe(2)
     })
+  })
+})
+
+describe('SettingsPanel local database status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.multiuser = true
+    mocks.hasKey.mockReturnValue(false)
+    mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: {} })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: {} })
+  })
+
+  it('warns an admin when the local S2 snapshot has stopped updating', async () => {
+    mocks.getDatabaseStatus.mockResolvedValue({
+      data: {
+        databases: [
+          {
+            database: 's2',
+            label: 'Semantic Scholar',
+            path: '/data/semantic_scholar.db',
+            exists: true,
+            size_bytes: 90_000_000_000,
+            snapshot: '2025-01-15',
+            snapshot_age_days: 420,
+            snapshot_stale: true,
+            ingest_complete: true,
+          },
+        ],
+        active: ['s2'],
+        using_local_s2: true,
+        refresh_interval_hours: 24,
+      },
+    })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+
+    expect(await screen.findByText(/Semantic Scholar — present/)).toBeInTheDocument()
+    expect(screen.getByText(/420 days old — not updating/)).toBeInTheDocument()
+  })
+
+  it('reports a missing local database instead of silently omitting it', async () => {
+    mocks.getDatabaseStatus.mockResolvedValue({
+      data: {
+        databases: [
+          {
+            database: 's2',
+            label: 'Semantic Scholar',
+            path: '/data/semantic_scholar.db',
+            exists: false,
+            size_bytes: null,
+            snapshot: null,
+            snapshot_age_days: null,
+            snapshot_stale: false,
+          },
+        ],
+        active: [],
+        using_local_s2: false,
+        refresh_interval_hours: 24,
+      },
+    })
+
+    render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
+
+    expect(await screen.findByText(/Semantic Scholar — missing/)).toBeInTheDocument()
   })
 })
