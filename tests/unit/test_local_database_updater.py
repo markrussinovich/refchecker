@@ -840,3 +840,45 @@ def test_finished_database_claims_complete_coverage(tmp_path):
         assert checker.has_complete_coverage() is True
     finally:
         checker.close()
+
+
+def test_interrupted_bootstrap_resumes_without_redownloading(tmp_path, monkeypatch):
+    """Resuming must skip shards already ingested and only then mark complete."""
+    db_path = tmp_path / 'semantic_scholar.db'
+    files = [{'path': f'papers-{i}.gz', 'url': f'https://example/{i}', 'size': 10} for i in range(3)]
+    downloaded = []
+
+    def _install(downloader, fail_after=None):
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-01-01')
+        monkeypatch.setattr(downloader, 'list_files', lambda release, dataset='papers': files)
+
+        def _fake_download(file_meta):
+            if fail_after is not None and len(downloaded) >= fail_after:
+                raise RuntimeError('connection reset')
+            downloaded.append(file_meta['path'])
+            _make_papers_archive(tmp_path / file_meta['path'], file_meta['path'], 'X')
+            return file_meta['path'], True
+
+        monkeypatch.setattr(downloader, 'download_file', _fake_download)
+
+    first = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        _install(first, fail_after=2)
+        first.download_dataset_files()
+        # Partial ingest must not advertise a finished snapshot.
+        assert first.get_last_release_id() is None
+    finally:
+        first.close()
+
+    assert downloaded == ['papers-0.gz', 'papers-1.gz']
+
+    second = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        _install(second)
+        assert second.download_dataset_files() is True
+        assert second.get_last_release_id() == '2026-01-01'
+    finally:
+        second.close()
+
+    # Only the shard that was missing is fetched on the retry.
+    assert downloaded == ['papers-0.gz', 'papers-1.gz', 'papers-2.gz']

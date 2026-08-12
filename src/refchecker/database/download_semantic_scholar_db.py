@@ -1443,8 +1443,16 @@ class SemanticScholarDownloader:
             
             # Download files
             downloaded_count = 0
+            ingested_count = 0
             total_records = 0
             for index, file_meta in enumerate(files, 1):
+                marker = self._archive_marker_key(latest_release, file_meta["path"])
+                if self.get_metadata(marker):
+                    logger.info(
+                        f"Skipping [{index}/{len(files)}] {file_meta['path']} - already ingested"
+                    )
+                    ingested_count += 1
+                    continue
                 if not self._has_room_for_next_archive(file_meta):
                     logger.error(
                         "Stopping dataset download: not enough free disk space on "
@@ -1474,16 +1482,34 @@ class SemanticScholarDownloader:
                 except Exception as e:
                     logger.error(f"Error processing {local_path}: {e}")
                     continue
+                # Record progress before deleting so an interrupted bootstrap
+                # resumes where it stopped instead of re-downloading tens of GB.
+                self.set_metadata(marker, datetime.now(timezone.utc).isoformat())
+                ingested_count += 1
                 self._discard_processed_archive(local_path)
 
-            logger.info(f"Downloaded {downloaded_count} files out of {len(files)} total files")
-            if total_records > 0:
-                self._record_processing_metadata(total_records)
-            return downloaded_count > 0
+            logger.info(
+                f"Ingested {ingested_count} of {len(files)} dataset files "
+                f"({downloaded_count} downloaded this run)"
+            )
+            if ingested_count < len(files):
+                # Leave the snapshot unrecorded: callers treat a database
+                # without one as a partial ingest whose misses can't be trusted.
+                logger.warning(
+                    "Dataset ingest incomplete; the database will keep falling back "
+                    "to the Semantic Scholar API until the remaining files are ingested."
+                )
+                return downloaded_count > 0
+            self._record_processing_metadata(total_records)
+            return True
             
         except Exception as e:
             logger.error(f"Error downloading dataset files: {e}")
             return False
+
+    def _archive_marker_key(self, release_id, archive_path) -> str:
+        """Metadata key marking one archive of one release as ingested."""
+        return f"ingested_archive_{release_id}_{os.path.basename(archive_path)}"
 
     def _has_room_for_next_archive(self, file_meta) -> bool:
         """Refuse to download when the disk can't absorb the archive plus growth.
