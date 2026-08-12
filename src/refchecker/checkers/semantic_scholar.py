@@ -103,11 +103,42 @@ class NonArxivReferenceChecker:
         # Track API failures for Enhanced Hybrid Checker
         self._api_failed = False
         self._failure_reason = None
+        self._api_key_rejected = False
         
         # ArXiv rate limiter for version checks
         self.arxiv_rate_limiter = ArXivRateLimiter.get_instance()
         self.arxiv_abs_url = "https://arxiv.org/abs"
         self.arxiv_timeout = 30
+
+    def _drop_rejected_api_key(self, response) -> bool:
+        """Fall back to anonymous access when S2 rejects our API key.
+
+        An invalid, revoked or not-yet-activated key makes every request return
+        401/403. Callers map that to `return None`, i.e. "paper not found", so a
+        bad key silently turns every lookup into a false miss and references get
+        reported unverified — strictly worse than sending no key at all, which
+        merely gets rate limited. Drop the key once, say so loudly, and let the
+        caller retry anonymously.
+
+        Returns:
+            True if the key was just dropped and the request is worth retrying.
+        """
+        if getattr(response, 'status_code', None) not in (401, 403):
+            return False
+        if not self._session.headers.get("x-api-key"):
+            # Already anonymous, so this is not about our credentials.
+            return False
+
+        logger.error(
+            "Semantic Scholar rejected the configured API key (HTTP %s). "
+            "Continuing without it at anonymous rate limits — check "
+            "SEMANTIC_SCHOLAR_API_KEY.",
+            response.status_code,
+        )
+        self._session.headers.pop("x-api-key", None)
+        self.headers.pop("x-api-key", None)
+        self._api_key_rejected = True
+        return True
     
     def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -152,6 +183,10 @@ class NonArxivReferenceChecker:
                 response = self._session.get(endpoint, params=params, timeout=30)
                 
                 # Check for rate limiting
+                # A rejected key 403s forever; retry anonymously rather than
+                # reporting the paper as missing.
+                if self._drop_rejected_api_key(response):
+                    continue
                 if response.status_code == 429:
                     wait_time = self.request_delay * (self.backoff_factor ** attempt)
                     logger.debug(f"Rate limit exceeded. Increasing delay and retrying...")
@@ -199,6 +234,10 @@ class NonArxivReferenceChecker:
                 response = self._session.get(endpoint, params=params, timeout=30)
                 
                 # Check for rate limiting
+                # A rejected key 403s forever; retry anonymously rather than
+                # reporting the paper as missing.
+                if self._drop_rejected_api_key(response):
+                    continue
                 if response.status_code == 429:
                     wait_time = self.request_delay * (self.backoff_factor ** attempt)
                     logger.debug(f"Rate limit exceeded. Increasing delay and retrying...")
@@ -252,6 +291,10 @@ class NonArxivReferenceChecker:
                     return response.json()
                 if response.status_code == 404:
                     return None
+                # A rejected key 403s forever; retry anonymously rather than
+                # reporting the paper as missing.
+                if self._drop_rejected_api_key(response):
+                    continue
                 if response.status_code == 429:
                     time.sleep(self.request_delay * (self.backoff_factor ** attempt))
                     continue
@@ -291,6 +334,10 @@ class NonArxivReferenceChecker:
                     return None
                 if response.status_code in (404, 400):
                     return None
+                # A rejected key 403s forever; retry anonymously rather than
+                # reporting the paper as missing.
+                if self._drop_rejected_api_key(response):
+                    continue
                 if response.status_code == 429:
                     time.sleep(self.request_delay * (self.backoff_factor ** attempt))
                     continue
@@ -333,6 +380,10 @@ class NonArxivReferenceChecker:
                     return response.json()
                 if response.status_code in (404, 400):
                     return None
+                # A rejected key 403s forever; retry anonymously rather than
+                # reporting the paper as missing.
+                if self._drop_rejected_api_key(response):
+                    continue
                 if response.status_code == 429:
                     time.sleep(self.request_delay * (self.backoff_factor ** attempt))
                     continue
@@ -813,6 +864,10 @@ class NonArxivReferenceChecker:
                     try:
                         response = self._session.get(endpoint, params=params, timeout=30)
                         
+                        # A rejected key 403s forever; retry anonymously rather than
+                        # reporting the paper as missing.
+                        if self._drop_rejected_api_key(response):
+                            continue
                         if response.status_code == 429:
                             wait_time = self.request_delay * (self.backoff_factor ** attempt)
                             logger.debug(f"Rate limit exceeded. Retrying in {wait_time}s...")
