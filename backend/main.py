@@ -2,6 +2,7 @@
 FastAPI application for RefChecker Web UI
 """
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import asyncio
 import time
 import uuid
@@ -160,6 +161,9 @@ def _private_artifact_headers(extra_headers: Optional[Dict[str, str]] = None) ->
 
 S2_BOOTSTRAP_MIN_FREE_GB = int(os.environ.get("REFCHECKER_S2_MIN_FREE_GB", "95"))
 DEFAULT_DB_REFRESH_INTERVAL_HOURS = 24.0
+# Semantic Scholar publishes weekly; a snapshot older than this means the
+# refreshes are not landing, whatever the refresh logs say.
+S2_SNAPSHOT_STALE_DAYS = 30.0
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -292,6 +296,24 @@ def _read_semantic_scholar_db_snapshot(db_path: Optional[Path]) -> Optional[str]
     except Exception as e:
         logger.warning(f"Failed to read Semantic Scholar snapshot metadata from {db_path}: {e}")
         return None
+
+
+def _snapshot_age_days(snapshot: Optional[str]) -> Optional[float]:
+    """Days since the S2 release the local DB last finished ingesting.
+
+    Release ids are dates ("2026-08-05"), so this is the honest answer to
+    "is the database actually being updated?" -- the file's mtime is not,
+    since any failed refresh or schema touch bumps it.
+    """
+    if not snapshot:
+        return None
+    try:
+        released = datetime.strptime(snapshot.strip(), "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
+    except (ValueError, AttributeError):
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - released).total_seconds() / 86400.0)
 
 
 async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
@@ -9768,6 +9790,13 @@ async def get_local_database_status(current_user: UserInfo = Depends(require_use
             # No snapshot recorded means the builder has not finished a pass,
             # so the file is a partial ingest and misses are not trustworthy.
             info["ingest_complete"] = info["snapshot"] is not None
+            age_days = _snapshot_age_days(info["snapshot"])
+            info["snapshot_age_days"] = age_days
+            # S2 publishes weekly, so a snapshot older than a month means the
+            # refreshes are not landing, regardless of what the logs claim.
+            info["snapshot_stale"] = (
+                age_days is not None and age_days > S2_SNAPSHOT_STALE_DAYS
+            )
         return info
 
     active_paths = await _get_configured_database_paths()

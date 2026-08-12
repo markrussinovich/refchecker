@@ -13,6 +13,7 @@ import importlib
 import os
 import sqlite3
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -289,3 +290,45 @@ def test_startup_does_not_block_on_sweep(backend_main, tmp_path, monkeypatch):
         await task
 
     _run(_scenario())
+
+
+def test_status_endpoint_flags_a_stale_snapshot(backend_main, tmp_path, monkeypatch):
+    """A database that stopped receiving updates still looks healthy by size and
+    mtime, so the snapshot release date is what has to surface the problem."""
+    api_main = backend_main
+    db_file = tmp_path / "data" / "semantic_scholar.db"
+    db_file.parent.mkdir()
+    stale = (datetime.now(timezone.utc) - timedelta(days=400)).strftime("%Y-%m-%d")
+    _make_s2_db(db_file, snapshot=stale)
+    monkeypatch.setenv("REFCHECKER_DB_PATH", str(db_file))
+    admin = api_main.UserInfo(
+        id=1, email="a@example.com", name="a", provider="github", is_admin=True
+    )
+
+    s2 = next(
+        d
+        for d in _run(api_main.get_local_database_status(admin))["databases"]
+        if d["database"] == "s2"
+    )
+    assert s2["snapshot_stale"] is True
+    assert s2["snapshot_age_days"] > 399
+
+
+def test_status_endpoint_accepts_a_recent_snapshot(backend_main, tmp_path, monkeypatch):
+    api_main = backend_main
+    db_file = tmp_path / "data" / "semantic_scholar.db"
+    db_file.parent.mkdir()
+    recent = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+    _make_s2_db(db_file, snapshot=recent)
+    monkeypatch.setenv("REFCHECKER_DB_PATH", str(db_file))
+    admin = api_main.UserInfo(
+        id=1, email="a@example.com", name="a", provider="github", is_admin=True
+    )
+
+    s2 = next(
+        d
+        for d in _run(api_main.get_local_database_status(admin))["databases"]
+        if d["database"] == "s2"
+    )
+    assert s2["snapshot_stale"] is False
+    assert s2["snapshot_age_days"] < 4
