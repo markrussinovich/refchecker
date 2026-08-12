@@ -26,8 +26,10 @@ from refchecker.utils.database_config import DATABASE_BUILD_DEPENDENCIES, DATABA
 
 # Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles).
 # Skip this when running under pytest so we don't replace pytest's capture streams, which can
-# lead to closed-file errors during teardown.
-if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
+# lead to closed-file errors during teardown. PYTEST_CURRENT_TEST is not set while pytest is
+# importing this module, so check for the imported pytest module as well; without that the
+# replaced wrapper is garbage collected, closes pytest's capture file, and aborts the run.
+if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST") and "pytest" not in sys.modules:
     import io
     if hasattr(sys.stdout, "buffer"):
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -99,7 +101,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
+if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST") and "pytest" not in sys.modules:
+    # PYTEST_CURRENT_TEST alone is not enough: it is unset while pytest is
+    # importing this module, and rebinding handlers onto pytest's capture
+    # stream leaves them pointing at a temp file pytest later closes, which
+    # crashes the whole run at teardown.
     loggers = [logging.getLogger()]
     loggers.extend(
         logger_obj
