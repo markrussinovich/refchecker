@@ -1334,3 +1334,38 @@ def test_rate_limited_file_listing_is_retried(tmp_path, monkeypatch):
         assert len(files) == 1
     finally:
         downloader.close()
+
+
+def test_signed_dataset_urls_are_not_written_to_logs(tmp_path, monkeypatch):
+    """Dataset links carry AWSAccessKeyId, Signature and x-amz-security-token;
+    those must not be recorded in a log file that operators read and share."""
+    signed = (
+        'https://ai2-s2ag.s3.amazonaws.com/updates/papers/shard.gz'
+        '?AWSAccessKeyId=ASIASECRET&Signature=abc%3D&x-amz-security-token=TOKEN'
+    )
+    downloader = _incremental_downloader(tmp_path, b'not json\n', monkeypatch)
+
+    class _Collector(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.messages = []
+
+        def emit(self, record):
+            self.messages.append(record.getMessage())
+
+    collector = _Collector()
+    module_logger = logging.getLogger(
+        'refchecker.database.download_semantic_scholar_db'
+    )
+    module_logger.setLevel(logging.DEBUG)
+    module_logger.addHandler(collector)
+    try:
+        downloader._process_incremental_file(signed, 'update')
+
+        blob = ' '.join(collector.messages)
+        assert 'ASIASECRET' not in blob
+        assert 'x-amz-security-token' not in blob
+        assert 'shard.gz' in blob
+    finally:
+        module_logger.removeHandler(collector)
+        downloader.close()

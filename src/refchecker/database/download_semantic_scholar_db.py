@@ -84,6 +84,16 @@ DIFF_RATE_LIMIT_RETRIES = 5
 DIFF_RATE_LIMIT_BACKOFF_SECONDS = 30
 
 
+def _redact_signed_url(url: str) -> str:
+    """Drop the query string from a dataset URL before logging it.
+
+    The datasets API hands back S3 links carrying AWSAccessKeyId, Signature and
+    x-amz-security-token. Those do not belong in a log file, and they made each
+    line unreadably long.
+    """
+    return str(url).split("?", 1)[0]
+
+
 class _PrefixedStream:
     """A read-only stream that replays a sniffed prefix ahead of the rest.
 
@@ -737,22 +747,22 @@ class SemanticScholarDownloader:
                     # Process update files
                     for update_url in update_files:
                         try:
-                            logger.info(f"Processing update file: {update_url}")
+                            logger.info(f"Processing update file: {_redact_signed_url(update_url)}")
                             records_updated = self._process_incremental_file(update_url, "update")
                             total_updated += records_updated
                         except Exception as e:
-                            logger.error(f"Error processing update file {update_url}: {e}")
+                            logger.error(f"Error processing update file {_redact_signed_url(update_url)}: {e}")
                             failed_files += 1
                             continue
                     
                     # Process delete files
                     for delete_url in delete_files:
                         try:
-                            logger.info(f"Processing delete file: {delete_url}")
+                            logger.info(f"Processing delete file: {_redact_signed_url(delete_url)}")
                             records_deleted = self._process_incremental_file(delete_url, "delete")
                             total_deleted += records_deleted
                         except Exception as e:
-                            logger.error(f"Error processing delete file {delete_url}: {e}")
+                            logger.error(f"Error processing delete file {_redact_signed_url(delete_url)}: {e}")
                             failed_files += 1
                             continue
             
@@ -1943,8 +1953,9 @@ class SemanticScholarDownloader:
         Returns:
             int: Number of records processed
         """
+        safe_url = _redact_signed_url(file_url)
         try:
-            logger.info(f"Processing {operation_type} file: {file_url}")
+            logger.debug(f"Processing {operation_type} file: {safe_url}")
             self._require_free_disk()
             
             # Download the file content
@@ -1953,7 +1964,7 @@ class SemanticScholarDownloader:
             
             records_processed = 0
             cursor = self.conn.cursor()
-            malformed = _MalformedLineReporter(f"{operation_type} file {file_url}")
+            malformed = _MalformedLineReporter(f"{operation_type} file {safe_url}")
             
             # Begin transaction for better performance
             self.conn.execute("BEGIN TRANSACTION")
@@ -2015,7 +2026,7 @@ class SemanticScholarDownloader:
             # Returning 0 here would be indistinguishable from "no changes in
             # this file", which is how a totally failed refresh came to report
             # success. Let the caller see the failure.
-            logger.error(f"Error processing {operation_type} file {file_url}: {e}")
+            logger.error(f"Error processing {operation_type} file {safe_url}: {e}")
             raise
 
 def main():
