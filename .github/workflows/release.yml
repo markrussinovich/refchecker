@@ -112,10 +112,38 @@ jobs:
         echo "current_version=$base_version" >> $GITHUB_OUTPUT
     
     - name: Commit version bump
+      id: commit_version
       run: |
-        git add src/refchecker/__version__.py
-        git commit -m "Bump version to ${{ steps.increment_version.outputs.new_version }}"
-        git push
+        # Another push (a contributor's, or a concurrent run of this workflow)
+        # can land between our checkout and our push, which rejects the bump
+        # and skips the build/publish/release steps below. Rebase onto
+        # whatever arrived and try again, recomputing the version each time so
+        # we never reuse a number a concurrent bump already took.
+        new_version="${{ steps.increment_version.outputs.new_version }}"
+
+        for attempt in 1 2 3 4 5; do
+          git add src/refchecker/__version__.py
+          git diff --cached --quiet || git commit -m "Bump version to $new_version"
+
+          if git push; then
+            echo "new_version=$new_version" >> $GITHUB_OUTPUT
+            echo "Pushed version $new_version on attempt $attempt"
+            exit 0
+          fi
+
+          echo "Push rejected; syncing with origin and retrying (attempt $attempt)"
+          git reset --hard HEAD~1
+          git fetch origin "$GITHUB_REF_NAME"
+          git reset --hard "origin/$GITHUB_REF_NAME"
+
+          base_version=$(python -c "import sys; sys.path.insert(0, 'src'); from refchecker.__version__ import __version__; print(__version__)")
+          IFS='.' read -r major minor patch <<< "$base_version"
+          new_version="${major}.${minor}.$((patch + 1))"
+          sed -i "s/__version__ = \".*\"/__version__ = \"$new_version\"/" src/refchecker/__version__.py
+        done
+
+        echo "::error::Could not push the version bump after 5 attempts"
+        exit 1
     
     - name: Run build script
       run: |
@@ -131,19 +159,19 @@ jobs:
     
     - name: Create GitHub Release
       run: |
-        gh release create "v${{ steps.increment_version.outputs.new_version }}" \
-          --title "Release v${{ steps.increment_version.outputs.new_version }}" \
-          --notes "Automated release v${{ steps.increment_version.outputs.new_version }}
+        gh release create "v${{ steps.commit_version.outputs.new_version }}" \
+          --title "Release v${{ steps.commit_version.outputs.new_version }}" \
+          --notes "Automated release v${{ steps.commit_version.outputs.new_version }}
         
         Previous version: v${{ steps.increment_version.outputs.current_version }}
         
         Changes:
-        - Auto-incremented version from ${{ steps.increment_version.outputs.current_version }} to ${{ steps.increment_version.outputs.new_version }}"
+        - Auto-incremented version from ${{ steps.increment_version.outputs.current_version }} to ${{ steps.commit_version.outputs.new_version }}"
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     outputs:
-      version: ${{ steps.increment_version.outputs.new_version }}
+      version: ${{ steps.commit_version.outputs.new_version }}
 
   # Build and publish Docker images to GitHub Container Registry
   docker-build-publish:
