@@ -205,6 +205,18 @@ class SemanticScholarRateLimitError(RuntimeError):
     """
 
 
+class SemanticScholarDiskSpaceError(RuntimeError):
+    """The volume is too full to keep ingesting.
+
+    Nothing about this is retryable within the same run: every remaining file
+    hits the same wall. It has to be distinguishable from a per-file parse
+    error so a catch-up stops on the first occurrence instead of grinding
+    through hundreds of files that cannot possibly succeed, and so the caller
+    never "falls back" to a full dataset download that needs far more room
+    than the incremental one that just ran out.
+    """
+
+
 class SemanticScholarAuthError(RuntimeError):
     """The datasets API rejected our credentials.
 
@@ -750,6 +762,8 @@ class SemanticScholarDownloader:
                             logger.info(f"Processing update file: {_redact_signed_url(update_url)}")
                             records_updated = self._process_incremental_file(update_url, "update")
                             total_updated += records_updated
+                        except SemanticScholarDiskSpaceError:
+                            raise
                         except Exception as e:
                             logger.error(f"Error processing update file {_redact_signed_url(update_url)}: {e}")
                             failed_files += 1
@@ -761,6 +775,8 @@ class SemanticScholarDownloader:
                             logger.info(f"Processing delete file: {_redact_signed_url(delete_url)}")
                             records_deleted = self._process_incremental_file(delete_url, "delete")
                             total_deleted += records_deleted
+                        except SemanticScholarDiskSpaceError:
+                            raise
                         except Exception as e:
                             logger.error(f"Error processing delete file {_redact_signed_url(delete_url)}: {e}")
                             failed_files += 1
@@ -794,7 +810,17 @@ class SemanticScholarDownloader:
                     logger.warning(f"Could not update release ID: {e}")
             
             return total_updated > 0 or total_deleted > 0
-            
+
+        except SemanticScholarDiskSpaceError as e:
+            # Report what did land, then re-raise: the caller must not treat
+            # this as an ordinary failure and escalate to a full download.
+            logger.error(
+                f"Stopping incremental update: {e}. "
+                f"Applied {total_updated} update and {total_deleted} delete records "
+                "before running out of room; the recorded release is unchanged so "
+                "the next run resumes from the same diff."
+            )
+            raise
         except Exception as e:
             logger.error(f"Error processing incremental diffs: {e}")
             return False
@@ -1410,6 +1436,15 @@ class SemanticScholarDownloader:
             # is indistinguishable here from "no incremental updates available".
             logger.error(f"{e}")
             return False
+        except SemanticScholarDiskSpaceError as e:
+            # A full download needs far more room than the incremental catch-up
+            # that just ran out, so escalating is guaranteed to fail and only
+            # buries the real cause under a second, larger failure.
+            logger.error(
+                f"Stopping refresh: {e}. Free space on the volume, then rerun; "
+                "the catch-up resumes from the same diff."
+            )
+            return False
 
         effective_snapshot = self.get_last_release_id() or self.current_snapshot_id
         if effective_snapshot:
@@ -1765,7 +1800,7 @@ class SemanticScholarDownloader:
         except OSError:
             return
         if free < MIN_FREE_DISK_BYTES:
-            raise RuntimeError(
+            raise SemanticScholarDiskSpaceError(
                 f"Only {self._format_size(free)} free on {self.output_dir}; "
                 f"refusing to continue ingest below {self._format_size(MIN_FREE_DISK_BYTES)}"
             )
@@ -2007,6 +2042,12 @@ class SemanticScholarDownloader:
                     except (json.JSONDecodeError, UnicodeDecodeError) as e:
                         malformed.record(line_num, e, records_processed)
                         continue
+                    except SemanticScholarDiskSpaceError:
+                        # Raised by the periodic headroom check above, not by
+                        # the record. Counting it as a malformed line would
+                        # hide a full disk and keep writing rows until the
+                        # malformed-line abort threshold was reached.
+                        raise
                     except Exception as e:
                         malformed.record(line_num, e, records_processed)
                         continue
