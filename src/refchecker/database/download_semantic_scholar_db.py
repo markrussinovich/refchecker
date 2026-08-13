@@ -1693,6 +1693,24 @@ class SemanticScholarDownloader:
         )
         return False
 
+    def _require_free_disk(self) -> None:
+        """Abort while there is still room, rather than running the volume dry.
+
+        An incremental catch-up writes rows straight into the database, so it
+        can exhaust the disk without downloading anything. Once free space hits
+        zero SQLite cannot even write its journal and starts failing every read
+        with "disk I/O error", which takes the database offline entirely.
+        """
+        try:
+            free = shutil.disk_usage(self.output_dir).free
+        except OSError:
+            return
+        if free < MIN_FREE_DISK_BYTES:
+            raise RuntimeError(
+                f"Only {self._format_size(free)} free on {self.output_dir}; "
+                f"refusing to continue ingest below {self._format_size(MIN_FREE_DISK_BYTES)}"
+            )
+
     def _discard_processed_archive(self, local_path: str) -> None:
         """Delete an ingested archive unless the operator asked to keep it."""
         if self.keep_dataset_files:
@@ -1876,6 +1894,7 @@ class SemanticScholarDownloader:
         """
         try:
             logger.info(f"Processing {operation_type} file: {file_url}")
+            self._require_free_disk()
             
             # Download the file content
             response = self.session.get(file_url, stream=True, timeout=300)
@@ -1917,6 +1936,9 @@ class SemanticScholarDownloader:
                         # Commit periodically for large files
                         if records_processed % 10000 == 0:
                             self.conn.commit()
+                            # Rows written by an incremental catch-up grow the
+                            # database itself, so re-check headroom as we go.
+                            self._require_free_disk()
                             self.conn.execute("BEGIN TRANSACTION")
                             logger.info(f"Processed {records_processed:,} {operation_type} records")
                         

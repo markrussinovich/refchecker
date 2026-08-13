@@ -1221,3 +1221,21 @@ def test_interrupted_download_leaves_no_partial_archive(tmp_path, monkeypatch):
         assert leftovers == []
     finally:
         downloader.close()
+
+
+def test_incremental_ingest_stops_before_filling_the_disk(tmp_path, monkeypatch):
+    """An incremental catch-up writes rows straight into the DB, so it can
+    exhaust the volume without downloading anything -- which is what left the
+    87GB production database raising "disk I/O error" on every lookup."""
+    payload = _gzipped_jsonl([{'paperId': 'S2-1', 'title': 'Paper', 'year': 2026}])
+    downloader = _incremental_downloader(tmp_path, payload, monkeypatch)
+    try:
+        monkeypatch.setattr(
+            'refchecker.database.download_semantic_scholar_db.shutil.disk_usage',
+            lambda path: collections.namedtuple('u', 'total used free')(100, 100, 1024),
+        )
+
+        with pytest.raises(RuntimeError, match='refusing to continue'):
+            downloader._process_incremental_file('https://example/diff.gz', 'update')
+    finally:
+        downloader.close()
