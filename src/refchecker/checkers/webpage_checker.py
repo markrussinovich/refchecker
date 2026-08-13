@@ -919,6 +919,13 @@ class WebPageChecker:
         url_is_academic = any(domain in url_lower for domain in academic_domains)
         if url_is_academic:
             return False
+
+        # Hosts we already trust as web-content sources elsewhere in this class
+        # count here too. Without this the two helpers disagree: a Hugging Face
+        # model card was "trusted" for one decision and unknown for the other,
+        # so a venue like "Open-weight release" fell through to an error.
+        if self._is_trusted_web_content_url(url):
+            return True
         
         # Check if venue matches any web content indicators
         venue_matches = any(indicator and indicator in venue_lower for indicator in all_indicators)

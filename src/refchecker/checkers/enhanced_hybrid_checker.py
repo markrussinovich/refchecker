@@ -359,6 +359,23 @@ class EnhancedHybridReferenceChecker:
         }
         return fallback_details.get(failure_type, f'{api_label}: verification failed')
 
+    @staticmethod
+    def _url_failure_message(subreason: str, web_url: str) -> str:
+        """Describe why a cited URL did not confirm the reference.
+
+        The distinction matters: a page we were blocked from reading tells us
+        nothing about its contents, so reporting it as a mismatch states a
+        conclusion that was never actually checked.
+        """
+        subreason = subreason or ''
+        if 'non-existent' in subreason:
+            return f'Non-existent web page: {web_url}'
+        if 'could not be accessed' in subreason:
+            return f'Cited URL could not be accessed to confirm the reference: {web_url}'
+        if 'URL references paper' in subreason:
+            return f'Paper not verified but URL references paper: {web_url}'
+        return f'Cited URL does not reference this paper: {web_url}'
+
     def _build_unverified_error_details(self, attempted_apis: List[str],
                                         failed_apis: List[Dict[str, Any]]) -> str:
         """Summarize which checkers returned no match versus which failed."""
@@ -1838,13 +1855,7 @@ class EnhancedHybridReferenceChecker:
                             'sources_checked': sources_checked,
                             'sources_negative': sources_negative,
                         })
-                        # Use specific message based on what went wrong
-                        if 'non-existent' in subreason:
-                            url_msg = f'Non-existent web page: {web_url}'
-                        elif 'URL references paper' in subreason:
-                            url_msg = f'Paper not verified but URL references paper: {web_url}'
-                        else:
-                            url_msg = f'Cited URL does not reference this paper: {web_url}'
+                        url_msg = self._url_failure_message(subreason, web_url)
                         errors_out.append({
                             'error_type': 'url' if 'URL references paper' not in subreason else 'unverified',
                             'error_details': url_msg,
