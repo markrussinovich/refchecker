@@ -66,6 +66,119 @@ ARCHIVE_EXPANSION_FACTOR = 4
 # Never let ingest drive the volume to zero: SQLite fails hard on a full disk.
 MIN_FREE_DISK_BYTES = 5 * 1024 ** 3
 
+# A handful of malformed records in a multi-million-line archive is normal and
+# worth reporting. Logging every one of them is not: a file we fail to decode
+# produces one message per line, which has filled a production data disk with a
+# multi-gigabyte log and taken the database offline. Report the first few, then
+# count the rest and summarise once.
+MAX_MALFORMED_LINE_LOGS = 20
+# If nothing at all parses after this many lines the payload is not the JSONL we
+# expect (wrong encoding, truncated download, an error page). Fail loudly rather
+# than grinding through gigabytes of garbage and reporting success afterwards.
+MALFORMED_LINE_ABORT_THRESHOLD = 1000
+
+GZIP_MAGIC = b"\x1f\x8b"
+
+
+class _PrefixedStream:
+    """A read-only stream that replays a sniffed prefix ahead of the rest.
+
+    HTTP response bodies cannot be rewound, so peeking at the first bytes to
+    detect gzip framing means putting them back before handing the stream to a
+    decompressor.
+    """
+
+    def __init__(self, prefix: bytes, stream):
+        self._prefix = prefix
+        self._stream = stream
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            data = self._prefix + self._stream.read()
+            self._prefix = b""
+            return data
+        if not self._prefix:
+            return self._stream.read(size)
+        data = self._prefix[:size]
+        self._prefix = self._prefix[len(data):]
+        if len(data) < size:
+            data += self._stream.read(size - len(data))
+        return data
+
+    def readable(self):
+        return True
+
+    def close(self):
+        self._prefix = b""
+
+
+def _iter_remote_json_lines(response, chunk_size: int = 1 << 20):
+    """Yield decoded lines from an HTTP response, transparently gunzipping.
+
+    The Semantic Scholar datasets API serves gzipped JSONL from S3 without a
+    ``Content-Encoding`` header, so ``requests`` hands back the compressed
+    bytes untouched. Iterating those as text yields binary garbage on every
+    line -- which is exactly how incremental updates silently stopped applying.
+    """
+    raw = getattr(response, "raw", None)
+    if raw is None:
+        prefix, source = b"", response
+    else:
+        # Undo any transport-level Content-Encoding, then sniff the payload.
+        try:
+            raw.decode_content = True
+        except AttributeError:
+            pass
+        prefix, source = raw.read(len(GZIP_MAGIC)) or b"", raw
+
+    stream = _PrefixedStream(prefix, source)
+    if prefix[:len(GZIP_MAGIC)] == GZIP_MAGIC:
+        stream = gzip.GzipFile(fileobj=stream)
+
+    buffer = b""
+    while True:
+        chunk = stream.read(chunk_size)
+        if not chunk:
+            break
+        buffer += chunk
+        lines = buffer.split(b"\n")
+        buffer = lines.pop()
+        for line in lines:
+            yield line.decode("utf-8", errors="replace")
+    if buffer:
+        yield buffer.decode("utf-8", errors="replace")
+
+
+class _MalformedLineReporter:
+    """Rate-limits per-line parse failures and aborts a wholly unreadable file."""
+
+    def __init__(self, description: str):
+        self.description = description
+        self.count = 0
+
+    def record(self, line_num: int, error: Exception, records_processed: int) -> None:
+        self.count += 1
+        if self.count <= MAX_MALFORMED_LINE_LOGS:
+            logger.warning(
+                f"Malformed line {line_num} in {self.description}: {error}"
+            )
+            if self.count == MAX_MALFORMED_LINE_LOGS:
+                logger.warning(
+                    f"Further malformed lines in {self.description} will be counted, not logged"
+                )
+        if records_processed == 0 and self.count >= MALFORMED_LINE_ABORT_THRESHOLD:
+            raise ValueError(
+                f"{self.description} is not readable JSONL: "
+                f"{self.count} consecutive malformed lines and no usable records"
+            )
+
+    def summarise(self, records_processed: int) -> None:
+        if self.count > MAX_MALFORMED_LINE_LOGS:
+            logger.warning(
+                f"Skipped {self.count:,} malformed lines in {self.description} "
+                f"({records_processed:,} records ingested)"
+            )
+
 
 class SemanticScholarAuthError(RuntimeError):
     """The datasets API rejected our credentials.
@@ -531,6 +644,7 @@ class SemanticScholarDownloader:
             
             total_updated = 0
             total_deleted = 0
+            failed_files = 0
             
             for diff in diffs:
                 if diff.get("type") == "full_dataset_update":
@@ -585,6 +699,7 @@ class SemanticScholarDownloader:
                             total_updated += records_updated
                         except Exception as e:
                             logger.error(f"Error processing update file {update_url}: {e}")
+                            failed_files += 1
                             continue
                     
                     # Process delete files
@@ -595,9 +710,22 @@ class SemanticScholarDownloader:
                             total_deleted += records_deleted
                         except Exception as e:
                             logger.error(f"Error processing delete file {delete_url}: {e}")
+                            failed_files += 1
                             continue
             
-            logger.info(f"Incremental update complete - Updated: {total_updated}, Deleted: {total_deleted}")
+            logger.info(
+                f"Incremental update complete - Updated: {total_updated}, "
+                f"Deleted: {total_deleted}, Failed files: {failed_files}"
+            )
+
+            if failed_files:
+                # Advancing the release marker after failures would permanently
+                # skip the diffs we could not apply, so stop here and report it.
+                logger.error(
+                    f"{failed_files} incremental file(s) failed; leaving the recorded "
+                    "release unchanged so the next run retries them"
+                )
+                return False
             
             # Update metadata after successful incremental update
             if total_updated > 0 or total_deleted > 0:
@@ -1293,6 +1421,7 @@ class SemanticScholarDownloader:
         
         records_processed = 0
         cursor = self.conn.cursor()
+        malformed = _MalformedLineReporter(os.path.basename(str(filename)))
         
         try:
             with gzip.open(file_path, 'rt', encoding='utf-8') as f:
@@ -1309,15 +1438,16 @@ class SemanticScholarDownloader:
                             logger.info(f"Processed {records_processed:,} records from {filename}")
                             self.conn.commit()
                             
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Invalid JSON on line {line_num} in {filename}: {e}")
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        malformed.record(line_num, e, records_processed)
                         continue
                     except Exception as e:
-                        logger.error(f"Error processing line {line_num} in {filename}: {e}")
+                        malformed.record(line_num, e, records_processed)
                         continue
             
             # Final commit
             self.conn.commit()
+            malformed.summarise(records_processed)
             
             # Track file processing metadata for incremental updates
             self._track_file_processing(filename, file_path, records_processed)
@@ -1687,12 +1817,24 @@ class SemanticScholarDownloader:
         # Get actual content length from response headers if available
         content_length = int(resp.headers.get('Content-Length', file_size or 0))
         
-        # Save file with progress tracking
+        # Download to a sibling temp file first. A failure part-way through (a
+        # dropped connection, or a full disk) otherwise leaves a truncated
+        # archive behind that nothing ever cleans up and that later looks like a
+        # complete download.
+        partial_path = local_path + ".part"
         downloaded = 0
-        with open(local_path, "wb") as f_out:
-            for chunk in resp.iter_content(8192):
-                f_out.write(chunk)
-                downloaded += len(chunk)
+        try:
+            with open(partial_path, "wb") as f_out:
+                for chunk in resp.iter_content(8192):
+                    f_out.write(chunk)
+                    downloaded += len(chunk)
+        except BaseException:
+            try:
+                os.remove(partial_path)
+            except OSError:
+                pass
+            raise
+        os.replace(partial_path, local_path)
         
         download_time = time.time() - start_time
         download_speed = downloaded / download_time if download_time > 0 else 0
@@ -1741,13 +1883,14 @@ class SemanticScholarDownloader:
             
             records_processed = 0
             cursor = self.conn.cursor()
+            malformed = _MalformedLineReporter(f"{operation_type} file {file_url}")
             
             # Begin transaction for better performance
             self.conn.execute("BEGIN TRANSACTION")
             
             try:
                 # Process the file line by line
-                for line_num, line in enumerate(response.iter_lines(decode_unicode=True), 1):
+                for line_num, line in enumerate(_iter_remote_json_lines(response), 1):
                     if not line.strip():
                         continue
                     
@@ -1777,15 +1920,16 @@ class SemanticScholarDownloader:
                             self.conn.execute("BEGIN TRANSACTION")
                             logger.info(f"Processed {records_processed:,} {operation_type} records")
                         
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Invalid JSON on line {line_num} in {operation_type} file: {e}")
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        malformed.record(line_num, e, records_processed)
                         continue
                     except Exception as e:
-                        logger.error(f"Error processing line {line_num} in {operation_type} file: {e}")
+                        malformed.record(line_num, e, records_processed)
                         continue
                 
                 # Final commit
                 self.conn.commit()
+                malformed.summarise(records_processed)
                 logger.info(f"Completed processing {records_processed:,} {operation_type} records")
                 
             except Exception as e:
@@ -1795,8 +1939,11 @@ class SemanticScholarDownloader:
             return records_processed
             
         except Exception as e:
+            # Returning 0 here would be indistinguishable from "no changes in
+            # this file", which is how a totally failed refresh came to report
+            # success. Let the caller see the failure.
             logger.error(f"Error processing {operation_type} file {file_url}: {e}")
-            return 0
+            raise
 
 def main():
     """Main function"""

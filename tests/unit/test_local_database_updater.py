@@ -2,6 +2,7 @@ import collections
 import gzip
 import io
 import json
+import logging
 import sqlite3
 import tarfile
 
@@ -13,6 +14,7 @@ from refchecker.checkers.local_semantic_scholar import (
 )
 from refchecker.database import local_database_updater as updater
 from refchecker.database.download_semantic_scholar_db import (
+    MAX_MALFORMED_LINE_LOGS,
     SemanticScholarAuthError,
     SemanticScholarDownloader,
 )
@@ -1052,3 +1054,170 @@ def test_refresh_reports_missing_api_key_instead_of_generic_failure(tmp_path, mo
 
     assert outcome.updated is False
     assert 'SEMANTIC_SCHOLAR_API_KEY' in outcome.message
+
+
+def _gzipped_jsonl(records):
+    """The datasets API serves gzipped JSONL from S3 with no Content-Encoding."""
+    body = "\n".join(json.dumps(r) for r in records).encode("utf-8")
+    return gzip.compress(body)
+
+
+class _FakeRawStream:
+    """Stands in for urllib3's raw response: read-only, not rewindable."""
+
+    def __init__(self, payload):
+        self._buffer = io.BytesIO(payload)
+        self.decode_content = False
+
+    def read(self, size=-1):
+        return self._buffer.read(size)
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.raw = _FakeRawStream(payload)
+        self.status_code = 200
+        self.headers = {}
+
+    def raise_for_status(self):
+        return None
+
+    def iter_lines(self, decode_unicode=False):
+        raise AssertionError(
+            "incremental ingest must decompress the archive, not read it as text"
+        )
+
+
+def _incremental_downloader(tmp_path, payload, monkeypatch):
+    db_path = tmp_path / 'semantic_scholar.db'
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+
+    class _Session:
+        def get(self, *args, **kwargs):
+            return _FakeResponse(payload)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(downloader, 'session', _Session())
+    return downloader
+
+
+def test_incremental_update_decompresses_gzipped_diff(tmp_path, monkeypatch):
+    """The diff files are gzip; reading them as text yielded binary garbage on
+    every line, so no update ever applied while the run still reported success."""
+    payload = _gzipped_jsonl([
+        {'paperId': 'S2-INC-1', 'title': 'Incrementally Updated Paper', 'year': 2026},
+        {'paperId': 'S2-INC-2', 'title': 'Another Updated Paper', 'year': 2026},
+    ])
+    downloader = _incremental_downloader(tmp_path, payload, monkeypatch)
+    try:
+        processed = downloader._process_incremental_file('https://example/diff.gz', 'update')
+
+        assert processed == 2
+        titles = {
+            row[0]
+            for row in downloader.conn.execute('SELECT title FROM papers').fetchall()
+        }
+        assert 'Incrementally Updated Paper' in titles
+    finally:
+        downloader.close()
+
+
+def test_incremental_update_still_reads_uncompressed_diff(tmp_path, monkeypatch):
+    """Plain JSONL must keep working: the format is sniffed, not assumed."""
+    payload = b'{"paperId": "S2-PLAIN", "title": "Uncompressed Diff", "year": 2026}\n'
+    downloader = _incremental_downloader(tmp_path, payload, monkeypatch)
+    try:
+        assert downloader._process_incremental_file('https://example/diff', 'update') == 1
+    finally:
+        downloader.close()
+
+
+def test_unreadable_incremental_file_aborts_instead_of_logging_every_line(tmp_path, monkeypatch):
+    """An undecodable payload produced one log line per record and filled the
+    production data disk with a multi-gigabyte log, taking the DB offline."""
+    payload = b"\n".join(b"\x83\x95\xbe not json" for _ in range(5000))
+    downloader = _incremental_downloader(tmp_path, payload, monkeypatch)
+
+    class _Collector(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.messages = []
+
+        def emit(self, record):
+            self.messages.append(record.getMessage())
+
+    collector = _Collector()
+    module_logger = logging.getLogger(
+        'refchecker.database.download_semantic_scholar_db'
+    )
+    module_logger.addHandler(collector)
+    try:
+        with pytest.raises(Exception):
+            downloader._process_incremental_file('https://example/diff', 'update')
+
+        per_line = [m for m in collector.messages if 'Malformed line' in m]
+        assert len(per_line) <= MAX_MALFORMED_LINE_LOGS
+    finally:
+        module_logger.removeHandler(collector)
+        downloader.close()
+
+
+def test_failed_incremental_file_does_not_advance_recorded_release(tmp_path, monkeypatch):
+    """Advancing the release marker past diffs we could not apply would skip
+    them forever, which is how the snapshot silently stayed months out of date."""
+    db_path = tmp_path / 'semantic_scholar.db'
+    _make_minimal_s2_db(db_path, release_id='2026-03-10')
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-08-05')
+
+        def _boom(file_url, operation_type):
+            raise RuntimeError('unreadable diff')
+
+        monkeypatch.setattr(downloader, '_process_incremental_file', _boom)
+
+        result = downloader.download_incremental_updates([
+            {'update_files': ['https://example/diff.gz'], 'delete_files': []}
+        ])
+
+        assert result is False
+        assert downloader.get_last_release_id() == '2026-03-10'
+    finally:
+        downloader.close()
+
+
+def test_interrupted_download_leaves_no_partial_archive(tmp_path, monkeypatch):
+    """A download that dies part-way (dropped connection, full disk) used to
+    leave a truncated .gz behind that nothing cleaned up."""
+    db_path = tmp_path / 'semantic_scholar.db'
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+    try:
+        class _Response:
+            status_code = 200
+            headers = {'Content-Length': '100'}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield b'partial data'
+                raise OSError(28, 'No space left on device')
+
+        class _Session:
+            def get(self, *args, **kwargs):
+                return _Response()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(downloader, 'session', _Session())
+
+        with pytest.raises(OSError):
+            downloader.download_file({'path': 'papers-0.gz', 'url': 'https://example/0', 'size': 100})
+
+        leftovers = sorted(p.name for p in tmp_path.iterdir() if '.gz' in p.name)
+        assert leftovers == []
+    finally:
+        downloader.close()

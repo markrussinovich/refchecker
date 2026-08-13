@@ -140,10 +140,15 @@ def test_overview_window_excludes_older_checks(admin_db):
 def test_overview_daily_series_buckets_by_day(admin_db):
     api_main, db = admin_db
     user = _run(_make_user(db, "alice"))
-    now = datetime.now(timezone.utc)
-    _run(_insert_check(db, user_id=user, timestamp=_ts(now - timedelta(days=1))))
-    _run(_insert_check(db, user_id=user, timestamp=_ts(now - timedelta(days=1, hours=2))))
-    _run(_insert_check(db, user_id=user, timestamp=_ts(now)))
+    # Anchor at midday so the two same-day checks cannot straddle midnight:
+    # offsetting from "now" made this fail whenever the suite ran near 00:00 UTC.
+    earlier_day = (datetime.now(timezone.utc) - timedelta(days=2)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    later_day = earlier_day + timedelta(days=1)
+    _run(_insert_check(db, user_id=user, timestamp=_ts(earlier_day)))
+    _run(_insert_check(db, user_id=user, timestamp=_ts(earlier_day - timedelta(hours=2))))
+    _run(_insert_check(db, user_id=user, timestamp=_ts(later_day)))
 
     admin = api_main.UserInfo(id=user, provider="github", is_admin=True)
     result = _run(api_main.get_admin_insights_overview(days=30, current_user=admin))
