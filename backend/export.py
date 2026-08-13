@@ -93,6 +93,33 @@ class PdfEngineUnavailableError(RuntimeError):
 # Warning types treated as low-stakes noise (mostly Semantic-Scholar year drift).
 _MINOR_WARNING_TYPES = {"year", "year_unverified", "authors_unverified", "venue"}
 
+# Fallback wording for a finding that carries a type but no detail text. Without
+# this such a finding is invisible: it still counts toward the summary totals, so
+# the report would claim N warnings while listing fewer.
+_ISSUE_TYPE_LABELS = {
+    "author": "Author mismatch",
+    "authors": "Author mismatch",
+    "authors_unverified": "Authors could not be verified",
+    "year": "Year mismatch",
+    "year_unverified": "Year could not be verified",
+    "title": "Title mismatch",
+    "venue": "Venue mismatch",
+    "doi": "DOI problem",
+    "url": "URL problem",
+    "url_inaccessible": "URL could not be reached",
+    "unverified": "Could not be verified",
+    "hallucination": "Reference appears to be fabricated",
+    "hallucinated": "Reference appears to be fabricated",
+}
+
+
+def _humanize_issue_type(issue_type: Any, fallback: str) -> str:
+    """Readable wording for a finding whose details are missing."""
+    key = str(issue_type or "").strip().lower()
+    if not key:
+        return fallback
+    return _ISSUE_TYPE_LABELS.get(key, key.replace("_", " ").capitalize())
+
 
 # --------------------------------------------------------------------------- #
 # Coercion / small helpers
@@ -174,15 +201,17 @@ def _issues_for(ref: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
     for er in (ref.get("errors") or []):
         if not isinstance(er, dict):
             continue
-        d = er.get("error_details") or f"{(er.get('error_type') or 'issue').title()} mismatch"
+        d = er.get("error_details") or _humanize_issue_type(er.get("error_type"), "Unspecified error")
         errors.append(str(d))
     for wn in (ref.get("warnings") or []):
         if not isinstance(wn, dict):
             continue
+        wt = (wn.get("warning_type") or wn.get("error_type") or "").lower()
         d = wn.get("warning_details") or wn.get("error_details")
         if not d:
-            continue
-        wt = (wn.get("warning_type") or wn.get("error_type") or "").lower()
+            # Report the type rather than dropping the finding, so the listed
+            # issues always account for every warning the summary counts.
+            d = _humanize_issue_type(wt, "Unspecified warning")
         (minor if wt in _MINOR_WARNING_TYPES else major).append(str(d))
     return errors, major, minor
 
@@ -945,6 +974,47 @@ def _ai_section_html(ai: Dict[str, Any]) -> str:
     </section>"""
 
 
+def _numbered(r: Dict[str, Any]) -> str:
+    """"12. Title" — or just "Title" when the reference carries no number.
+    Without the guard an un-numbered reference renders as a stray ". Title"."""
+    num = r.get("num")
+    return f"{num}. {r['title']}" if num else str(r["title"])
+
+
+def _problem_rows(m: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """References carrying an error or a major warning — the "Issues to address"
+    set. Shared by every format so they agree on what counts as a problem."""
+    return [r for r in m["rows"] if r["errors"] or r["major"]]
+
+
+def _issues_section_html(m: Dict[str, Any]) -> str:
+    problems = _problem_rows(m)
+    if not problems:
+        return ('<section class="card"><h2>Issues to address (0)</h2>'
+                '<div class="muted small">No errors or major warnings.</div></section>')
+    items = ""
+    for r in problems:
+        color = _STATUS_COLOR.get(r["status"], "#8e8ea0")
+        detail = ""
+        for d in r["errors"]:
+            detail += f'<div class="issue err">⛔ {_e(d)}</div>'
+        for d in r["major"]:
+            detail += f'<div class="issue warn">⚠ {_e(d)}</div>'
+        if r.get("corrected"):
+            detail += (f'<div class="fix"><span class="fix-lbl">was → should be:</span> '
+                       f'{_diff_html(r.get("cited"), r["corrected"])}</div>')
+        items += f"""
+      <li class="ref">
+        <span class="chip" style="background:{color}">{_e(r["status"])}</span>
+        <div class="ref-body">
+          <div class="ref-title">{_e(_numbered(r))}</div>
+          {detail}
+        </div>
+      </li>"""
+    return (f'<section class="card"><h2>Issues to address ({len(problems)})</h2>'
+            f'<ul class="refs">{items}</ul></section>')
+
+
 def _ref_row_html(r: Dict[str, Any]) -> str:
     color = _STATUS_COLOR.get(r["status"], "#8e8ea0")
     issues = ""
@@ -964,7 +1034,7 @@ def _ref_row_html(r: Dict[str, Any]) -> str:
       <li class="ref">
         <span class="chip" style="background:{color}">{_e(r["status"])}</span>
         <div class="ref-body">
-          <div class="ref-title">{_e(r["num"])}{". " if r["num"] else ""}{_e(r["title"])}{cited}</div>
+          <div class="ref-title">{_e(_numbered(r))}{cited}</div>
           <div class="muted small">{_e(r["meta"])} {link}</div>
           {issues}
         </div>
@@ -1006,6 +1076,8 @@ def serialize_check_to_html(check: Dict[str, Any], *, corrections: bool = False,
                         f'reference{"s" if n_orph != 1 else ""} not cited inline in the body text.</div>')
     if "ai" in sec and m["ai"]:
         body.append(_ai_section_html(m["ai"]))
+    if "issues" in sec:
+        body.append(_issues_section_html(m))
     if "references" in sec:
         body.append(f'<section class="card"><h2>References</h2><ul class="refs">{ref_list}</ul></section>')
     body.append('<footer>Generated by RefChecker · This report is a verification aid, not a determination of misconduct.</footer>')
@@ -1193,7 +1265,7 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
     if "ai" in sec and m["ai"]:
         out.append(_ai_markdown(m["ai"], level + 1))
     if "issues" in sec:
-        problems = [r for r in m["rows"] if r["errors"] or r["major"]]
+        problems = _problem_rows(m)
         out.append(f"{h}# Issues to address ({len(problems)})")
         out.append("")
         if not problems:
@@ -1202,7 +1274,7 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
         for r in problems:
             emoji = "🔴" if r["errors"] else "🟡"
             tag = "ERROR" if r["errors"] else "WARNING"
-            out.append(f"- {emoji} **[{tag}] {r['num']}. {r['title']}**")
+            out.append(f"- {emoji} **[{tag}] {_numbered(r)}**")
             for d in r["errors"]:
                 out.append(f"  - ⛔ error: {d}")
             for d in r["major"]:
@@ -1219,12 +1291,19 @@ def _md_for_model(m: Dict[str, Any], *, level: int = 1) -> str:
         out.append("")
         for r in m["rows"]:
             emoji = _STATUS_EMOJI.get(r["status"], "⚪")
-            line = f"- {emoji} `{r['status']}` {r['num']}. {r['title']}"
+            line = f"- {emoji} `{r['status']}` {_numbered(r)}"
             if r["meta"]:
                 line += f" — {r['meta']}"
             if r["url"]:
                 line += f" <{r['url']}>"
             out.append(line)
+            # Spell out every finding here too. The reference list is often
+            # exported on its own, and a bare "error"/"warning" status that
+            # never says what is wrong is not actionable.
+            for d in r["errors"]:
+                out.append(f"  - ⛔ error: {d}")
+            for d in r["major"]:
+                out.append(f"  - ⚠ warning: {d}")
             for d in r["minor"]:
                 out.append(f"  - minor note: {d}")
         out.append("")
@@ -1308,7 +1387,7 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
         rows_html.append(
             f'<tr><td style="padding:6px 8px 6px 0;vertical-align:top;white-space:nowrap;color:{color}">'
             f'<b>{mark} {_e(label)}</b></td>'
-            f'<td style="padding:6px 0;border-bottom:1px solid #f0f0f0"><b>{_e(r["num"])}{". " if r["num"] else ""}{_e(r["title"])}</b>'
+            f'<td style="padding:6px 0;border-bottom:1px solid #f0f0f0"><b>{_e(_numbered(r))}</b>'
             f'<br/><font color="#8e8ea0" style="font-size:9pt">{_e(r["meta"])}</font>{issues}</td></tr>'
         )
     parts = []
@@ -1342,6 +1421,21 @@ def _pdf_html_for_model(m: Dict[str, Any], *, header: bool = True) -> str:
         parts.append(f'<p><b><font color="{bc}">AI-likelihood: {_e(band.capitalize())}</font></b><br/>'
                      f'<font color="#8e8ea0" style="font-size:9pt">{_e(ai.get("summary"))}</font></p>')
         parts.append(f'<p style="color:#8e8ea0;font-size:8pt;margin:4pt 0">! {_e(_ai_disclaimer(ai))}</p>')
+    if "issues" in sec:
+        problems = _problem_rows(m)
+        parts.append(f'{_h2}Issues to address ({len(problems)})</h2>')
+        if not problems:
+            parts.append('<p style="color:#8e8ea0;font-size:9pt">No errors or major warnings.</p>')
+        for r in problems:
+            parts.append(f'<p style="margin:6pt 0 0;font-size:10pt"><b>{_e(_numbered(r))}</b></p>')
+            for d in r["errors"]:
+                parts.append(f'<p style="margin:2px 0 2px 10pt;color:#ef4146;font-size:9pt">✗ {_e(d)}</p>')
+            for d in r["major"]:
+                parts.append(f'<p style="margin:2px 0 2px 10pt;color:#f59e0b;font-size:9pt">! {_e(d)}</p>')
+            if r.get("corrected"):
+                parts.append(f'<p style="margin:2px 0 2px 10pt;font-size:9pt">'
+                             f'<font color="#8e8ea0">was → should be: </font>'
+                             f'{_diff_html(r.get("cited"), r["corrected"])}</p>')
     if "references" in sec:
         parts.append(f'{_h2}References</h2>')
         parts.append(f'<table style="width:100%;border-collapse:collapse">{"".join(rows_html)}</table>')
@@ -1444,12 +1538,12 @@ def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
             blocks.append(_docx_para(str(ai["summary"]), size=20, color="8E8EA0"))
         blocks.append(_docx_para(f"Note: {_ai_disclaimer(ai)}", size=18, color="8E8EA0", italic=True))
     if "issues" in sec:
-        problems = [r for r in m["rows"] if r["errors"] or r["major"]]
+        problems = _problem_rows(m)
         blocks.append(_docx_para(f"Issues to address ({len(problems)})", size=28, bold=True, color="10A37F"))
         if not problems:
             blocks.append(_docx_para("No errors or major warnings.", size=22, color="8E8EA0", italic=True))
         for r in problems:
-            blocks.append(_docx_para(f"{r['num']}. {r['title']}", size=22, bold=True, space_after=20))
+            blocks.append(_docx_para(f"{_numbered(r)}", size=22, bold=True, space_after=20))
             # Markers are plain ASCII (x / ! / ->) coloured by the run — Word
             # renders these reliably, unlike colour-emoji which show as tofu.
             for d in r["errors"]:
@@ -1471,11 +1565,17 @@ def _docx_blocks_for_model(m: Dict[str, Any]) -> List[str]:
             mark = _STATUS_MARK.get(r["status"], "●")
             label = _STATUS_LABEL.get(r["status"], r["status"])
             tint = _STATUS_COLOR.get(r["status"], "#8e8ea0").lstrip("#").upper()
-            blocks.append(_docx_para(f"{mark} [{label}] {r['num']}. {r['title']}", size=22, bold=True,
+            blocks.append(_docx_para(f"{mark} [{label}] {_numbered(r)}", size=22, bold=True,
                                      color=tint, space_after=20))
             meta = r["meta"] + (f"  {r['url']}" if r["url"] else "")
             if meta.strip():
                 blocks.append(_docx_para(f"   {meta}", size=18, color="8E8EA0", space_after=20))
+            # Spell out every finding here too — the reference list is often
+            # exported on its own, and a bare status is not actionable.
+            for d in r["errors"]:
+                blocks.append(_docx_para(f"   x  {d}", size=18, color="EF4146", space_after=20))
+            for d in r["major"]:
+                blocks.append(_docx_para(f"   !  {d}", size=18, color="F59E0B", space_after=20))
             for d in r["minor"]:
                 blocks.append(_docx_para(f"   · {d} (minor)", size=18, color="9AA0AD", space_after=20))
     blocks.append(_docx_para("Generated by RefChecker — a verification aid, not a determination of misconduct.",
@@ -1585,6 +1685,8 @@ def serialize_batch_to_html(checks: Sequence[Dict[str, Any]], *, corrections: bo
             body.append(f'<div class="stats">{cards}</div>')
         if "ai" in m["sections"] and m["ai"]:
             body.append(_ai_section_html(m["ai"]))
+        if "issues" in m["sections"]:
+            body.append(_issues_section_html(m))
         if "references" in m["sections"]:
             body.append(f'<section class="card"><ul class="refs">{"".join(_ref_row_html(r) for r in m["rows"])}</ul></section>')
         per_paper.append("".join(body))
