@@ -3995,16 +3995,26 @@ class ProgressRefChecker:
             xcheck = await _db.cross_check_seen_refs(reference)
             if xcheck:
                 warnings_list = result.setdefault("warnings", [])
+                _FIELD_LABELS = {
+                    "doi": "DOI",
+                    "arxiv_id": "arXiv ID",
+                    "year": "year",
+                    "authors": "authors",
+                    "venue": "venue",
+                }
                 for entry in xcheck[:3]:
                     field_summaries = []
                     for d in entry.get("diffs") or []:
+                        field = d.get("field")
+                        label = _FIELD_LABELS.get(field, field)
                         field_summaries.append(
-                            f"{d.get('field')}: cached '{d.get('cached')}' vs cited '{d.get('cited')}'"
+                            f"{label} — here: {d.get('cited')} / previously: {d.get('cached')}"
                         )
                     warnings_list.append({
                         "warning_type": "cache_inconsistency",
                         "warning_details": (
-                            "A previously-verified ref with this title disagrees on: "
+                            "You cited this same title differently in an earlier "
+                            "check. Confirm which version is correct. "
                             + "; ".join(field_summaries)
                         ),
                         "cached_title": entry.get("cached_title"),

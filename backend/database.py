@@ -2851,6 +2851,63 @@ class Database:
         data["_fuzzy_match_score"] = best_score
         return data
 
+    @staticmethod
+    def _author_names(value: Any) -> List[str]:
+        """Normalize an authors value into a plain list of names.
+
+        Cached rows store authors as JSON (``'["K. Meng", "D. Bau"]'``) while a
+        live reference carries a real list or a comma-joined string. Comparing
+        those two shapes directly made ``"K. Meng"`` look different from
+        ``K. Meng`` — the JSON quoting and brackets were treated as part of the
+        surname, so the first-author guard fired on every single cached ref.
+        """
+        import json as _json
+
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            items = list(value)
+        else:
+            text = str(value).strip()
+            if not text:
+                return []
+            items = None
+            if text.startswith("["):
+                try:
+                    parsed = _json.loads(text)
+                    if isinstance(parsed, list):
+                        items = parsed
+                except (ValueError, TypeError):
+                    items = None
+            if items is None:
+                items = re.split(r"[,;]| and ", text)
+
+        names = []
+        for item in items:
+            name = str(item or "").strip().strip('"\'[]')
+            name = re.sub(r"\s+", " ", name).strip()
+            if name:
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _first_author_surname(names: List[str]) -> str:
+        """Return the lowercased surname of the first author, or ''.
+
+        Handles both ``"K. Meng"`` and ``"Meng, K."`` and ignores any
+        punctuation so quoting differences never register as a real mismatch.
+        """
+        if not names:
+            return ""
+        first = names[0]
+        # "Meng, K." — surname leads when the entry itself contains a comma.
+        if "," in first:
+            candidate = first.split(",")[0]
+        else:
+            candidate = first.split()[-1] if first.split() else ""
+        candidate = re.sub(r"[^A-Za-z\u00C0-\u024F\-']", "", candidate)
+        return candidate.lower()
+
     async def cross_check_seen_refs(self, ref: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Cross-reference a cited ref against the Seen-Refs cache.
 
@@ -2897,11 +2954,9 @@ class Database:
                 rows = await cursor.fetchall()
         except Exception:
             return []
-        ref_authors = ref.get("authors") or []
-        if isinstance(ref_authors, list):
-            ref_authors_str = ", ".join(a for a in ref_authors if a)
-        else:
-            ref_authors_str = str(ref_authors or "")
+        ref_author_names = self._author_names(ref.get("authors"))
+        ref_authors_str = ", ".join(ref_author_names)
+        ref_first_surname = self._first_author_surname(ref_author_names)
         ref_doi = (ref.get("doi") or "").strip().lower()
         ref_arxiv = (ref.get("arxiv_id") or "").strip().lower()
         ref_year = str(ref.get("year") or "").strip()
@@ -2925,19 +2980,21 @@ class Database:
             cached_year = str(r["year"] or "").strip()
             if cached_year and ref_year and cached_year != ref_year:
                 diffs.append({"field": "year", "cached": r["year"], "cited": ref.get("year")})
-            cached_authors = (r["authors"] or "").strip().lower()
-            if cached_authors and ref_authors_str and cached_authors != ref_authors_str.lower():
-                # Only flag if the FIRST author's surname differs —
-                # author-order / et-al / formatting differences shouldn't
-                # trigger noise. Pull the first surname of each side.
-                def _first_surname(s: str) -> str:
-                    s = (s or "").split(",")[0].split(";")[0].strip()
-                    parts = s.split()
-                    return parts[-1].lower() if parts else ""
-                if _first_surname(r["authors"] or "") != _first_surname(ref_authors_str):
+            # Only flag if the FIRST author's surname differs — author-order,
+            # et-al truncation and formatting differences shouldn't trigger
+            # noise. Both sides are normalized first: cached rows hold JSON,
+            # live refs hold a list or a joined string.
+            cached_author_names = self._author_names(r["authors"])
+            if cached_author_names and ref_author_names:
+                cached_first_surname = self._first_author_surname(cached_author_names)
+                if (
+                    cached_first_surname
+                    and ref_first_surname
+                    and cached_first_surname != ref_first_surname
+                ):
                     diffs.append({
                         "field": "authors",
-                        "cached": (r["authors"] or "")[:120],
+                        "cached": ", ".join(cached_author_names)[:120],
                         "cited": ref_authors_str[:120],
                     })
             cached_venue = (r["venue"] or "").strip().lower()
