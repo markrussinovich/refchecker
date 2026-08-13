@@ -1261,8 +1261,8 @@ class NonArxivReferenceChecker:
                 not pv.startswith('arxiv') and
                 not pv.startswith('corr')):
                 errors.append({
-                    'error_type': 'venue',
-                    'error_details': f"Venue missing: should include '{paper_venue}'",
+                    'warning_type': 'venue',
+                    'warning_details': f"Venue missing: should include '{paper_venue}'",
                     'ref_venue_correct': paper_venue
                 })
 

@@ -225,8 +225,12 @@ def test_missing_title_spacing_uses_verified_title_for_display(_make_checker):
 
 # ── Missing venue ───────────────────────────────────────────────────
 
-def test_missing_venue_produces_error(_make_checker):
-    """When reference has no venue but DB has a real venue, an error is produced."""
+def test_missing_venue_produces_warning(_make_checker):
+    """When reference has no venue but DB has a real venue, a warning is produced.
+
+    Severity is deliberately a warning, not an error: citing a paper by its
+    preprint (with no venue) is normal practice and not a factual mistake.
+    """
     checker = _make_checker([{
         "paperId": "200",
         "title": "Deep Residual Learning",
@@ -246,9 +250,10 @@ def test_missing_venue_produces_error(_make_checker):
 
     verified_data, errors, url = checker.verify_reference(reference)
     assert verified_data is not None
-    venue_errors = [e for e in errors if e.get("error_type") == "venue"]
-    assert len(venue_errors) >= 1, f"Expected venue error for missing venue, got: {errors}"
-    assert "missing" in venue_errors[0]["error_details"].lower() or "should include" in venue_errors[0]["error_details"].lower()
+    assert not any(e.get("error_type") == "venue" for e in errors), f"Missing venue must not be an error: {errors}"
+    venue_warnings = [e for e in errors if e.get("warning_type") == "venue"]
+    assert len(venue_warnings) >= 1, f"Expected venue warning for missing venue, got: {errors}"
+    assert "missing" in venue_warnings[0]["warning_details"].lower() or "should include" in venue_warnings[0]["warning_details"].lower()
 
 
 def test_missing_venue_skips_arxiv_venue(_make_checker):

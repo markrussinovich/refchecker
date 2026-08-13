@@ -3623,6 +3623,33 @@ def _is_garbage_author_name(name: str) -> bool:
     return False
 
 
+def _authors_are_permutation(cited_names: list, correct_names: list) -> bool:
+    """
+    True if two equal-length author lists name the same people in any order.
+
+    Each cited author must pair with a DISTINCT authoritative author, so a list
+    that repeats one name can't be matched against several different people.
+    Used to tolerate databases that record author order differently from the
+    published paper.
+    """
+    if not cited_names or len(cited_names) != len(correct_names):
+        return False
+
+    used = set()
+    for cited in cited_names:
+        matched = None
+        for i, correct in enumerate(correct_names):
+            if i in used:
+                continue
+            if enhanced_name_match(correct, cited):
+                matched = i
+                break
+        if matched is None:
+            return False
+        used.add(matched)
+    return True
+
+
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
     """
     Compare author lists to check if they match.
@@ -3930,7 +3957,25 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     else:
         comparison_cited = cleaned_cited
         comparison_correct = correct_names
-    
+
+    # Same people, different order: databases record author order unreliably
+    # (Semantic Scholar lists the Menlo Report as "Kenneally, Dittrich" while
+    # the report itself is "Dittrich, Kenneally"). If the two lists are a
+    # permutation of one another — every cited author pairs with a DISTINCT
+    # authoritative author — the citation names exactly the right people, so a
+    # positional comparison would report an error the user can't act on and
+    # that may well be the database's fault. Accept the match with a note.
+    if (
+        comparison_cited
+        and len(comparison_cited) == len(comparison_correct)
+        and _authors_are_permutation(comparison_cited, comparison_correct)
+        and not enhanced_name_match(comparison_cited[0], comparison_correct[0])
+    ):
+        return True, (
+            f"Authors match ({len(comparison_cited)} authors listed in a "
+            "different order than the database record)"
+        )
+
     # Use shared three-line formatter (imported lazily to avoid circular imports)
     from refchecker.utils.error_utils import format_first_author_mismatch, format_author_mismatch
 

@@ -827,8 +827,8 @@ class LocalNonArxivReferenceChecker:
                 not paper_venue_lower.startswith('arxiv') and
                 not paper_venue_lower.startswith('corr')):
                 errors.append({
-                    'error_type': 'venue',
-                    'error_details': f"Venue missing: should include '{paper_venue}'",
+                    'warning_type': 'venue',
+                    'warning_details': f"Venue missing: should include '{paper_venue}'",
                     'ref_venue_correct': paper_venue
                 })
         

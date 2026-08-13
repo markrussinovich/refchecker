@@ -324,9 +324,11 @@ def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]
 
     # If cited venue cleans to empty, treat as missing venue instead of mismatch
     if not clean_cited and clean_correct:
+        # Incompleteness, not a factual error: citing a paper by its preprint
+        # (no venue) is normal practice, unlike citing the wrong venue.
         return {
-            'error_type': 'venue',
-            'error_details': format_missing_venue(clean_correct),
+            'warning_type': 'venue',
+            'warning_details': format_missing_venue(clean_correct),
             'ref_venue_correct': correct_venue
         }
 
