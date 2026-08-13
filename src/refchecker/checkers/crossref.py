@@ -38,6 +38,31 @@ from refchecker.config.settings import get_config
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
+def _normalize_crossref_work(work: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Flatten CrossRef's list-valued metadata fields to plain strings.
+
+    CrossRef returns `"title": ["Attention Is All You Need"]` — a list, even for
+    a single title — and does the same for `container-title`, `short-container-title`
+    and `subtitle`. The title-search paths already unwrap this before matching,
+    but the DOI lookup returned the raw message, so a DOI-verified reference
+    carried a *list* in `title`. That value is copied straight into the
+    "corrected reference" the user sees, which rendered as
+    `['Attention Is All You Need']`, and any consumer calling `.strip()` on it
+    raises `AttributeError`.
+
+    Normalizing here keeps the returned shape identical no matter which lookup
+    path found the work.
+    """
+    if not work:
+        return work
+    normalized = dict(work)
+    for key in ('title', 'container-title', 'short-container-title', 'subtitle'):
+        value = normalized.get(key)
+        if isinstance(value, list):
+            normalized[key] = str(value[0]) if value else ''
+    return normalized
+
 # Get configuration
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
@@ -236,10 +261,10 @@ class CrossRefReferenceChecker:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         hit = cached_api_response(getattr(self, 'cache_dir', None), 'crossref', 'get_by_doi', doi)
         if hit is not None:
-            return hit
+            return _normalize_crossref_work(hit)
         result = self._get_work_by_doi_uncached(doi)
         cache_api_response(getattr(self, 'cache_dir', None), 'crossref', 'get_by_doi', doi, result)
-        return result
+        return _normalize_crossref_work(result)
 
     def _get_work_by_doi_uncached(self, doi: str) -> Optional[Dict[str, Any]]:
         # Clean DOI - remove any prefixes
