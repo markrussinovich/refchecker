@@ -79,6 +79,10 @@ MALFORMED_LINE_ABORT_THRESHOLD = 1000
 
 GZIP_MAGIC = b"\x1f\x8b"
 
+# The datasets API throttles diff requests hard; a short wait clears it.
+DIFF_RATE_LIMIT_RETRIES = 5
+DIFF_RATE_LIMIT_BACKOFF_SECONDS = 30
+
 
 class _PrefixedStream:
     """A read-only stream that replays a sniffed prefix ahead of the rest.
@@ -178,6 +182,17 @@ class _MalformedLineReporter:
                 f"Skipped {self.count:,} malformed lines in {self.description} "
                 f"({records_processed:,} records ingested)"
             )
+
+
+class SemanticScholarRateLimitError(RuntimeError):
+    """The datasets API throttled us.
+
+    This is transient and says nothing about whether updates exist. Treating it
+    as "no incremental updates available" made a refresh fall through to
+    re-downloading the entire ~90GB dataset, which cannot fit on a disk sized
+    for the database, so a single 429 turned a small catch-up into a guaranteed
+    failure.
+    """
 
 
 class SemanticScholarAuthError(RuntimeError):
@@ -427,6 +442,8 @@ class SemanticScholarDownloader:
             }
             
         except Exception as e:
+            if isinstance(e, (SemanticScholarAuthError, SemanticScholarRateLimitError)):
+                raise
             logger.error(f"Error checking for updates: {e}")
             return {
                 'has_updates': False,
@@ -470,7 +487,19 @@ class SemanticScholarDownloader:
                 headers["x-api-key"] = self.api_key
             
             logger.info(f"Requesting incremental diffs from: {url}")
-            response = self.session.get(url, headers=headers, timeout=30)
+            # The datasets API throttles aggressively; a single 429 previously
+            # looked like "no updates" and escalated to a full re-download.
+            response = None
+            for attempt in range(DIFF_RATE_LIMIT_RETRIES):
+                response = self.session.get(url, headers=headers, timeout=60)
+                if response.status_code != 429:
+                    break
+                delay = DIFF_RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1)
+                logger.warning(
+                    f"Rate limited on diffs API (attempt {attempt + 1}/"
+                    f"{DIFF_RATE_LIMIT_RETRIES}); retrying in {delay}s"
+                )
+                time.sleep(delay)
             
             # Handle different response codes
             if response.status_code == 404:
@@ -478,8 +507,11 @@ class SemanticScholarDownloader:
                 logger.info("This usually means the release gap is too large for incremental updates")
                 return self._check_incremental_alternative_by_release(start_release_id, end_release_id)
             elif response.status_code == 429:
-                logger.warning("Rate limited on diffs API. Consider waiting or using a higher tier API key")
-                return None
+                raise SemanticScholarRateLimitError(
+                    "The Semantic Scholar datasets API is rate limiting diff requests; "
+                    "the incremental catch-up could not be checked. Retrying later is "
+                    "cheaper than re-downloading the full dataset."
+                )
             elif response.status_code in (401, 403):
                 raise SemanticScholarAuthError(
                     "The Semantic Scholar datasets API rejected the request "
@@ -500,7 +532,10 @@ class SemanticScholarDownloader:
             return None
             
         except Exception as e:
-            if isinstance(e, SemanticScholarAuthError) or _is_auth_error(e):
+            if (
+                isinstance(e, (SemanticScholarAuthError, SemanticScholarRateLimitError))
+                or _is_auth_error(e)
+            ):
                 raise
             logger.info(f"Error checking incremental updates: {e}")
             logger.info("Falling back to alternative incremental check method")
@@ -1335,10 +1370,16 @@ class SemanticScholarDownloader:
             return True
 
         logger.info("Database exists - checking for new or updated data (incremental update)")
-        self.process_local_files(
-            force_reprocess=force_reprocess,
-            incremental=True,
-        )
+        try:
+            self.process_local_files(
+                force_reprocess=force_reprocess,
+                incremental=True,
+            )
+        except SemanticScholarRateLimitError as e:
+            # Falling through here would re-download the whole dataset because
+            # the throttle looks like "no incremental updates available".
+            logger.error(f"{e}")
+            return False
 
         current_release = self.get_last_release_id()
         latest_release = self.get_latest_release_id()

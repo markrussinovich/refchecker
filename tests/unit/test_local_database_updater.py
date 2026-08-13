@@ -1239,3 +1239,72 @@ def test_incremental_ingest_stops_before_filling_the_disk(tmp_path, monkeypatch)
             downloader._process_incremental_file('https://example/diff.gz', 'update')
     finally:
         downloader.close()
+
+
+def _rate_limited_downloader(tmp_path, monkeypatch, responses):
+    db_path = tmp_path / 'semantic_scholar.db'
+    _make_minimal_s2_db(db_path, release_id='2026-03-10')
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path), db_path=str(db_path))
+
+    class _Resp:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self._payload = payload or {}
+            self.headers = {}
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            return None
+
+    queue = list(responses)
+
+    class _Session:
+        def get(self, *args, **kwargs):
+            return _Resp(*queue.pop(0))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(downloader, 'session', _Session())
+    monkeypatch.setattr(
+        'refchecker.database.download_semantic_scholar_db.time.sleep', lambda s: None
+    )
+    return downloader
+
+
+def test_rate_limited_diff_request_is_retried(tmp_path, monkeypatch):
+    """A 429 is transient and says nothing about whether updates exist."""
+    diffs = {'diffs': [{'update_files': ['https://example/u.gz'], 'delete_files': []}]}
+    downloader = _rate_limited_downloader(
+        tmp_path, monkeypatch, [(429, None), (429, None), (200, diffs)]
+    )
+    try:
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-08-05')
+
+        result = downloader.check_incremental_updates('2026-03-10')
+
+        assert result == diffs['diffs']
+    finally:
+        downloader.close()
+
+
+def test_persistent_rate_limit_does_not_trigger_full_redownload(tmp_path, monkeypatch):
+    """Treating a throttle as "no incremental updates" made refresh fall through
+    to re-downloading the whole ~90GB dataset, which cannot fit beside the DB."""
+    downloader = _rate_limited_downloader(
+        tmp_path, monkeypatch, [(429, None)] * 10
+    )
+    try:
+        monkeypatch.setattr(downloader, 'get_latest_release_id', lambda: '2026-08-05')
+
+        def _must_not_run(*args, **kwargs):
+            raise AssertionError('rate limiting must not trigger a full dataset download')
+
+        monkeypatch.setattr(downloader, 'download_dataset_files', _must_not_run)
+
+        assert downloader.refresh_database() is False
+        assert downloader.get_last_release_id() == '2026-03-10'
+    finally:
+        downloader.close()
