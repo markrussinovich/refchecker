@@ -145,11 +145,20 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
 
   const [shareNote, setShareNote] = useState('')
 
+  // The publish paths take the SAME report options as the download, so a
+  // published link matches what the dialog was configured to produce. Without
+  // this, unchecking a section had no effect on a shared link.
+  const reportOpts = () => ({
+    include: includeList.length ? includeList.join(',') : undefined,
+    corrections,
+    summary: summary.canonical,
+  })
+
   const handlePublish = async () => {
     setBusy('publish'); setError(''); setShareUrl(''); setShareNote('')
     try {
       localStorage.setItem('refchecker.githubToken', token)
-      const res = await publishCheck(checkId, { adapter: 'github_gist', token, public: isPublic })
+      const res = await publishCheck(checkId, { adapter: 'github_gist', token, public: isPublic, ...reportOpts() })
       setShareUrl(res.data?.url || '')
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Publish failed')
@@ -160,7 +169,7 @@ export default function ShareModal({ checkId, batchId, title, onClose }) {
   const handleQuickLink = async () => {
     setBusy('quicklink'); setError(''); setShareUrl(''); setShareNote('')
     try {
-      const res = await publishCheck(checkId, { adapter: 'quick_link' })
+      const res = await publishCheck(checkId, { adapter: 'quick_link', ...reportOpts() })
       setShareUrl(res.data?.url || '')
       setShareNote('Anonymous PDF report link — no account or domain needed. Public to anyone with the URL and expires after a while.')
     } catch (e) {
