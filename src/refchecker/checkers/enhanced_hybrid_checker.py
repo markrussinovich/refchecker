@@ -39,6 +39,37 @@ from refchecker.utils.database_config import DATABASE_LABELS, DATABASE_LOOKUP_OR
 
 logger = logging.getLogger(__name__)
 
+
+def _venue_text(venue: Any) -> str:
+    """Flatten a venue value to plain text.
+
+    Venue fields don't always arrive as strings. Semantic Scholar returns
+    ``journal`` as an object (``{'name': ..., 'volume': ...}``) and Crossref
+    returns ``container-title`` as a list, so code that fell back from an empty
+    ``venue`` to ``journal`` could hand a dict to string comparisons. That
+    raised ``AttributeError: 'dict' object has no attribute 'strip'`` inside the
+    wrong-paper check, which the caller recorded as a checker failure — the
+    reference was reported unverified even though the database had matched it.
+    """
+    if venue is None:
+        return ''
+    if isinstance(venue, str):
+        return venue.strip()
+    if isinstance(venue, dict):
+        for key in ('name', 'title', 'container-title', 'fullName', 'display_name'):
+            value = venue.get(key)
+            if value:
+                return _venue_text(value)
+        return ''
+    if isinstance(venue, (list, tuple)):
+        for item in venue:
+            text = _venue_text(item)
+            if text:
+                return text
+        return ''
+    return str(venue).strip()
+
+
 class EnhancedHybridReferenceChecker:
     """
     Enhanced hybrid reference checker with multiple API sources for improved reliability
@@ -851,8 +882,8 @@ class EnhancedHybridReferenceChecker:
         in doubt, return True (don't trigger wrong-paper rejection on a
         venue we simply can't classify).
         """
-        cv = (cited_venue or '').strip()
-        av = (actual_venue or '').strip()
+        cv = _venue_text(cited_venue)
+        av = _venue_text(actual_venue)
         if not cv or not av:
             return True  # missing data — don't reject on venue signal
 
