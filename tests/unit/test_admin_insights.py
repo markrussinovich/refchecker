@@ -137,6 +137,30 @@ def test_overview_window_excludes_older_checks(admin_db):
     assert everything["window_days"] is None
 
 
+def test_active_users_counts_only_those_who_checked_in_the_window(admin_db):
+    """The headline user count is window-scoped, not the registration total."""
+    api_main, db = admin_db
+    alice = _run(_make_user(db, "alice"))
+    bob = _run(_make_user(db, "bob"))
+    _run(_make_user(db, "carol"))  # signed up, never ran a check
+    now = datetime.now(timezone.utc)
+
+    _run(_insert_check(db, user_id=alice, timestamp=_ts(now - timedelta(days=2)), total_refs=3))
+    _run(_insert_check(db, user_id=alice, timestamp=_ts(now - timedelta(days=3)), total_refs=3))
+    # Bob only checked long before the window.
+    _run(_insert_check(db, user_id=bob, timestamp=_ts(now - timedelta(days=90)), total_refs=9))
+
+    admin = api_main.UserInfo(id=alice, provider="github", is_admin=True)
+
+    recent = _run(api_main.get_admin_insights_overview(days=30, current_user=admin))
+    assert recent["totals"]["active_users"] == 1, "only alice checked in the last 30 days"
+    assert recent["totals"]["total_users"] == 3, "registration total is still reported"
+
+    everything = _run(api_main.get_admin_insights_overview(days=0, current_user=admin))
+    assert everything["totals"]["active_users"] == 2, "carol never checked"
+    assert everything["totals"]["total_users"] == 3
+
+
 def test_overview_daily_series_buckets_by_day(admin_db):
     api_main, db = admin_db
     user = _run(_make_user(db, "alice"))

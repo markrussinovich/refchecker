@@ -131,14 +131,60 @@ describe('AdminPanel', () => {
       return node?.nextElementSibling?.textContent
     }
 
-    expect(statFor('Users')).toBe('12')
+    expect(statFor('Users')).toBe('5')
     expect(statFor('Checks')).toBe('40')
     expect(statFor('References')).toBe('800')
     expect(statFor('Hallucinated')).toBe('9')
     expect(statFor('Avg duration')).toBe('4.2s')
     expect(screen.getByText('1.1% of refs')).toBeTruthy()
     expect(screen.getByText('87.5%')).toBeTruthy()
-    expect(screen.getByText('5 active')).toBeTruthy()
+    expect(screen.getByText('12 registered')).toBeTruthy()
+  })
+
+  it('counts only users who ran a check in the window, not all registrations', async () => {
+    const { container } = render(<AdminPanel open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Checks')).toBeTruthy())
+
+    const label = Array.from(container.querySelectorAll('div')).find(
+      (el) => el.className.includes('text-xs') && el.textContent === 'Users'
+    )
+    // active_users (5), not total_users (12).
+    expect(label?.nextElementSibling?.textContent).toBe('5')
+    expect(screen.getByText('12 registered')).toBeTruthy()
+  })
+
+  it('labels the checks-per-day chart with dates', async () => {
+    const { container } = render(<AdminPanel open onClose={() => {}} />)
+
+    await waitFor(() => expect(screen.getByText('Checks per day')).toBeTruthy())
+
+    const chart = container.querySelector('svg[aria-label="Checks per day"]')
+    expect(chart).toBeTruthy()
+    const labels = Array.from(chart.querySelectorAll('text')).map((t) => t.textContent)
+    expect(labels).toEqual(['Aug 10', 'Aug 11'])
+  })
+
+  it('thins x-axis labels on long windows but always keeps the endpoints', async () => {
+    const longDaily = Array.from({ length: 30 }, (_, i) => ({
+      day: `2026-07-${String(i + 1).padStart(2, '0')}`,
+      checks: i,
+      users: 1,
+      references_checked: i * 2,
+      hallucinations: 0,
+    }))
+    mocks.getAdminOverview.mockResolvedValue({
+      data: { ...overview, daily: longDaily },
+    })
+
+    const { container } = render(<AdminPanel open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Checks per day')).toBeTruthy())
+
+    const chart = container.querySelector('svg[aria-label="Checks per day"]')
+    const labels = Array.from(chart.querySelectorAll('text')).map((t) => t.textContent)
+
+    expect(labels.length).toBeLessThanOrEqual(8)
+    expect(labels[0]).toBe('Jul 1')
+    expect(labels[labels.length - 1]).toBe('Jul 30')
   })
 
   it('drills from users through sessions to a check and its references', async () => {

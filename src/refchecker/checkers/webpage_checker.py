@@ -35,6 +35,20 @@ class WebPageChecker:
         })
         self.last_request_time = 0
     
+    def _reference_url(self, reference: Dict[str, Any]) -> str:
+        """Return the reference's web URL, accepting either field name.
+
+        Extracted references carry the link as ``cited_url``; some callers
+        normalise it to ``url``. Reading only one of the two made a reference
+        with a perfectly good link look like it had none, which surfaced to
+        users as "Cited URL does not reference this paper".
+        """
+        for key in ('url', 'cited_url'):
+            value = reference.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ''
+
     def is_web_page_url(self, url: str) -> bool:
         """
         Check if URL is a web page that should be verified
@@ -131,7 +145,7 @@ class WebPageChecker:
         logger.debug(f"Verifying web page reference: {reference.get('title', 'Untitled')}")
         
         # Extract web URL from reference
-        web_url = reference.get('url', '').strip()
+        web_url = self._reference_url(reference)
         if not web_url or not self.is_web_page_url(web_url):
             logger.debug("No verifiable web URL found in reference")
             return None, [], None
@@ -550,7 +564,7 @@ class WebPageChecker:
         logger.debug(f"Checking unverified URL reference: {reference.get('title', 'Untitled')}")
         
         # Extract URL from reference
-        web_url = reference.get('url', '').strip()
+        web_url = self._reference_url(reference)
         if not web_url:
             return "paper not found and URL doesn't reference it"  # No URL to check
         
@@ -638,7 +652,7 @@ class WebPageChecker:
         logger.debug(f"Verifying raw URL for unverified reference: {reference.get('title', 'Untitled')}")
         
         # Extract URL from reference
-        web_url = reference.get('url', '').strip()
+        web_url = self._reference_url(reference)
         if not web_url:
             return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], None
         

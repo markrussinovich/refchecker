@@ -88,6 +88,49 @@ function Stat({ label, value, sub, tone }) {
   )
 }
 
+const MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
+/**
+ * Format a ``YYYY-MM-DD`` bucket key as ``Aug 10``. Parsed by hand rather than
+ * via ``new Date()`` so the label never shifts a day due to the local timezone.
+ */
+function formatDayLabel(day) {
+  if (typeof day !== 'string') return ''
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim())
+  if (!match) return day
+  const month = MONTH_NAMES[Number(match[2]) - 1]
+  if (!month) return day
+  return `${month} ${Number(match[3])}`
+}
+
+/**
+ * Pick which bars get an x-axis label so they never overlap. Always labels the
+ * first and last day, then spaces the rest evenly.
+ */
+function pickLabelIndices(count, maxLabels = 8) {
+  if (count <= maxLabels) {
+    return daysRange(count)
+  }
+  const step = Math.ceil((count - 1) / (maxLabels - 1))
+  const indices = []
+  for (let i = 0; i < count - 1; i += step) indices.push(i)
+  indices.push(count - 1)
+  // Drop the second-to-last label if crowding against the final one.
+  if (indices.length > 1 && count - 1 - indices[indices.length - 2] < step / 2) {
+    indices.splice(indices.length - 2, 1)
+  }
+  return indices
+}
+
+function daysRange(count) {
+  const out = []
+  for (let i = 0; i < count; i += 1) out.push(i)
+  return out
+}
+
 /**
  * Inline SVG bar chart. The project has no chart library and this panel is not
  * worth adding one for.
@@ -102,9 +145,12 @@ function DailyChart({ daily }) {
   }
 
   const width = 640
-  const height = 120
+  const plotHeight = 120
+  const axisHeight = 22
+  const height = plotHeight + axisHeight
   const max = Math.max(...daily.map((d) => d.checks), 1)
   const barWidth = width / daily.length
+  const labelIndices = new Set(pickLabelIndices(daily.length))
 
   return (
     <svg
@@ -112,21 +158,49 @@ function DailyChart({ daily }) {
       className="w-full"
       role="img"
       aria-label="Checks per day"
-      style={{ height: '120px' }}
+      style={{ height: `${height}px` }}
     >
       {daily.map((d, i) => {
-        const h = Math.max((d.checks / max) * (height - 16), d.checks > 0 ? 2 : 0)
+        const h = Math.max((d.checks / max) * (plotHeight - 16), d.checks > 0 ? 2 : 0)
         return (
           <rect
             key={d.day || i}
             x={i * barWidth + 1}
-            y={height - h}
+            y={plotHeight - h}
             width={Math.max(barWidth - 2, 1)}
             height={h}
             fill="var(--color-accent)"
           >
             <title>{`${d.day}: ${d.checks} checks, ${d.references_checked} refs, ${d.hallucinations} hallucinated`}</title>
           </rect>
+        )
+      })}
+
+      <line
+        x1={0}
+        y1={plotHeight + 0.5}
+        x2={width}
+        y2={plotHeight + 0.5}
+        stroke="var(--color-border)"
+        strokeWidth={1}
+      />
+
+      {daily.map((d, i) => {
+        if (!labelIndices.has(i)) return null
+        const center = i * barWidth + barWidth / 2
+        const isFirst = i === 0
+        const isLast = i === daily.length - 1
+        return (
+          <text
+            key={`label-${d.day || i}`}
+            x={isFirst ? 0 : isLast ? width : center}
+            y={plotHeight + 15}
+            textAnchor={isFirst ? 'start' : isLast ? 'end' : 'middle'}
+            fontSize={11}
+            fill="var(--color-text-secondary)"
+          >
+            {formatDayLabel(d.day)}
+          </text>
         )
       })}
     </svg>
@@ -170,7 +244,11 @@ function OverviewTab({ overview }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="Users" value={num(t.total_users)} sub={`${num(t.active_users)} active`} />
+        <Stat
+          label="Users"
+          value={num(t.active_users)}
+          sub={`${num(t.total_users)} registered`}
+        />
         <Stat label="Checks" value={num(t.checks)} sub={`${num(t.distinct_papers)} distinct papers`} />
         <Stat
           label="References"

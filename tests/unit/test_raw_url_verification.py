@@ -441,5 +441,96 @@ class TestVenueDetection(unittest.TestCase):
                 self.assertTrue(has_venue, f"Reference should have venue: {ref}")
 
 
+class TestCitedUrlFieldFallback(unittest.TestCase):
+    """A reference whose link lives in ``cited_url`` must still be checked.
+
+    Extracted references carry the link as ``cited_url``. The web page checker
+    used to read only ``url``, so such a reference looked like it had no link
+    at all and was reported as "Cited URL does not reference this paper" even
+    though the page verified fine.
+    """
+
+    def setUp(self):
+        self.webpage_checker = WebPageChecker()
+
+    def _ok_response(self):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-type': 'text/html'}
+        mock_response.url = 'https://huggingface.co/moonshotai/Kimi-K3'
+        mock_response.content = (
+            b'<html><head><title>moonshotai/Kimi-K3 &middot; Hugging Face</title></head>'
+            b'<body><h1>Kimi K3</h1><p>Model weights and technical report.</p></body></html>'
+        )
+        return mock_response
+
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
+    def test_cited_url_only_reference_is_verified(self, mock_request):
+        mock_request.return_value = self._ok_response()
+
+        reference = {
+            'title': 'Kimi K3: Model weights and technical report',
+            'authors': ['Moonshot AI'],
+            'year': 2026,
+            'venue': 'Open-weight release',
+            'cited_url': 'https://huggingface.co/moonshotai/Kimi-K3',
+        }
+
+        verified_data, errors, url = \
+            self.webpage_checker.verify_raw_url_for_unverified_reference(reference)
+
+        self.assertEqual(url, 'https://huggingface.co/moonshotai/Kimi-K3')
+        self.assertIsNotNone(verified_data)
+        self.assertEqual(errors, [])
+
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
+    def test_url_field_still_takes_precedence(self, mock_request):
+        mock_request.return_value = self._ok_response()
+
+        reference = {
+            'title': 'Kimi K3: Model weights and technical report',
+            'url': 'https://huggingface.co/moonshotai/Kimi-K3',
+            'cited_url': 'https://example.com/other',
+        }
+
+        _, _, url = self.webpage_checker.verify_raw_url_for_unverified_reference(reference)
+        self.assertEqual(url, 'https://huggingface.co/moonshotai/Kimi-K3')
+
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
+    def test_blank_url_falls_through_to_cited_url(self, mock_request):
+        mock_request.return_value = self._ok_response()
+
+        reference = {
+            'title': 'Kimi K3: Model weights and technical report',
+            'url': '   ',
+            'cited_url': 'https://huggingface.co/moonshotai/Kimi-K3',
+        }
+
+        _, _, url = self.webpage_checker.verify_raw_url_for_unverified_reference(reference)
+        self.assertEqual(url, 'https://huggingface.co/moonshotai/Kimi-K3')
+
+    def test_reference_without_any_url_is_unchanged(self):
+        reference = {'title': 'No link here', 'authors': ['Someone']}
+
+        verified_data, errors, url = \
+            self.webpage_checker.verify_raw_url_for_unverified_reference(reference)
+
+        self.assertIsNone(verified_data)
+        self.assertIsNone(url)
+        self.assertEqual(errors[0]['error_type'], 'unverified')
+
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
+    def test_unverified_reason_helper_also_uses_cited_url(self, mock_request):
+        mock_request.return_value = self._ok_response()
+
+        reference = {
+            'title': 'Kimi K3: Model weights and technical report',
+            'cited_url': 'https://huggingface.co/moonshotai/Kimi-K3',
+        }
+
+        reason = self.webpage_checker.check_unverified_url_reference(reference)
+        self.assertNotEqual(reason, "paper not found and URL doesn't reference it")
+
+
 if __name__ == '__main__':
     unittest.main()
