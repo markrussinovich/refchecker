@@ -24,8 +24,11 @@ History:
     2 - missing venue downgraded from error to warning; author lists that
         differ only in order accepted; citation tail no longer stored as the
         venue; a blocked URL no longer reported as a content mismatch.
+    3 - post-parse field fixups now run on the WebUI path too. They were only
+        ever applied by the CLI/bulk wrapper, so WebUI verdicts were produced
+        against uncorrected venue/title/author fields.
 """
 
-VERIFICATION_LOGIC_VERSION = 2
+VERIFICATION_LOGIC_VERSION = 3
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]

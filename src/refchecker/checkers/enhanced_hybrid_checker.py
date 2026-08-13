@@ -36,6 +36,7 @@ from importlib import import_module
 from typing import Dict, List, Tuple, Optional, Any
 
 from refchecker.utils.database_config import DATABASE_LABELS, DATABASE_LOOKUP_ORDER
+from refchecker.utils.reference_fixups import fixup_reference_fields
 
 logger = logging.getLogger(__name__)
 
@@ -1570,6 +1571,14 @@ class EnhancedHybridReferenceChecker:
         This is the single entry point used by CLI, WebUI, and bulk paths.
         All verification logic lives here so every mode gets identical results.
         """
+        # Repair field swaps (venue-as-title, author-list-as-title, citation
+        # tail stored as the venue) before anything compares these fields.
+        # Applied here rather than in a caller because this is the one point
+        # every path funnels through: the WebUI reaches the checker directly
+        # and would otherwise skip the fixups. Idempotent, so paths that also
+        # apply them earlier are unaffected.
+        fixup_reference_fields(reference)
+
         verified_data, errors, url = self._verify_reference_core(reference)
 
         # Post-process: ArXiv re-verify, independent ArXiv ID check
