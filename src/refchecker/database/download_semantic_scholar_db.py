@@ -710,8 +710,15 @@ class SemanticScholarDownloader:
             total_updated = 0
             total_deleted = 0
             failed_files = 0
-            
+            # Diffs arrive oldest-first, so each one that lands completely can be
+            # recorded straight away. Without that, an interruption part-way
+            # through a long catch-up throws away every diff already applied and
+            # the next run starts over from the beginning.
+            checkpointed_release = None
+            checkpoints_blocked = False
+
             for diff in diffs:
+                diff_failed_files = failed_files
                 if diff.get("type") == "full_dataset_update":
                     # Handle full dataset update recommendation by downloading the full dataset
                     logger.info(f"Full dataset update recommended: {diff.get('message')}")
@@ -781,6 +788,22 @@ class SemanticScholarDownloader:
                             logger.error(f"Error processing delete file {_redact_signed_url(delete_url)}: {e}")
                             failed_files += 1
                             continue
+
+                # Only record a diff once every one of its files landed, and only
+                # while no earlier diff has failed: the release marker is a
+                # watermark, so moving it past a gap would skip those records
+                # permanently.
+                to_release = diff.get("to_release")
+                if failed_files > diff_failed_files:
+                    checkpoints_blocked = True
+                elif to_release and not checkpoints_blocked:
+                    try:
+                        self.set_last_release_id(to_release)
+                        self.set_last_update_time(datetime.now(timezone.utc).isoformat())
+                        checkpointed_release = to_release
+                        logger.info(f"Applied diff through release {to_release}")
+                    except Exception as e:
+                        logger.warning(f"Could not record progress at release {to_release}: {e}")
             
             logger.info(
                 f"Incremental update complete - Updated: {total_updated}, "
@@ -788,15 +811,21 @@ class SemanticScholarDownloader:
             )
 
             if failed_files:
-                # Advancing the release marker after failures would permanently
-                # skip the diffs we could not apply, so stop here and report it.
+                # The marker still sits at the last diff that applied in full, so
+                # the retry resumes there rather than redoing the whole catch-up.
+                resume_note = (
+                    f"progress is recorded through release {checkpointed_release}"
+                    if checkpointed_release
+                    else "the recorded release is unchanged"
+                )
                 logger.error(
-                    f"{failed_files} incremental file(s) failed; leaving the recorded "
-                    "release unchanged so the next run retries them"
+                    f"{failed_files} incremental file(s) failed; {resume_note} "
+                    "so the next run retries from there"
                 )
                 return False
-            
-            # Update metadata after successful incremental update
+
+            # Land on the newest release the API reported, which also covers diff
+            # shapes that carry no to_release to checkpoint on.
             if total_updated > 0 or total_deleted > 0:
                 current_time = datetime.now(timezone.utc).isoformat()
                 self.set_last_update_time(current_time)
@@ -814,11 +843,17 @@ class SemanticScholarDownloader:
         except SemanticScholarDiskSpaceError as e:
             # Report what did land, then re-raise: the caller must not treat
             # this as an ordinary failure and escalate to a full download.
+            resume_note = (
+                f"progress is recorded through release {checkpointed_release}, so the "
+                "next run resumes after it"
+                if checkpointed_release
+                else "the recorded release is unchanged so the next run resumes from "
+                "the same diff"
+            )
             logger.error(
                 f"Stopping incremental update: {e}. "
                 f"Applied {total_updated} update and {total_deleted} delete records "
-                "before running out of room; the recorded release is unchanged so "
-                "the next run resumes from the same diff."
+                f"before running out of room; {resume_note}."
             )
             raise
         except Exception as e:
