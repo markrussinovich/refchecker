@@ -451,6 +451,32 @@ class SemanticScholarDownloader:
                 'message': f'Error checking for updates: {e}'
             }
     
+    def _get_with_rate_limit_retry(self, url, **kwargs):
+        """GET a datasets API endpoint, waiting out 429s instead of giving up.
+
+        Every datasets endpoint throttles. Treating a 429 as a hard failure made
+        the refresh conclude it had no incremental path and fall back to
+        re-downloading the entire ~90GB dataset, which cannot fit beside the
+        database it builds.
+        """
+        kwargs.setdefault("timeout", 60)
+        response = None
+        for attempt in range(DIFF_RATE_LIMIT_RETRIES):
+            response = self.session.get(url, **kwargs)
+            if response.status_code != 429:
+                return response
+            delay = DIFF_RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1)
+            logger.warning(
+                f"Rate limited by the datasets API (attempt {attempt + 1}/"
+                f"{DIFF_RATE_LIMIT_RETRIES}); retrying in {delay}s"
+            )
+            time.sleep(delay)
+        raise SemanticScholarRateLimitError(
+            f"The Semantic Scholar datasets API is still rate limiting {url} after "
+            f"{DIFF_RATE_LIMIT_RETRIES} attempts. Retrying later is cheaper than "
+            "re-downloading the full dataset."
+        )
+
     def check_incremental_updates(self, start_release_id=None):
         """
         Check for incremental updates between releases using the correct API
@@ -487,31 +513,13 @@ class SemanticScholarDownloader:
                 headers["x-api-key"] = self.api_key
             
             logger.info(f"Requesting incremental diffs from: {url}")
-            # The datasets API throttles aggressively; a single 429 previously
-            # looked like "no updates" and escalated to a full re-download.
-            response = None
-            for attempt in range(DIFF_RATE_LIMIT_RETRIES):
-                response = self.session.get(url, headers=headers, timeout=60)
-                if response.status_code != 429:
-                    break
-                delay = DIFF_RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1)
-                logger.warning(
-                    f"Rate limited on diffs API (attempt {attempt + 1}/"
-                    f"{DIFF_RATE_LIMIT_RETRIES}); retrying in {delay}s"
-                )
-                time.sleep(delay)
+            response = self._get_with_rate_limit_retry(url, headers=headers)
             
             # Handle different response codes
             if response.status_code == 404:
                 logger.info(f"Incremental diffs not available for {start_release_id} to {end_release_id} (404)")
                 logger.info("This usually means the release gap is too large for incremental updates")
                 return self._check_incremental_alternative_by_release(start_release_id, end_release_id)
-            elif response.status_code == 429:
-                raise SemanticScholarRateLimitError(
-                    "The Semantic Scholar datasets API is rate limiting diff requests; "
-                    "the incremental catch-up could not be checked. Retrying later is "
-                    "cheaper than re-downloading the full dataset."
-                )
             elif response.status_code in (401, 403):
                 raise SemanticScholarAuthError(
                     "The Semantic Scholar datasets API rejected the request "
@@ -800,7 +808,7 @@ class SemanticScholarDownloader:
             if self.api_key:
                 headers["x-api-key"] = self.api_key
             
-            response = self.session.get(url, headers=headers, timeout=30)
+            response = self._get_with_rate_limit_retry(url, headers=headers)
             response.raise_for_status()
             
             data = response.json()
@@ -1375,23 +1383,23 @@ class SemanticScholarDownloader:
                 force_reprocess=force_reprocess,
                 incremental=True,
             )
+
+            current_release = self.get_last_release_id()
+            latest_release = self.get_latest_release_id()
+            if current_release != latest_release:
+                logger.info(f"Still behind (current: {current_release}, latest: {latest_release})")
+                gz_files = self._find_local_dataset_files()
+                if not gz_files:
+                    logger.info("No .gz files found - downloading latest dataset")
+                    success = self.download_dataset_files()
+                    if not success:
+                        logger.error("Failed to download dataset files")
+                        return False
         except SemanticScholarRateLimitError as e:
-            # Falling through here would re-download the whole dataset because
-            # the throttle looks like "no incremental updates available".
+            # Continuing would re-download the whole dataset, because a throttle
+            # is indistinguishable here from "no incremental updates available".
             logger.error(f"{e}")
             return False
-
-        current_release = self.get_last_release_id()
-        latest_release = self.get_latest_release_id()
-        if current_release != latest_release:
-            logger.info(f"Still behind (current: {current_release}, latest: {latest_release})")
-            gz_files = self._find_local_dataset_files()
-            if not gz_files:
-                logger.info("No .gz files found - downloading latest dataset")
-                success = self.download_dataset_files()
-                if not success:
-                    logger.error("Failed to download dataset files")
-                    return False
 
         effective_snapshot = self.get_last_release_id() or self.current_snapshot_id
         if effective_snapshot:
@@ -1802,7 +1810,7 @@ class SemanticScholarDownloader:
             if self.api_key:
                 headers["x-api-key"] = self.api_key
             
-            response = self.session.get(url, headers=headers, timeout=30)
+            response = self._get_with_rate_limit_retry(url, headers=headers)
             response.raise_for_status()
             
             data = response.json()
@@ -1830,6 +1838,8 @@ class SemanticScholarDownloader:
             return structured_files
             
         except Exception as e:
+            if isinstance(e, SemanticScholarRateLimitError):
+                raise
             if _is_auth_error(e):
                 raise SemanticScholarAuthError(
                     "The Semantic Scholar datasets API rejected the request "

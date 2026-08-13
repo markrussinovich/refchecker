@@ -1308,3 +1308,29 @@ def test_persistent_rate_limit_does_not_trigger_full_redownload(tmp_path, monkey
         assert downloader.get_last_release_id() == '2026-03-10'
     finally:
         downloader.close()
+
+
+def test_rate_limited_release_lookup_is_retried(tmp_path, monkeypatch):
+    """Every datasets endpoint throttles, not just diffs; a 429 on the release
+    lookup previously aborted the refresh and escalated to a full download."""
+    downloader = _rate_limited_downloader(
+        tmp_path, monkeypatch, [(429, None), (200, {'release_id': '2026-08-05'})]
+    )
+    try:
+        assert downloader.get_latest_release_id() == '2026-08-05'
+    finally:
+        downloader.close()
+
+
+def test_rate_limited_file_listing_is_retried(tmp_path, monkeypatch):
+    downloader = _rate_limited_downloader(
+        tmp_path,
+        monkeypatch,
+        [(429, None), (200, {'files': ['https://example/papers-0.gz?token=x']})],
+    )
+    try:
+        files = downloader.list_files('2026-08-05', dataset='papers')
+
+        assert len(files) == 1
+    finally:
+        downloader.close()
