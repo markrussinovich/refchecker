@@ -3233,12 +3233,9 @@ class ArxivReferenceChecker:
             - url: URL of the paper if found, None otherwise
             - verified_data: The verified paper data from the verification service, None if not found
         """
-        # Apply post-parse fixups (handles cached refs from earlier runs
-        # that may have venue-as-title, author-as-title, etc.)
-        self._fixup_reference_fields(reference)
-        # All verification logic (ArXiv ID checks, re-verification, URL
-        # fallbacks) is inside the hybrid checker so every code path gets
-        # identical results.
+        # Post-parse fixups (venue-as-title, author-as-title, citation tail in
+        # the venue) are applied inside verify_reference_standard so the paths
+        # that call it directly get them too.
         return self.verify_reference_standard(source_paper, reference)
 
     def _fixup_reference_fields(self, reference):
@@ -3304,6 +3301,51 @@ class ArxivReferenceChecker:
                 m = re.search(r'\.\s*([A-Z][^.]{15,}?)\.\s*[a-z]', title)
                 if m:
                     reference['title'] = m.group(1).strip()
+
+        # --- Citation-tail-as-venue ---
+        # LLM extraction sometimes returns the whole remainder of the raw
+        # citation as the venue: `Tian, "BioProBench: ...," in International
+        # Conference on Machine Learning (ICML) , 2026`. The title then shows
+        # up twice in the UI and every venue comparison runs against a string
+        # that can never match the real venue.
+        self._strip_citation_tail_from_venue(reference)
+
+    _VENUE_TAIL_QUOTES = '"\u201c\u201d\u2018\u2019\u00ab\u00bb'
+
+    def _strip_citation_tail_from_venue(self, reference):
+        """Reduce a venue that swallowed the citation tail to the venue itself."""
+        venue = reference.get('venue', '') or ''
+        if not venue or not isinstance(venue, str):
+            return
+
+        quotes = self._VENUE_TAIL_QUOTES
+        # A venue never contains a quoted span; a citation tail always does.
+        if not any(q in venue for q in quotes):
+            return
+
+        # Prefer the segment introduced by "in", which is where the venue sits
+        # in every style that quotes the title. Search after the closing quote
+        # so an "in" inside the title cannot match.
+        last_quote = max(venue.rfind(q) for q in quotes)
+        tail = venue[last_quote + 1:] if last_quote >= 0 else venue
+
+        m = re.search(r'^\s*[,.]?\s*in\s+(.+)$', tail, re.IGNORECASE)
+        candidate = m.group(1) if m else tail
+
+        # Everything from the year onwards is citation metadata, not venue —
+        # and notes often follow it (", 2024, arXiv:2404" / ", 2026, SEAM").
+        # Require the comma so a venue that legitimately carries a year, like
+        # "ICLR 2024" or "Proceedings of the 2024 Conference", survives.
+        candidate = re.split(r'\s*,\s*(?:19|20)\d{2}[a-z]?\b', candidate)[0]
+        candidate = candidate.strip().strip(',;.').strip()
+
+        if not candidate or len(candidate) < 3:
+            # Nothing usable survived, so the field is noise either way and a
+            # blank venue is far better than one that fails every comparison.
+            reference['venue'] = ''
+            return
+
+        reference['venue'] = candidate
 
     # ------------------------------------------------------------------
     # ArXiv re-verification fallback for wrong DB matches
@@ -3583,6 +3625,11 @@ class ArxivReferenceChecker:
         checks, re-verification, and URL fallbacks) lives in the hybrid
         checker so CLI, WebUI, and bulk paths get identical results.
         """
+        # Post-parse fixups live here rather than in verify_reference because
+        # the hallucination recheck and seen-refs paths call this method
+        # directly; running them once here keeps every path identical.
+        self._fixup_reference_fields(reference)
+
         # GitHub references bypass the hybrid checker
         github_result = self.verify_github_reference(reference)
         if github_result:
