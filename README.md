@@ -979,11 +979,14 @@ checks fall back to the remote S2 API and are correspondingly slower.
 | `REFCHECKER_S2_MIN_FREE_GB` | `95` | Refuse to start a bootstrap download without at least this much free disk. |
 | `REFCHECKER_S2_KEEP_ARCHIVES` | `false` | Keep the downloaded `.gz` dataset shards after they are ingested (needs tens of GB extra). |
 
-Size the disk for the database plus a few GB of working room (~100 GB for the
-~90 GB slim DB). The downloader ingests one compressed shard at a time and
-deletes it, so the full compressed dataset never has to sit on the disk
-alongside the database; it also stops before filling the volume, because
-SQLite fails hard (and can leave the DB unusable) on a full disk.
+Size the disk for the database plus real working room (~150 GB for the ~90 GB
+slim DB). The downloader ingests one compressed shard at a time and deletes it,
+so the full compressed dataset never has to sit on the disk alongside the
+database; it also stops before filling the volume, because SQLite fails hard
+(and can leave the DB unusable) on a full disk. Budget well beyond the database
+size: incremental updates rewrite rows in place, so a diff needs free space to
+land before the superseded pages are released. A volume sized to just fit the
+database will refuse to apply updates and leave the snapshot frozen.
 
 Admins can confirm what a deployment is actually using at any time:
 

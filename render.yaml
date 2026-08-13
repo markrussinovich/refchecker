@@ -66,9 +66,14 @@ services:
     disk:
       name: refchecker-data
       mountPath: /data
-      sizeGB: 100                    # Fits ~90 GB slim DB ($25/month on Render).
-                                     # Dataset shards are ingested and deleted
-                                     # one at a time, so only the DB needs room.
+      sizeGB: 150                    # The ~90 GB slim DB plus headroom for the
+                                     # incremental catch-up, which rewrites rows
+                                     # in place and needs free space to land a
+                                     # diff before the old pages are released.
+                                     # 100 GB left only ~5 GB free and stalled
+                                     # the refresh. Dataset shards are ingested
+                                     # and deleted one at a time, so the shards
+                                     # themselves need little room.
 
     healthCheckPath: /api/health
 
