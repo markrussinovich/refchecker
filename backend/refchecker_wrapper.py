@@ -33,6 +33,7 @@ from backend.database import get_data_dir
 
 from refchecker.utils.text_utils import extract_latex_references
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
+from refchecker.utils.reference_fixups import fixup_reference_fields
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -3548,6 +3549,12 @@ class ProgressRefChecker:
             return self._verify_reference_body(reference)
 
     def _verify_reference_body(self, reference: Dict[str, Any]):
+        # Match the CLI's ordering in verify_reference_standard: repair the
+        # parsed fields first, so GitHub detection below reads a cleaned venue
+        # rather than a raw citation tail. Idempotent, and the hybrid checker
+        # applies them again for references that don't take this bypass.
+        fixup_reference_fields(reference)
+
         # GitHub references bypass the hybrid checker (same as CLI's
         # verify_reference_standard → verify_github_reference).
         github_url = None
