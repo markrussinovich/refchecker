@@ -1,10 +1,11 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminPanel from './AdminPanel'
 
 const mocks = vi.hoisted(() => ({
   getAdminOverview: vi.fn(),
   getAdminUsers: vi.fn(),
+  getAdminPapers: vi.fn(),
   getAdminUserSessions: vi.fn(),
   getAdminCheckDetail: vi.fn(),
 }))
@@ -53,9 +54,59 @@ const users = {
       references_checked: 400,
       hallucinations: 5,
       last_check_at: '2026-08-11 10:00:00',
+      lifetime_checks: 30,
+      lifetime_last_check_at: '2026-08-11 10:00:00',
+      never_checked: false,
     },
   ],
   unattributed: { checks: 4, references_checked: 40, hallucinations: 0 },
+  counts: { total_users: 12, active_users: 5, never_checked_users: 6, idle_users: 1 },
+}
+
+const papers = {
+  total_papers: 2,
+  truncated: false,
+  window_days: 30,
+  papers: [
+    {
+      paper_id: 'k:arxiv:1706.03762',
+      latest_check_id: 501,
+      title: 'Attention Is All You Need',
+      url: 'https://arxiv.org/abs/1706.03762',
+      source_type: 'url',
+      last_checked_at: '2026-08-11 10:00:00',
+      first_checked_at: '2026-08-01 10:00:00',
+      checks: 3,
+      checked_by: 2,
+      failed_checks: 0,
+      status: 'completed',
+      total_refs: 20,
+      refs_verified: 18,
+      errors: 1,
+      warnings: 2,
+      hallucinations: 4,
+      user: { id: 7, name: 'Ada Lovelace', email: 'ada@example.com' },
+    },
+    {
+      paper_id: 'c:502',
+      latest_check_id: 502,
+      title: 'thesis.pdf',
+      url: null,
+      source_type: 'file',
+      last_checked_at: '2026-08-10 09:00:00',
+      first_checked_at: '2026-08-10 09:00:00',
+      checks: 1,
+      checked_by: 1,
+      failed_checks: 0,
+      status: 'completed',
+      total_refs: 5,
+      refs_verified: 5,
+      errors: 0,
+      warnings: 0,
+      hallucinations: 0,
+      user: null,
+    },
+  ],
 }
 
 const sessions = {
@@ -108,6 +159,7 @@ describe('AdminPanel', () => {
     vi.clearAllMocks()
     mocks.getAdminOverview.mockResolvedValue({ data: overview })
     mocks.getAdminUsers.mockResolvedValue({ data: users })
+    mocks.getAdminPapers.mockResolvedValue({ data: papers })
     mocks.getAdminUserSessions.mockResolvedValue({ data: sessions })
     mocks.getAdminCheckDetail.mockResolvedValue({ data: checkDetail })
   })
@@ -281,5 +333,215 @@ describe('AdminPanel', () => {
     expect(hallucinated?.nextElementSibling?.getAttribute('style')).toContain(
       'var(--color-hallucination)'
     )
+  })
+
+  describe('staying current', () => {
+    it('refreshes on a timer so an open dashboard does not go stale', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        render(<AdminPanel open onClose={() => {}} />)
+        await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1))
+
+        await act(async () => {
+          vi.advanceTimersByTime(30000)
+        })
+
+        await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(2))
+        expect(mocks.getAdminUsers).toHaveBeenCalledTimes(2)
+        expect(mocks.getAdminPapers).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('stops polling once closed so a dismissed panel is not still querying', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        const { rerender } = render(<AdminPanel open onClose={() => {}} />)
+        await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1))
+
+        rerender(<AdminPanel open={false} onClose={() => {}} />)
+        await act(async () => {
+          vi.advanceTimersByTime(120000)
+        })
+
+        expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('a background refresh does not blank the panel out under the reader', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        render(<AdminPanel open onClose={() => {}} />)
+        await waitFor(() => expect(screen.getByText('Checks')).toBeTruthy())
+
+        let resolve
+        mocks.getAdminOverview.mockReturnValue(
+          new Promise((r) => {
+            resolve = r
+          })
+        )
+        await act(async () => {
+          vi.advanceTimersByTime(30000)
+        })
+
+        // Mid-refresh the previous numbers are still on screen, not "Loading…".
+        expect(screen.getByText('Checks')).toBeTruthy()
+        expect(screen.queryByText('Loading…')).toBeNull()
+
+        await act(async () => {
+          resolve({ data: overview })
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('offers a manual refresh', async () => {
+      render(<AdminPanel open onClose={() => {}} />)
+      await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1))
+
+      fireEvent.click(screen.getByLabelText('Refresh admin data'))
+
+      await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(2))
+    })
+  })
+
+  describe('zero-check users', () => {
+    const withInactive = {
+      ...users,
+      users: [
+        ...users.users,
+        {
+          id: 8,
+          name: 'Never Ran',
+          email: 'ghost@example.com',
+          provider: 'google',
+          checks: 0,
+          references_checked: 0,
+          hallucinations: 0,
+          lifetime_checks: 0,
+          lifetime_last_check_at: null,
+          never_checked: true,
+          created_at: '2026-08-01 09:00:00',
+        },
+        {
+          id: 9,
+          name: 'Lapsed User',
+          email: 'lapsed@example.com',
+          provider: 'github',
+          checks: 0,
+          references_checked: 0,
+          hallucinations: 0,
+          lifetime_checks: 14,
+          lifetime_last_check_at: '2026-01-05 09:00:00',
+          never_checked: false,
+        },
+      ],
+    }
+
+    it('hides users with no activity in the window by default', async () => {
+      mocks.getAdminUsers.mockResolvedValue({ data: withInactive })
+      render(<AdminPanel open onClose={() => {}} />)
+      await waitFor(() => expect(mocks.getAdminUsers).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: /^users$/i }))
+
+      expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+      expect(screen.queryByText('Never Ran')).toBeNull()
+      expect(screen.queryByText('Lapsed User')).toBeNull()
+    })
+
+    it('can reveal them, and says which never ran anything at all', async () => {
+      mocks.getAdminUsers.mockResolvedValue({ data: withInactive })
+      render(<AdminPanel open onClose={() => {}} />)
+      await waitFor(() => expect(mocks.getAdminUsers).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: /^users$/i }))
+
+      fireEvent.click(await screen.findByText(/Show 2 inactive/i))
+
+      expect(await screen.findByText('Never Ran')).toBeTruthy()
+      expect(screen.getByText('Lapsed User')).toBeTruthy()
+      // The whole point: these two must not read the same.
+      expect(screen.getByText('never used')).toBeTruthy()
+      expect(screen.getByText('14 all time')).toBeTruthy()
+    })
+
+    it('summarises how many of the registered users are actually active', async () => {
+      mocks.getAdminUsers.mockResolvedValue({ data: withInactive })
+      render(<AdminPanel open onClose={() => {}} />)
+      await waitFor(() => expect(mocks.getAdminUsers).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: /^users$/i }))
+
+      expect(await screen.findByText(/5 of 12 users active/i)).toBeTruthy()
+      expect(screen.getByText(/6 have never run a check/i)).toBeTruthy()
+    })
+  })
+
+  describe('papers tab', () => {
+    const openPapers = async () => {
+      render(<AdminPanel open onClose={() => {}} />)
+      await waitFor(() => expect(mocks.getAdminPapers).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: /^papers$/i }))
+    }
+
+    it('lists papers newest first with their stats', async () => {
+      await openPapers()
+
+      const first = await screen.findByText('Attention Is All You Need')
+      expect(first).toBeTruthy()
+      expect(screen.getByText('thesis.pdf')).toBeTruthy()
+      expect(screen.getByText('20 refs')).toBeTruthy()
+      expect(screen.getByText('18 verified')).toBeTruthy()
+      expect(screen.getByText('4 hallucinated')).toBeTruthy()
+      expect(screen.getByText(/2 papers/i)).toBeTruthy()
+    })
+
+    it('links a paper to its source when one exists', async () => {
+      await openPapers()
+      await screen.findByText('Attention Is All You Need')
+
+      const link = screen.getByRole('link', { name: /source/i })
+      expect(link.getAttribute('href')).toBe('https://arxiv.org/abs/1706.03762')
+      expect(link.getAttribute('target')).toBe('_blank')
+    })
+
+    it('shows no link for an upload rather than a dead server path', async () => {
+      await openPapers()
+      await screen.findByText('thesis.pdf')
+
+      // Only the arXiv paper has a source link; the upload must not invent one.
+      expect(screen.getAllByRole('link', { name: /source/i })).toHaveLength(1)
+    })
+
+    it('notes when a paper was checked more than once', async () => {
+      await openPapers()
+      await screen.findByText('Attention Is All You Need')
+
+      expect(screen.getByText(/checked 3×/)).toBeTruthy()
+      expect(screen.getByText(/by 2 people/)).toBeTruthy()
+    })
+
+    it('drills into the latest check and comes back to papers, not sessions', async () => {
+      await openPapers()
+      fireEvent.click(await screen.findByText('Attention Is All You Need'))
+
+      await waitFor(() => expect(mocks.getAdminCheckDetail).toHaveBeenCalledWith(501))
+      expect(await screen.findByText('A fake paper')).toBeTruthy()
+
+      const back = screen.getByRole('button', { name: /back to papers/i })
+      fireEvent.click(back)
+      expect(await screen.findByText('thesis.pdf')).toBeTruthy()
+    })
+
+    it('says so plainly when nothing was checked in the window', async () => {
+      mocks.getAdminPapers.mockResolvedValue({
+        data: { papers: [], total_papers: 0, truncated: false, window_days: 30 },
+      })
+      await openPapers()
+
+      expect(await screen.findByText(/No papers have been checked in this window/i)).toBeTruthy()
+    })
   })
 })

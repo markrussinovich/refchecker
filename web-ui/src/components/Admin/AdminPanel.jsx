@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   getAdminOverview,
   getAdminUsers,
+  getAdminPapers,
   getAdminUserSessions,
   getAdminCheckDetail,
 } from '../../utils/api'
@@ -10,9 +11,15 @@ import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
 /**
  * Admin analytics dashboard.
  *
- * Drill-down: Overview -> Users -> Sessions -> Checks -> References. Sessions
- * are synthesised server-side from check timestamps (there is no sessions
- * table), so a "session" here means one sitting by one user.
+ * Drill-down: Overview -> Users -> Sessions -> Checks -> References, plus a
+ * flat Papers list for "what has been run through this lately". Sessions are
+ * synthesised server-side from check timestamps (there is no sessions table),
+ * so a "session" here means one sitting by one user.
+ *
+ * The data refreshes itself on a timer: an operator leaves this open while
+ * watching traffic, and a dashboard that silently goes stale is worse than no
+ * dashboard. Refreshes are deliberately quiet — they never raise the loading
+ * flag, so the list does not blank out under the reader every 30 seconds.
  *
  * Deliberately shows real names and emails: the whole point is to look at an
  * individual's activity. The pre-existing /api/admin/activity endpoint stays
@@ -25,6 +32,10 @@ const WINDOWS = [
   { label: '90 days', value: 90 },
   { label: 'All time', value: 0 },
 ]
+
+// Short enough that the numbers track a live run, long enough that an idle
+// dashboard is not hammering the database.
+const REFRESH_MS = 30000
 
 const num = (n) => (typeof n === 'number' ? n.toLocaleString() : '0')
 
@@ -290,23 +301,53 @@ function OverviewTab({ overview }) {
   )
 }
 
-function UsersTab({ data, onSelectUser }) {
+function UsersTab({ data, onSelectUser, showInactive, onToggleInactive }) {
   if (!data) return null
   const users = data.users || []
+  const counts = data.counts || {}
+  const windowed = data.window_days
+  // A user with no checks in the window is not necessarily a dead account, so
+  // the two cases are labelled differently rather than both reading "0 checks".
+  const inactive = users.filter((u) => !u.checks)
+  const visible = showInactive ? users : users.filter((u) => u.checks > 0)
+
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {num(counts.active_users)} of {num(counts.total_users)} users active
+          {windowed ? ` in the last ${windowed} days` : ''}
+          {counts.never_checked_users > 0 && (
+            <> · {num(counts.never_checked_users)} have never run a check</>
+          )}
+          {counts.idle_users > 0 && <> · {num(counts.idle_users)} idle this window</>}
+        </p>
+        {inactive.length > 0 && (
+          <button
+            type="button"
+            onClick={onToggleInactive}
+            className="text-xs px-2 py-1 rounded-lg transition-colors shrink-0"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            {showInactive ? 'Hide' : 'Show'} {num(inactive.length)} inactive
+          </button>
+        )}
+      </div>
+
       {data.unattributed?.checks > 0 && (
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {num(data.unattributed.checks)} checks are not attributed to a user (recorded before
           sign-in was required, or run in single-user mode).
         </p>
       )}
-      {users.length === 0 && (
+      {visible.length === 0 && (
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          No users yet.
+          {users.length === 0
+            ? 'No users yet.'
+            : 'Nobody ran a check in this window. Widen the window, or show inactive users.'}
         </p>
       )}
-      {users.map((u) => (
+      {visible.map((u) => (
         <button
           key={u.id}
           type="button"
@@ -315,6 +356,7 @@ function UsersTab({ data, onSelectUser }) {
           style={{
             backgroundColor: 'var(--color-bg-primary)',
             border: '1px solid var(--color-border)',
+            opacity: u.checks ? 1 : 0.65,
           }}
         >
           <div className="flex items-center justify-between gap-3">
@@ -334,7 +376,10 @@ function UsersTab({ data, onSelectUser }) {
                 )}
               </div>
               <div className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
-                {u.email} · via {u.provider} · last active {formatTime(u.last_check_at)}
+                {u.email} · via {u.provider} ·{' '}
+                {u.never_checked
+                  ? `joined ${formatTime(u.created_at)}, never checked`
+                  : `last active ${formatTime(u.lifetime_last_check_at || u.last_check_at)}`}
               </div>
             </div>
             <div className="text-right shrink-0">
@@ -342,14 +387,133 @@ function UsersTab({ data, onSelectUser }) {
                 {num(u.checks)} checks
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {num(u.references_checked)} refs ·{' '}
-                <span style={{ color: 'var(--color-hallucination)' }}>
-                  {num(u.hallucinations)} hallucinated
-                </span>
+                {u.checks > 0 ? (
+                  <>
+                    {num(u.references_checked)} refs ·{' '}
+                    <span style={{ color: 'var(--color-hallucination)' }}>
+                      {num(u.hallucinations)} hallucinated
+                    </span>
+                  </>
+                ) : u.never_checked ? (
+                  'never used'
+                ) : (
+                  `${num(u.lifetime_checks)} all time`
+                )}
               </div>
             </div>
           </div>
         </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Papers checked, newest first. One row per paper rather than per check, so a
+ * document run five times appears once — the stats shown are its most recent
+ * result, which is what "how did this paper do" means after a re-run.
+ */
+function PapersTab({ data, onSelectCheck }) {
+  if (!data) return null
+  const papers = data.papers || []
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        {num(data.total_papers)} papers
+        {data.window_days ? ` in the last ${data.window_days} days` : ' all time'}
+        {data.truncated && <> · showing the {num(papers.length)} most recent</>}
+      </p>
+
+      {papers.length === 0 && (
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          No papers have been checked in this window.
+        </p>
+      )}
+
+      {papers.map((p) => (
+        <div
+          key={p.paper_id}
+          className="rounded-xl px-4 py-3"
+          style={{
+            backgroundColor: 'var(--color-bg-primary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => onSelectCheck(p.latest_check_id)}
+                className="text-sm font-semibold text-left truncate w-full transition-colors"
+                style={{ color: 'var(--color-text-primary)' }}
+                title={p.title || 'Untitled'}
+              >
+                {p.title || 'Untitled'}
+              </button>
+              <div className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                {formatTime(p.last_checked_at)}
+                {p.checks > 1 && <> · checked {num(p.checks)}×</>}
+                {p.checked_by > 1 && <> by {num(p.checked_by)} people</>}
+                {p.user && <> · {p.user.name || p.user.email}</>}
+                {p.source_type && <> · {p.source_type}</>}
+              </div>
+              <div className="text-xs mt-1 flex items-center gap-2 flex-wrap">
+                {p.status === 'failed' ? (
+                  <span style={{ color: 'var(--color-error)' }}>
+                    failed{p.failure_class ? ` (${p.failure_class})` : ''}
+                  </span>
+                ) : (
+                  <>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      {num(p.total_refs)} refs
+                    </span>
+                    <span style={{ color: 'var(--color-success)' }}>
+                      {num(p.refs_verified)} verified
+                    </span>
+                    {p.errors > 0 && (
+                      <span style={{ color: 'var(--color-error)' }}>{num(p.errors)} errors</span>
+                    )}
+                    {p.warnings > 0 && (
+                      <span style={{ color: 'var(--color-warning)' }}>
+                        {num(p.warnings)} warnings
+                      </span>
+                    )}
+                    {p.hallucinations > 0 && (
+                      <span style={{ color: 'var(--color-hallucination)' }}>
+                        {num(p.hallucinations)} hallucinated
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2">
+              {/* Uploads and pasted text have no public URL, so no dead link is shown. */}
+              {p.url && (
+                <a
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs px-2 py-1 rounded-lg transition-colors"
+                  style={{ color: 'var(--color-accent)' }}
+                  title={p.url}
+                >
+                  source ↗
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => onSelectCheck(p.latest_check_id)}
+                className="text-xs px-2 py-1 rounded-lg transition-colors"
+                style={{ color: 'var(--color-accent)' }}
+              >
+                details
+              </button>
+            </div>
+          </div>
+        </div>
       ))}
     </div>
   )
@@ -438,7 +602,39 @@ function SessionsTab({ sessions, loading, onSelectCheck, onBack, user }) {
   )
 }
 
-function CheckTab({ check, loading, onBack }) {
+/**
+ * "updated 12s ago", ticking on its own so the age stays honest between the
+ * 30-second polls rather than freezing at whatever it read on the last render.
+ */
+function LastUpdated({ at, refreshing }) {
+  // The current time is state advanced by a timer, not read during render:
+  // reading the clock while rendering makes the output depend on when React
+  // happens to re-run the component.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  const label = useMemo(() => {
+    if (refreshing) return 'updating…'
+    if (!at) return ''
+    const seconds = Math.max(0, Math.round((now - at) / 1000))
+    if (seconds < 10) return 'updated just now'
+    if (seconds < 60) return `updated ${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    return minutes < 60 ? `updated ${minutes}m ago` : `updated ${Math.floor(minutes / 60)}h ago`
+  }, [at, now, refreshing])
+
+  if (!label) return null
+  return (
+    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+      {label}
+    </span>
+  )
+}
+
+function CheckTab({ check, loading, onBack, origin = 'sessions' }) {
   return (
     <div className="space-y-3">
       <button
@@ -447,7 +643,7 @@ function CheckTab({ check, loading, onBack }) {
         className="text-xs px-2 py-1 -ml-2 rounded-lg transition-colors"
         style={{ color: 'var(--color-accent)' }}
       >
-        ← Back to sessions
+        ← Back to {origin}
       </button>
 
       {loading && (
@@ -529,29 +725,66 @@ export default function AdminPanel({ open, onClose }) {
   const [days, setDays] = useState(30)
   const [overview, setOverview] = useState(null)
   const [users, setUsers] = useState(null)
+  const [papers, setPapers] = useState(null)
   const [selectedUser, setSelectedUser] = useState(null)
   const [sessions, setSessions] = useState(null)
   const [check, setCheck] = useState(null)
+  const [checkOrigin, setCheckOrigin] = useState('sessions')
+  const [showInactive, setShowInactive] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [updatedAt, setUpdatedAt] = useState(null)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [ov, us] = await Promise.all([getAdminOverview(days), getAdminUsers(days)])
-      setOverview(ov.data)
-      setUsers(us.data)
-    } catch (e) {
-      setError(e?.response?.data?.detail || e.message || 'Failed to load admin data')
-    } finally {
-      setLoading(false)
-    }
-  }, [days])
+  // A refresh that fires while the user is reading must not blank the panel,
+  // so only the first load for a given window raises `loading`.
+  const load = useCallback(
+    async ({ quiet = false } = {}) => {
+      if (quiet) setRefreshing(true)
+      else setLoading(true)
+      setError(null)
+      try {
+        const [ov, us, pp] = await Promise.all([
+          getAdminOverview(days),
+          getAdminUsers(days),
+          getAdminPapers(days),
+        ])
+        setOverview(ov.data)
+        setUsers(us.data)
+        setPapers(pp.data)
+        setUpdatedAt(Date.now())
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message || 'Failed to load admin data')
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [days]
+  )
 
   useEffect(() => {
     if (open) load()
   }, [open, load])
+
+  // Poll while the panel is open. `loadRef` keeps the interval from being torn
+  // down and recreated on every render, which would reset the countdown and,
+  // with a fast enough render loop, mean it never actually fires.
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const id = setInterval(() => {
+      // Drilled-in views own the panel; refreshing under them would be
+      // disorienting and the aggregates are not what is being read.
+      if (document.visibilityState === 'hidden') return
+      loadRef.current({ quiet: true })
+    }, REFRESH_MS)
+    return () => clearInterval(id)
+  }, [open])
 
   const selectUser = async (user) => {
     setSelectedUser(user)
@@ -568,7 +801,8 @@ export default function AdminPanel({ open, onClose }) {
     }
   }
 
-  const selectCheck = async (checkId) => {
+  const selectCheck = async (checkId, origin = 'sessions') => {
+    setCheckOrigin(origin)
     setTab('check')
     setLoading(true)
     setError(null)
@@ -584,7 +818,16 @@ export default function AdminPanel({ open, onClose }) {
 
   if (!open) return null
 
-  const usersTabActive = tab === 'users' || tab === 'sessions' || tab === 'check'
+  // While drilled into a check, keep the tab it was opened from lit, so the
+  // header still says where "back" leads.
+  const usersTabActive =
+    tab === 'users' || tab === 'sessions' || (tab === 'check' && checkOrigin === 'sessions')
+  const papersTabActive = tab === 'papers' || (tab === 'check' && checkOrigin === 'papers')
+  const TABS = [
+    { id: 'overview', label: 'overview', active: tab === 'overview' },
+    { id: 'users', label: 'users', active: usersTabActive },
+    { id: 'papers', label: 'papers', active: papersTabActive },
+  ]
 
   return (
     <div
@@ -611,6 +854,18 @@ export default function AdminPanel({ open, onClose }) {
             Admin dashboard
           </h2>
           <div className="flex items-center gap-2">
+            <LastUpdated at={updatedAt} refreshing={refreshing} />
+            <button
+              type="button"
+              onClick={() => load({ quiet: true })}
+              disabled={refreshing || loading}
+              aria-label="Refresh admin data"
+              title="Refresh now"
+              className="text-xs px-2 py-1 rounded-lg transition-colors"
+              style={{ color: 'var(--color-accent)' }}
+            >
+              ↻
+            </button>
             <select
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
@@ -641,26 +896,23 @@ export default function AdminPanel({ open, onClose }) {
         </div>
 
         <div className="flex gap-1 px-5 pt-3">
-          {['overview', 'users'].map((t) => {
-            const active = t === 'overview' ? tab === 'overview' : usersTabActive
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                aria-pressed={active}
-                className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
-                  active ? 'font-semibold' : ''
-                }`}
-                style={{
-                  backgroundColor: active ? 'var(--color-bg-tertiary)' : 'transparent',
-                  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}
-              >
-                {t}
-              </button>
-            )
-          })}
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              aria-pressed={t.active}
+              className={`text-xs px-3 py-1.5 rounded-lg capitalize transition-colors ${
+                t.active ? 'font-semibold' : ''
+              }`}
+              style={{
+                backgroundColor: t.active ? 'var(--color-bg-tertiary)' : 'transparent',
+                color: t.active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -669,24 +921,39 @@ export default function AdminPanel({ open, onClose }) {
               {error}
             </p>
           )}
-          {loading && tab === 'overview' && (
+          {loading && (tab === 'overview' || tab === 'papers') && (
             <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               Loading…
             </p>
           )}
           {tab === 'overview' && !loading && <OverviewTab overview={overview} />}
-          {tab === 'users' && <UsersTab data={users} onSelectUser={selectUser} />}
+          {tab === 'papers' && !loading && (
+            <PapersTab data={papers} onSelectCheck={(id) => selectCheck(id, 'papers')} />
+          )}
+          {tab === 'users' && (
+            <UsersTab
+              data={users}
+              onSelectUser={selectUser}
+              showInactive={showInactive}
+              onToggleInactive={() => setShowInactive((v) => !v)}
+            />
+          )}
           {tab === 'sessions' && (
             <SessionsTab
               sessions={sessions}
               loading={loading}
               user={selectedUser}
-              onSelectCheck={selectCheck}
+              onSelectCheck={(id) => selectCheck(id, 'sessions')}
               onBack={() => setTab('users')}
             />
           )}
           {tab === 'check' && (
-            <CheckTab check={check} loading={loading} onBack={() => setTab('sessions')} />
+            <CheckTab
+              check={check}
+              loading={loading}
+              origin={checkOrigin}
+              onBack={() => setTab(checkOrigin)}
+            />
           )}
         </div>
       </div>

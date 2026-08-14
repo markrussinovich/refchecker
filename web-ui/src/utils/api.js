@@ -142,8 +142,10 @@ export const clearDatabase = () => api.delete('/admin/database')
 // so the user drill-down is scoped by user id rather than a session id.
 export const getAdminOverview = (days = 30) =>
   api.get('/admin/insights/overview', { params: { days } })
-export const getAdminUsers = (days = 30, limit = 100) =>
-  api.get('/admin/insights/users', { params: { days, limit } })
+export const getAdminUsers = (days = 30, limit = 100, activeOnly = false) =>
+  api.get('/admin/insights/users', { params: { days, limit, active_only: activeOnly } })
+export const getAdminPapers = (days = 30, limit = 100) =>
+  api.get('/admin/insights/papers', { params: { days, limit } })
 export const getAdminUserSessions = (userId, days = 30, gapMinutes = 30) =>
   api.get(`/admin/insights/users/${userId}/sessions`, {
     params: { days, gap_minutes: gapMinutes },

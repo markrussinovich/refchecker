@@ -6595,14 +6595,32 @@ async def get_admin_insights_overview(
 async def get_admin_insights_users(
     days: int = 0,
     limit: int = 100,
+    active_only: bool = False,
     current_user: UserInfo = Depends(require_user),
 ):
     """Per-user activity rollup, busiest first."""
     _require_admin(current_user)
     try:
-        return await admin_insights.get_users(db.db_path, days=days, limit=limit)
+        return await admin_insights.get_users(
+            db.db_path, days=days, limit=limit, active_only=active_only
+        )
     except Exception as e:
         logger.error(f"Error building admin user rollup: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/insights/papers")
+async def get_admin_insights_papers(
+    days: int = 0,
+    limit: int = 100,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Every paper checked, most recently checked first, with its latest stats."""
+    _require_admin(current_user)
+    try:
+        return await admin_insights.get_papers(db.db_path, days=days, limit=limit)
+    except Exception as e:
+        logger.error(f"Error building admin paper rollup: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

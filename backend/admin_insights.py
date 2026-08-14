@@ -41,6 +41,85 @@ DEFAULT_SESSION_GAP_MINUTES = 30
 # Guardrails so a malformed query string cannot ask for the whole table.
 MAX_USER_ROWS = 500
 MAX_SESSION_CHECKS = 2000
+MAX_PAPER_ROWS = 500
+
+# ``paper_key`` is not reliably unique per paper. Uploads that never yielded a
+# title are all stored as ``title:unknown-paper`` and every pasted body is
+# ``title:pasted-text``, so grouping on the column alone merges hundreds of
+# unrelated documents into a single "paper". These placeholder keys are the ones
+# that must never be treated as an identity.
+_PLACEHOLDER_KEYS = ("title:unknown-paper", "title:pasted-text", "title:untitled")
+_PLACEHOLDER_TITLES = ("pasted text", "unknown paper", "untitled", "untitled document")
+
+
+def _sql_list(values: tuple) -> str:
+    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+
+
+# Identity of a paper, most trustworthy signal first: a real key (arxiv:/doi:/a
+# genuine title slug), else the title (which for an untitled upload is the
+# filename, and so still groups repeat runs of the same file), else the check
+# itself so unrelated rows are never merged. Shared by the overview count and
+# the papers list so the two can never disagree about what a paper is.
+# Identity of a paper, most trustworthy signal first: a real key (arxiv:/doi:/a
+# genuine title slug), else the title (which for an untitled upload is the
+# filename, and so still groups repeat runs of the same file), else the check
+# itself so unrelated rows are never merged. Shared by the overview count and
+# the papers list so the two can never disagree about what a paper is.
+def _paper_group_expr(alias: str = "") -> str:
+    """SQL for the identity of a paper, optionally qualified by a table alias.
+
+    Most trustworthy signal first: a real key (``arxiv:``/``doi:``/a genuine
+    title slug), else the title (which for an untitled upload is the filename,
+    and so still groups repeat runs of the same file), else the check row itself
+    so unrelated documents are never merged.
+
+    Shared by the overview count and the papers list so the two can never
+    disagree about what a paper is.
+    """
+    p = f"{alias}." if alias else ""
+    return f"""
+    CASE
+        WHEN {p}paper_key IS NOT NULL AND TRIM({p}paper_key) != ''
+             AND LOWER(TRIM({p}paper_key)) NOT IN ({_sql_list(_PLACEHOLDER_KEYS)})
+            THEN 'k:' || LOWER(TRIM({p}paper_key))
+        WHEN {p}paper_title IS NOT NULL AND TRIM({p}paper_title) != ''
+             AND LOWER(TRIM({p}paper_title)) NOT IN ({_sql_list(_PLACEHOLDER_TITLES)})
+            THEN 't:' || LOWER(TRIM({p}paper_title))
+        ELSE 'c:' || {p}id
+    END
+"""
+
+
+_PAPER_GROUP_EXPR = _paper_group_expr()
+
+
+def _paper_link(
+    source_type: Optional[str],
+    paper_source: Optional[str],
+    identifier_type: Optional[str],
+    identifier_value: Optional[str],
+) -> Optional[str]:
+    """Resolve a paper to an openable URL, or None for uploads and pasted text.
+
+    Local paths are deliberately not returned: ``/data/uploads/...`` is a path
+    on the server that means nothing to a browser, and emitting it as a link
+    would produce one that always fails.
+    """
+    ident_type = (identifier_type or "").strip().lower()
+    ident = (identifier_value or "").strip()
+    if ident and ident_type == "arxiv":
+        return f"https://arxiv.org/abs/{ident.replace('arXiv:', '').replace('arxiv:', '')}"
+    if ident and ident_type == "doi":
+        return "https://doi.org/" + ident.replace("https://doi.org/", "").replace("doi:", "")
+
+    src = (paper_source or "").strip()
+    if src.startswith("http://") or src.startswith("https://"):
+        return src
+    if (source_type or "").strip().lower() == "url" and src:
+        # A bare arXiv id is a legitimate "url" source in this product.
+        return f"https://arxiv.org/abs/{src}" if src[0].isdigit() else None
+    return None
 
 
 def _window_start(days: Optional[int]) -> Optional[str]:
@@ -162,7 +241,7 @@ async def get_overview(db_path: str, days: Optional[int] = 30) -> Dict[str, Any]
 
         async with conn.execute(
             f"""SELECT COUNT(DISTINCT user_id) AS active_users,
-                       COUNT(DISTINCT COALESCE(paper_key, paper_title)) AS distinct_papers
+                       COUNT(DISTINCT {_PAPER_GROUP_EXPR}) AS distinct_papers
                 FROM check_history {where}""",
             params,
         ) as cur:
@@ -247,18 +326,30 @@ async def get_users(
     db_path: str,
     days: Optional[int] = None,
     limit: int = 100,
+    active_only: bool = False,
 ) -> Dict[str, Any]:
     """Per-user rollup, busiest first.
 
-    LEFT JOIN from ``users`` so someone who signed in but never ran a check is
-    still listed — that distinction matters when judging adoption. Checks whose
-    ``user_id`` is NULL (rows predating the column, or single-user mode) are
-    reported separately rather than silently dropped.
+    LEFT JOIN from ``users`` so someone who signed in but never ran a check can
+    still be counted — that distinction matters when judging adoption — but the
+    two reasons a row shows zero are very different and must not look alike:
+    a user who has never run anything, versus one who was busy last quarter and
+    simply falls outside the current window. Every row therefore also carries
+    lifetime totals, and ``active_only`` drops the users with no activity in the
+    window so the list is not swamped by sign-ups who never returned.
+
+    Ordering falls back to lifetime activity so that when the window is narrow
+    the ``limit`` keeps the people who actually use the product, rather than an
+    arbitrary slice of never-active accounts that all tie at zero.
+
+    Checks whose ``user_id`` is NULL (rows predating the column, or single-user
+    mode) are reported separately rather than silently dropped.
     """
     since = _window_start(days)
     limit = max(1, min(_int(limit) or 100, MAX_USER_ROWS))
     check_filter = "AND c.timestamp >= ?" if since else ""
     params: List[Any] = [since] if since else []
+    having = "HAVING checks > 0" if active_only else ""
 
     async with _connect(db_path) as conn:
         users = []
@@ -266,7 +357,7 @@ async def get_users(
             f"""SELECT u.id, u.provider, u.email, u.name, u.avatar_url,
                        u.is_admin, u.created_at,
                        COUNT(c.id) AS checks,
-                       COUNT(DISTINCT COALESCE(c.paper_key, c.paper_title)) AS distinct_papers,
+                       COUNT(DISTINCT {_paper_group_expr('c')}) AS distinct_papers,
                        COALESCE(SUM(c.total_refs), 0) AS references_checked,
                        COALESCE(SUM(c.refs_verified), 0) AS references_verified,
                        COALESCE(SUM(c.errors_count), 0) AS errors,
@@ -274,18 +365,27 @@ async def get_users(
                        COALESCE(SUM(c.unverified_count), 0) AS unverified,
                        COALESCE(SUM(c.hallucination_count), 0) AS hallucinations,
                        MIN(c.timestamp) AS first_check_at,
-                       MAX(c.timestamp) AS last_check_at
+                       MAX(c.timestamp) AS last_check_at,
+                       (SELECT COUNT(*) FROM check_history h WHERE h.user_id = u.id)
+                           AS lifetime_checks,
+                       (SELECT COALESCE(SUM(h.total_refs), 0) FROM check_history h
+                             WHERE h.user_id = u.id) AS lifetime_references_checked,
+                       (SELECT MAX(h.timestamp) FROM check_history h WHERE h.user_id = u.id)
+                           AS lifetime_last_check_at
                 FROM users u
                 LEFT JOIN check_history c
                        ON c.user_id = u.id {check_filter}
                 GROUP BY u.id
-                ORDER BY checks DESC, u.id ASC
+                {having}
+                ORDER BY checks DESC, lifetime_checks DESC, u.id ASC
                 LIMIT ?""",
             (*params, limit),
         ) as cur:
             async for row in cur:
                 item = dict(row)
                 email = item.get("email")
+                # An empty window is not the same as never having run anything.
+                lifetime_checks = _int(item.get("lifetime_checks"))
                 users.append(
                     {
                         "id": item.get("id"),
@@ -309,8 +409,40 @@ async def get_users(
                         ),
                         "first_check_at": item.get("first_check_at"),
                         "last_check_at": item.get("last_check_at"),
+                        "lifetime_checks": lifetime_checks,
+                        "lifetime_references_checked": _int(
+                            item.get("lifetime_references_checked")
+                        ),
+                        "lifetime_last_check_at": item.get("lifetime_last_check_at"),
+                        "never_checked": lifetime_checks == 0,
                     }
                 )
+
+        # Counted over the whole users table, not the truncated page, so the UI
+        # can say "12 of 512" honestly even when limit clipped the list.
+        async with conn.execute(
+            f"""SELECT COUNT(*) AS total_users,
+                       SUM(CASE WHEN in_window > 0 THEN 1 ELSE 0 END) AS active_users,
+                       SUM(CASE WHEN lifetime = 0 THEN 1 ELSE 0 END) AS never_checked_users
+                FROM (
+                    SELECT (SELECT COUNT(*) FROM check_history h
+                             WHERE h.user_id = u.id
+                             {'AND h.timestamp >= ?' if since else ''}) AS in_window,
+                           (SELECT COUNT(*) FROM check_history h
+                             WHERE h.user_id = u.id) AS lifetime
+                      FROM users u
+                )""",
+            params,
+        ) as cur:
+            row = dict(await cur.fetchone() or {})
+            counts = {
+                "total_users": _int(row.get("total_users")),
+                "active_users": _int(row.get("active_users")),
+                "never_checked_users": _int(row.get("never_checked_users")),
+            }
+            counts["idle_users"] = max(
+                0, counts["total_users"] - counts["active_users"] - counts["never_checked_users"]
+            )
 
         where = "WHERE c.user_id IS NULL" + (" AND c.timestamp >= ?" if since else "")
         async with conn.execute(
@@ -327,7 +459,167 @@ async def get_users(
                 "hallucinations": _int(row.get("hallucinations")),
             }
 
-    return {"users": users, "unattributed": unattributed, "window_days": days or None}
+    return {
+        "users": users,
+        "unattributed": unattributed,
+        "counts": counts,
+        "active_only": bool(active_only),
+        "truncated": len(users) >= limit,
+        "window_days": days or None,
+    }
+
+
+async def get_papers(
+    db_path: str,
+    days: Optional[int] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Every paper that has been checked, most recently checked first.
+
+    One row per *paper*, not per check, so a document run five times appears
+    once with ``checks: 5``. Identity comes from :func:`_paper_group_expr`; see
+    there for why ``paper_key`` alone is not enough.
+
+    The headline stats are taken from the paper's most recent check rather than
+    summed across all of them: re-running a paper after fixing its bibliography
+    should show the improved result, not the sum of every attempt. Cross-check
+    totals are still exposed as ``checks`` and ``checked_by`` for context.
+    """
+    since = _window_start(days)
+    limit = max(1, min(_int(limit) or 100, MAX_PAPER_ROWS))
+    where = "WHERE timestamp >= ?" if since else ""
+    params: List[Any] = [since] if since else []
+    group = _paper_group_expr()
+
+    async with _connect(db_path) as conn:
+        async with conn.execute(
+            f"""SELECT COUNT(*) AS papers FROM (
+                    SELECT 1 FROM check_history {where} GROUP BY {group}
+                )""",
+            params,
+        ) as cur:
+            total_papers = _int((await cur.fetchone() or {"papers": 0})["papers"])
+
+        papers: List[Dict[str, Any]] = []
+        # The per-paper stats must come from one specific row — the most recent
+        # check. Grouping with bare columns would *appear* to do this, but
+        # SQLite only defines that behaviour when a query has exactly one
+        # min/max aggregate, and this one needs both. ROW_NUMBER picks the row
+        # explicitly instead, with id as a tiebreak so two checks sharing a
+        # timestamp still resolve to a stable winner.
+        async with conn.execute(
+            f"""WITH scoped AS (
+                    SELECT *, {group} AS paper_id,
+                           COALESCE(started_at, timestamp) AS sort_at
+                      FROM check_history {where}
+                ),
+                grouped AS (
+                    SELECT paper_id,
+                           COUNT(*) AS checks,
+                           COUNT(DISTINCT user_id) AS checked_by,
+                           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_checks,
+                           MIN(sort_at) AS first_checked_at,
+                           MAX(sort_at) AS last_checked_at
+                      FROM scoped GROUP BY paper_id
+                ),
+                ranked AS (
+                    SELECT paper_id, id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY paper_id ORDER BY sort_at DESC, id DESC
+                           ) AS rn
+                      FROM scoped
+                )
+                SELECT g.paper_id, g.checks, g.checked_by, g.failed_checks,
+                       g.first_checked_at, g.last_checked_at,
+                       c.id, c.user_id, c.paper_title, c.paper_source, c.source_type,
+                       c.paper_key, c.original_filename, c.custom_label, c.status,
+                       c.failure_class, c.duration_ms, c.total_refs, c.refs_verified,
+                       c.refs_with_errors, c.refs_with_warnings_only, c.errors_count,
+                       c.warnings_count, c.suggestions_count, c.unverified_count,
+                       c.hallucination_count, c.llm_provider, c.llm_model,
+                       c.extraction_method, c.paper_identifier_type,
+                       c.paper_identifier_value
+                  FROM grouped g
+                  JOIN ranked r ON r.paper_id = g.paper_id AND r.rn = 1
+                  JOIN check_history c ON c.id = r.id
+                 ORDER BY g.last_checked_at DESC, c.id DESC
+                 LIMIT ?""",
+            (*params, limit),
+        ) as cur:
+            async for row in cur:
+                item = dict(row)
+                total_refs = _int(item.get("total_refs"))
+                papers.append(
+                    {
+                        "paper_id": item.get("paper_id"),
+                        "latest_check_id": item.get("id"),
+                        "title": item.get("paper_title") or item.get("original_filename"),
+                        "custom_label": item.get("custom_label"),
+                        "original_filename": item.get("original_filename"),
+                        "source_type": item.get("source_type"),
+                        "paper_key": item.get("paper_key"),
+                        "identifier_type": item.get("paper_identifier_type"),
+                        "identifier_value": item.get("paper_identifier_value"),
+                        "url": _paper_link(
+                            item.get("source_type"),
+                            item.get("paper_source"),
+                            item.get("paper_identifier_type"),
+                            item.get("paper_identifier_value"),
+                        ),
+                        "user_id": item.get("user_id"),
+                        "first_checked_at": item.get("first_checked_at"),
+                        "last_checked_at": item.get("last_checked_at"),
+                        "checks": _int(item.get("checks")),
+                        "checked_by": _int(item.get("checked_by")),
+                        "failed_checks": _int(item.get("failed_checks")),
+                        "status": item.get("status"),
+                        "failure_class": item.get("failure_class"),
+                        "duration_ms": item.get("duration_ms"),
+                        "llm_model": item.get("llm_model"),
+                        "llm_provider": item.get("llm_provider"),
+                        "extraction_method": item.get("extraction_method"),
+                        "total_refs": total_refs,
+                        "refs_verified": _int(item.get("refs_verified")),
+                        "refs_with_errors": _int(item.get("refs_with_errors")),
+                        "refs_with_warnings_only": _int(item.get("refs_with_warnings_only")),
+                        "errors": _int(item.get("errors_count")),
+                        "warnings": _int(item.get("warnings_count")),
+                        "suggestions": _int(item.get("suggestions_count")),
+                        "unverified": _int(item.get("unverified_count")),
+                        "hallucinations": _int(item.get("hallucination_count")),
+                        "hallucination_rate": _rate(
+                            _int(item.get("hallucination_count")), total_refs
+                        ),
+                        "verified_rate": _rate(_int(item.get("refs_verified")), total_refs),
+                    }
+                )
+
+        owners = {p["user_id"] for p in papers if p.get("user_id") is not None}
+        people: Dict[int, Dict[str, Any]] = {}
+        if owners:
+            placeholders = ", ".join("?" for _ in owners)
+            async with conn.execute(
+                f"SELECT id, email, name FROM users WHERE id IN ({placeholders})",
+                tuple(owners),
+            ) as cur:
+                async for row in cur:
+                    person = dict(row)
+                    people[person["id"]] = {
+                        "id": person.get("id"),
+                        "name": person.get("name"),
+                        "email": person.get("email"),
+                    }
+
+    for paper in papers:
+        paper["user"] = people.get(paper.get("user_id"))
+
+    return {
+        "papers": papers,
+        "total_papers": total_papers,
+        "truncated": len(papers) >= limit,
+        "window_days": days or None,
+        "since": since,
+    }
 
 
 def _summarise_session(checks: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -335,6 +335,7 @@ def test_missing_check_is_a_404(admin_db):
     [
         lambda m, u: m.get_admin_insights_overview(days=30, current_user=u),
         lambda m, u: m.get_admin_insights_users(days=0, limit=10, current_user=u),
+        lambda m, u: m.get_admin_insights_papers(days=0, limit=10, current_user=u),
         lambda m, u: m.get_admin_insights_user_sessions(user_id=1, current_user=u),
         lambda m, u: m.get_admin_insights_check(check_id=1, current_user=u),
     ],
