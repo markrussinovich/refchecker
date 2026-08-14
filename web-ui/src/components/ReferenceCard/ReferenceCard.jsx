@@ -1674,6 +1674,16 @@ const _authorProfileCache = new Map()
 // lookups, so clicking "Find profile" again for the same author/paper is free.
 const _authorFindCache = new Map()
 
+// Names the corpus a metric was computed over. h-index and i10-index may come
+// from different providers, and the numbers differ between them (and from
+// Google Scholar, which publishes no API), so the tooltip says which is which
+// instead of presenting them as one comparable set.
+function _metricSourceLabel(source) {
+  if (source === 'semantic_scholar') return ' (Semantic Scholar)'
+  if (source === 'openalex') return ' (OpenAlex)'
+  return ''
+}
+
 // Initials from a display name ("H.B. Guruprasad" -> "HG", "Jane Doe" -> "JD").
 function _authorInitials(name) {
   const parts = String(name || '').replace(/[^A-Za-z\s.-]/g, '').split(/[\s.-]+/).filter(Boolean)
@@ -1767,10 +1777,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   const loadProfile = () => {
     const s2 = e?.s2_author_id
     const oa = e?.openalex_id
-    const key = s2 || (oa ? `oa:${oa}` : null)
+    // Both ids go in the key and the request: S2 carries the richer record but
+    // publishes no i10-index, so OpenAlex is queried alongside it rather than
+    // only when S2 is missing.
+    const key = s2 || oa ? `${s2 || ''}|${oa || ''}` : null
     if (!key || profile) return
     if (_authorProfileCache.has(key)) { setProfile(_authorProfileCache.get(key)); return }
-    fetchAuthorProfile(s2 ? { author_id: s2 } : { openalex_id: oa })
+    fetchAuthorProfile({ author_id: s2 || null, openalex_id: oa || null })
       .then(res => {
         const data = res?.data || { available: false }
         _authorProfileCache.set(key, data)
@@ -1997,7 +2010,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
         const affs = (ep?.available && Array.isArray(ep.affiliations) && ep.affiliations.length)
           ? ep.affiliations
           : (Array.isArray(e.institutions) ? e.institutions : [])
-        const hasMetrics = ep?.available && (ep.paperCount != null || ep.citationCount != null || ep.hIndex != null)
+        const hasMetrics = ep?.available && (ep.paperCount != null || ep.citationCount != null || ep.hIndex != null || ep.i10Index != null)
         const loading = (!!e.s2_author_id || !!e.openalex_id) && !profile
         const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
         const chip = (label, val, title) => (
@@ -2081,18 +2094,24 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
                   {affs.slice(0, 2).join(' · ')}
                 </div>
               )}
-              {/* Author standing — h-index + total citations from the fetched
-                  Semantic Scholar / OpenAlex profile. Real-data gated: each
-                  metric renders only when the profile actually carries it, so
-                  the line disappears entirely when neither is known (no
-                  invented numbers). Surfaced inline in the header so the
-                  h-index is visible immediately, alongside the metric chips. */}
-              {ep?.available && (ep.hIndex != null || ep.citationCount != null) && (
+              {/* Author standing — h-index, i10-index and total citations from
+                  the fetched Semantic Scholar / OpenAlex profile. Real-data
+                  gated: each metric renders only when the profile actually
+                  carries it, so the line disappears entirely when none is known
+                  (no invented numbers). Surfaced inline in the header so the
+                  indices are visible immediately, alongside the metric chips. */}
+              {ep?.available && (ep.hIndex != null || ep.i10Index != null || ep.citationCount != null) && (
                 <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2 }}>
                   {ep.hIndex != null && (
-                    <span title="h-index">h-index <span style={{ fontWeight: 700 }}>{fmt(ep.hIndex)}</span></span>
+                    <span title={`h-index${_metricSourceLabel(ep.metricsSource)}`}>h-index <span style={{ fontWeight: 700 }}>{fmt(ep.hIndex)}</span></span>
                   )}
-                  {ep.hIndex != null && ep.citationCount != null && (
+                  {ep.hIndex != null && ep.i10Index != null && (
+                    <span style={{ color: 'var(--color-text-muted)' }}> · </span>
+                  )}
+                  {ep.i10Index != null && (
+                    <span title={`i10-index${_metricSourceLabel(ep.i10Source)} — publications with at least 10 citations`}>i10 <span style={{ fontWeight: 700 }}>{fmt(ep.i10Index)}</span></span>
+                  )}
+                  {(ep.hIndex != null || ep.i10Index != null) && ep.citationCount != null && (
                     <span style={{ color: 'var(--color-text-muted)' }}> · </span>
                   )}
                   {ep.citationCount != null && (
@@ -2103,12 +2122,16 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             </div>
           </div>
 
-          {/* Metric chips */}
+          {/* Metric chips. h-index and i10-index can come from different
+              corpora (S2 publishes no i10-index), so each names its source in
+              the tooltip rather than implying the pair is comparable. Neither
+              is Google Scholar, which has no API. */}
           {hasMetrics && (
             <div className="flex gap-1.5 px-3 pb-2.5">
               {ep.paperCount != null && chip('papers', fmt(ep.paperCount), 'Publications')}
               {ep.citationCount != null && chip('citations', fmt(ep.citationCount), 'Total citations')}
-              {ep.hIndex != null && chip('h-index', ep.hIndex, 'h-index')}
+              {ep.hIndex != null && chip('h-index', ep.hIndex, `h-index${_metricSourceLabel(ep.metricsSource)}`)}
+              {ep.i10Index != null && chip('i10-index', ep.i10Index, `i10-index${_metricSourceLabel(ep.i10Source)} — publications with at least 10 citations`)}
             </div>
           )}
 

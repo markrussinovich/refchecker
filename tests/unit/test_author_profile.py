@@ -29,6 +29,9 @@ _WANTED = [
     "_normalize_person_name",
     "_name_tokens",
     "_author_corroborated_on_work",
+    # `_fetch_openalex_author_metrics` delegates to this shared extractor so the
+    # find-profile and profile-endpoint paths report identical numbers.
+    "_fetch_openalex_author",
     "_fetch_openalex_author_metrics",
     "author_find",
 ]

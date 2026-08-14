@@ -466,6 +466,76 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(orcidLink).toBeUndefined()
   })
 
+  it('shows the i10-index alongside the h-index when the profile carries it', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockResolvedValue({
+      data: {
+        available: true,
+        hIndex: 137,
+        i10Index: 300,
+        metricsSource: 'semantic_scholar',
+        i10Source: 'openalex',
+        papers: [],
+      },
+    })
+    const reference = {
+      status: 'verified',
+      title: 'Indexed author paper',
+      authors: ['Ada Index'],
+      year: 2021,
+      enrichment: { authors: [{ name: 'Ada Index', s2_author_id: '55', openalex_id: 'A55' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.click(screen.getByText('Ada Index'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getAllByText('300').length).toBeGreaterThan(0))
+    expect(within(dialog).getAllByText('137').length).toBeGreaterThan(0)
+    // Both surfaces render it: the inline header line AND the metric chip row.
+    expect(within(dialog).getAllByTitle(/i10-index \(OpenAlex\)/i).length).toBe(2)
+    expect(within(dialog).getByText('i10-index')).toBeTruthy() // the chip's label
+    // Each index names the corpus it came from, since the two providers differ.
+    expect(within(dialog).getAllByTitle(/h-index \(Semantic Scholar\)/i).length).toBe(2)
+  })
+
+  it('omits the i10-index when the profile has none (no fabrication)', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockResolvedValue({
+      data: { available: true, hIndex: 9, papers: [] },
+    })
+    const reference = {
+      status: 'verified',
+      title: 'No i10 paper',
+      authors: ['Bob Noindex'],
+      year: 2021,
+      enrichment: { authors: [{ name: 'Bob Noindex', s2_author_id: '56' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.click(screen.getByText('Bob Noindex'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getAllByText('9').length).toBeGreaterThan(0))
+    expect(within(dialog).queryAllByText(/i10/i).length).toBe(0)
+  })
+
+  it('sends BOTH author ids so the OpenAlex-only i10-index is reachable for S2 authors', async () => {
+    vi.useRealTimers()
+    mockFetchAuthorProfile.mockClear()
+    mockFetchAuthorProfile.mockResolvedValue({ data: { available: true, papers: [] } })
+    const reference = {
+      status: 'verified',
+      title: 'Dual id paper',
+      authors: ['Cara Dual'],
+      year: 2021,
+      enrichment: { authors: [{ name: 'Cara Dual', s2_author_id: '77', openalex_id: 'A77' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.mouseEnter(screen.getByText('Cara Dual'))
+    await waitFor(() => expect(mockFetchAuthorProfile).toHaveBeenCalled())
+    expect(mockFetchAuthorProfile).toHaveBeenCalledWith({ author_id: '77', openalex_id: 'A77' })
+  })
+
   it('R37: relabels the inline badge and appends a literature-citation pill when cited_by_count exists', () => {
     const reference = {
       status: 'verified',

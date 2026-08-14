@@ -9131,74 +9131,171 @@ _AUTHOR_PROFILE_CACHE: dict = {}
 _AUTHOR_PROFILE_TTL = 6 * 60 * 60  # 6 hours
 
 
+async def _noop_none() -> None:
+    """An awaitable placeholder so ``gather`` can keep a fixed shape when only
+    one of the two author ids is known."""
+    return None
+
+
+async def _fetch_s2_author(author_id: str) -> Optional[Dict[str, Any]]:
+    """Semantic Scholar author record: the richest source (adds recent papers).
+
+    Note S2 publishes no i10-index, which is why OpenAlex is consulted
+    alongside it rather than only as a fallback. Soft-fails to None so one
+    provider being down never sinks the other's data.
+    """
+    import httpx
+
+    try:
+        api_key = await _resolve_semantic_scholar_api_key(None)
+        headers = {"x-api-key": api_key} if api_key else {}
+        fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
+        url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
+        if r.status_code != 200:
+            return None
+        d = r.json() or {}
+    except Exception as e:
+        logger.debug("s2 author fetch failed for %s: %s", author_id, e)
+        return None
+    papers = [
+        {"title": p.get("title"), "year": p.get("year")}
+        for p in (d.get("papers") or [])
+        if p.get("title")
+    ]
+    papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
+    return {
+        "available": True,
+        "name": d.get("name"),
+        "affiliations": d.get("affiliations") or [],
+        "paperCount": d.get("paperCount"),
+        "citationCount": d.get("citationCount"),
+        "hIndex": d.get("hIndex"),
+        "homepage": d.get("homepage"),
+        "papers": papers[:5],
+        "source": "semantic_scholar",
+        "metricsSource": "semantic_scholar" if d.get("hIndex") is not None else None,
+    }
+
+
+async def _fetch_openalex_author(openalex_id: str) -> Optional[Dict[str, Any]]:
+    """OpenAlex author record — the only free source here that publishes an
+    i10-index (``summary_stats.i10_index``), alongside h-index and ORCID.
+    Soft-fails to None so a bad response never breaks the hover card."""
+    import httpx
+
+    try:
+        vid = openalex_id if openalex_id.startswith("A") else str(openalex_id).rsplit("/", 1)[-1]
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"https://api.openalex.org/authors/{vid}", timeout=10.0)
+        if r.status_code != 200:
+            return None
+        d = r.json() or {}
+    except Exception as e:
+        logger.debug("openalex author fetch failed for %s: %s", openalex_id, e)
+        return None
+    ss = d.get("summary_stats") or {}
+    insts = [
+        i.get("display_name")
+        for i in (d.get("last_known_institutions") or [])
+        if isinstance(i, dict) and i.get("display_name")
+    ]
+    if not insts:
+        for aff in (d.get("affiliations") or [])[:2]:
+            nm = ((aff or {}).get("institution") or {}).get("display_name")
+            if nm:
+                insts.append(nm)
+    orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
+    if isinstance(orcid, str):
+        orcid = orcid.rsplit("/", 1)[-1]
+    return {
+        "available": True,
+        "name": d.get("display_name"),
+        "affiliations": insts,
+        "paperCount": d.get("works_count"),
+        "citationCount": d.get("cited_by_count"),
+        "hIndex": ss.get("h_index"),
+        "i10Index": ss.get("i10_index"),
+        "homepage": None,
+        "orcid": orcid if isinstance(orcid, str) else None,
+        "papers": [],
+        "source": "openalex",
+        "metricsSource": "openalex" if ss.get("h_index") is not None else None,
+    }
+
+
+def _merge_author_profiles(
+    primary: Optional[Dict[str, Any]],
+    openalex: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Combine the Semantic Scholar profile with OpenAlex's extra metrics.
+
+    Semantic Scholar stays authoritative for everything it reports, so the
+    numbers already on screen do not shift when OpenAlex is consulted. OpenAlex
+    only fills gaps — most importantly the i10-index, which S2 does not publish.
+
+    The two are computed over *different corpora*, so an h-index from one and an
+    i10-index from the other are not strictly comparable. Rather than silently
+    mixing them, each metric is labelled with the source it came from
+    (``metricsSource`` / ``i10Source``) and the UI says so on hover.
+    """
+    if not primary:
+        return openalex or {"available": False}
+    if not openalex:
+        return primary
+
+    merged = dict(primary)
+    for key in ("i10Index", "orcid"):
+        if merged.get(key) is None and openalex.get(key) is not None:
+            merged[key] = openalex[key]
+    for key in ("hIndex", "paperCount", "citationCount", "homepage"):
+        if merged.get(key) is None and openalex.get(key) is not None:
+            merged[key] = openalex[key]
+            merged["metricsSource"] = merged.get("metricsSource") or "openalex"
+    if not merged.get("affiliations") and openalex.get("affiliations"):
+        merged["affiliations"] = openalex["affiliations"]
+    if merged.get("i10Index") is not None:
+        merged["i10Source"] = "openalex"
+    return merged
+
+
 @app.post("/api/authors/profile")
 async def author_profile(req: _AuthorProfileRequest, current_user: UserInfo = Depends(require_user)):
-    """Fetch an enriched Semantic Scholar author profile for the hover card:
-    affiliation, paper/citation counts, h-index, homepage, and a few recent
+    """Fetch an enriched author profile for the hover card: affiliation,
+    paper/citation counts, h-index, i10-index, homepage, and a few recent
     papers. Cached (6h TTL) and soft-failing — returns {available: False} on
     any error so the tooltip simply falls back to the basic identifiers.
+
+    Semantic Scholar and OpenAlex are queried together when both ids are known:
+    S2 has the richer record but publishes no i10-index, and OpenAlex is the
+    only free source here that does. Neither is Google Scholar, which offers no
+    API — see the ``i10Source`` note in :func:`_merge_author_profiles`.
     """
     import time as _time
     author_id = (req.author_id or "").strip()
     oa_id = (req.openalex_id or "").strip()
-    cache_key = author_id or (f"oa:{oa_id}" if oa_id else "")
-    if not cache_key:
+    # Both ids participate in the key: the same S2 author asked for with and
+    # without an OpenAlex id yields different payloads (i10-index present or not).
+    cache_key = f"{author_id}|{oa_id}"
+    if not (author_id or oa_id):
         return {"available": False}
     # Serve from cache when fresh.
     cached = _AUTHOR_PROFILE_CACHE.get(cache_key)
     if cached and (_time.monotonic() - cached[0]) < _AUTHOR_PROFILE_TTL:
         return cached[1]
 
-    import httpx
     payload = {"available": False}
     try:
-        if author_id:
-            # Semantic Scholar author API (richest: + recent papers).
-            api_key = await _resolve_semantic_scholar_api_key(None)
-            headers = {"x-api-key": api_key} if api_key else {}
-            fields = "name,affiliations,paperCount,citationCount,hIndex,homepage,papers.title,papers.year"
-            url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}"
-            async with httpx.AsyncClient() as client:
-                r = await client.get(url, params={"fields": fields}, headers=headers, timeout=10.0)
-            if r.status_code == 200:
-                d = r.json() or {}
-                papers = [{"title": p.get("title"), "year": p.get("year")}
-                          for p in (d.get("papers") or []) if p.get("title")]
-                papers.sort(key=lambda p: (p.get("year") or 0), reverse=True)
-                payload = {
-                    "available": True, "name": d.get("name"),
-                    "affiliations": d.get("affiliations") or [],
-                    "paperCount": d.get("paperCount"), "citationCount": d.get("citationCount"),
-                    "hIndex": d.get("hIndex"), "homepage": d.get("homepage"),
-                    "papers": papers[:5], "source": "semantic_scholar",
-                }
-        elif oa_id:
-            # OpenAlex /authors fallback for authors with no S2 id — supplies
-            # h-index / citations / works-count / ORCID for the hover.
-            vid = oa_id if oa_id.startswith("A") else str(oa_id).rsplit("/", 1)[-1]
-            async with httpx.AsyncClient() as client:
-                r = await client.get(f"https://api.openalex.org/authors/{vid}", timeout=10.0)
-            if r.status_code == 200:
-                d = r.json() or {}
-                ss = d.get("summary_stats") or {}
-                insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
-                         if isinstance(i, dict) and i.get("display_name")]
-                if not insts:
-                    for aff in (d.get("affiliations") or [])[:2]:
-                        nm = ((aff or {}).get("institution") or {}).get("display_name")
-                        if nm:
-                            insts.append(nm)
-                orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
-                if isinstance(orcid, str):
-                    orcid = orcid.rsplit("/", 1)[-1]
-                payload = {
-                    "available": True, "name": d.get("display_name"),
-                    "affiliations": insts,
-                    "paperCount": d.get("works_count"), "citationCount": d.get("cited_by_count"),
-                    "hIndex": ss.get("h_index"), "homepage": None,
-                    "orcid": orcid if isinstance(orcid, str) else None,
-                    "papers": [], "source": "openalex",
-                }
+        # Concurrent so adding the i10-index lookup does not double hover latency.
+        primary, openalex = await asyncio.gather(
+            _fetch_s2_author(author_id) if author_id else _noop_none(),
+            _fetch_openalex_author(oa_id) if oa_id else _noop_none(),
+            return_exceptions=True,
+        )
+        primary = primary if isinstance(primary, dict) else None
+        openalex = openalex if isinstance(openalex, dict) else None
+        payload = _merge_author_profiles(primary, openalex)
     except Exception as e:
         logger.debug("author_profile fetch failed for %s: %s", cache_key, e)
         payload = {"available": False}
@@ -9374,38 +9471,25 @@ async def author_find(req: _AuthorFindRequest,
 
 
 async def _fetch_openalex_author_metrics(short_id: str) -> Dict[str, Any]:
-    """Fetch h-index / citations / works-count / ORCID / affiliations + recent
-    papers for a resolved OpenAlex author id. Returns {} on any failure so the
-    caller still reports the (corroborated) id without metrics."""
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"https://api.openalex.org/authors/{short_id}")
-        if r.status_code != 200:
-            return {}
-        d = r.json() or {}
-        ss = d.get("summary_stats") or {}
-        insts = [i.get("display_name") for i in (d.get("last_known_institutions") or [])
-                 if isinstance(i, dict) and i.get("display_name")]
-        if not insts:
-            for aff in (d.get("affiliations") or [])[:2]:
-                nm = ((aff or {}).get("institution") or {}).get("display_name")
-                if nm:
-                    insts.append(nm)
-        orcid = d.get("orcid") or (d.get("ids") or {}).get("orcid")
-        if isinstance(orcid, str):
-            orcid = orcid.rsplit("/", 1)[-1]
-        return {
-            "affiliations": insts,
-            "paperCount": d.get("works_count"),
-            "citationCount": d.get("cited_by_count"),
-            "hIndex": ss.get("h_index"),
-            "homepage": None,
-            "orcid": orcid if isinstance(orcid, str) else None,
-            "papers": [],
-        }
-    except Exception:
+    """Metric fields for a resolved OpenAlex author id, reusing the same
+    extraction as the author-profile endpoint so both paths report identical
+    numbers (including the i10-index). Returns {} on any failure so the caller
+    still reports the (corroborated) id without metrics."""
+    d = await _fetch_openalex_author(short_id)
+    if not d:
         return {}
+    return {
+        "affiliations": d.get("affiliations") or [],
+        "paperCount": d.get("paperCount"),
+        "citationCount": d.get("citationCount"),
+        "hIndex": d.get("hIndex"),
+        "i10Index": d.get("i10Index"),
+        "i10Source": "openalex" if d.get("i10Index") is not None else None,
+        "metricsSource": d.get("metricsSource"),
+        "homepage": None,
+        "orcid": d.get("orcid"),
+        "papers": [],
+    }
 
 
 @app.get("/api/references/seen")
