@@ -27,8 +27,12 @@ History:
     3 - post-parse field fixups now run on the WebUI path too. They were only
         ever applied by the CLI/bulk wrapper, so WebUI verdicts were produced
         against uncorrected venue/title/author fields.
+    4 - the cached-verification (fuzzy Seen-Refs hit) path now compares titles
+        with the shared scorer and the shared acceptance threshold instead of a
+        private token-Jaccard with its own cut-offs, so a reference is judged
+        the same whether it was verified fresh or replayed from cache.
 """
 
-VERIFICATION_LOGIC_VERSION = 3
+VERIFICATION_LOGIC_VERSION = 4
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]

@@ -42,6 +42,7 @@ from . import admin_insights
 from .database import db, get_data_dir, get_logs_dir
 from .websocket_manager import manager, presence
 from .refchecker_wrapper import ProgressRefChecker
+from .reference_status import classify_verification_result, split_errors_and_warnings
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
 from .cites_refs import fetch_cites_and_refs, normalize_mode as _normalize_overlap_mode
@@ -2958,15 +2959,23 @@ async def get_check_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _render_check_html(check_id: int, current_user: UserInfo) -> tuple[str, str]:
+async def _render_check_html(check_id: int, current_user: UserInfo, *,
+                             include: Optional[str] = None,
+                             corrections: bool = False,
+                             summary: Any = None) -> tuple[str, str]:
     """Resolve a check and render it to standalone HTML. Returns (title, html).
 
     Team-aware read (R26): a member of the team a check is shared with can export
     it, mirroring the shared-check detail view (renders only the already-shared
-    references + verdicts, no owner-only raw assets)."""
+    references + verdicts, no owner-only raw assets).
+
+    The report options are honoured here so a published link matches what the
+    share dialog was configured to produce, exactly as the download does."""
     check = await _get_accessible_check_or_404(check_id, current_user)
-    from backend.export import serialize_check_to_html
-    html_str = serialize_check_to_html(check)
+    from backend.export import serialize_check_to_html, parse_sections
+    html_str = serialize_check_to_html(
+        check, corrections=corrections,
+        sections=parse_sections(include), summary=summary)
     title = check.get("paper_title") or check.get("custom_label") or f"refchecker-{check_id}"
     return title, html_str
 
@@ -2994,6 +3003,12 @@ class _PublishRequest(BaseModel):
     adapter: str = "github_gist"   # 'github_gist'
     token: str = ""                 # caller-supplied PAT (gist scope)
     public: bool = False
+    # The share dialog's report options. Publishing used to ignore these and
+    # always emit the full default report, so unchecking a section (or asking
+    # for suggested corrections) silently had no effect on a published link.
+    include: Optional[str] = None
+    corrections: bool = False
+    summary: Optional[Dict[str, Any]] = None
 
 
 @app.get("/api/check/{check_id}/health")
@@ -3530,7 +3545,9 @@ async def publish_check(check_id: int, req: _PublishRequest,
     # per-adapter try/except — so any failure surfaced as a raw, detail-leaking
     # 500 for EVERY share type. Wrap it into a stable, generic 500.
     try:
-        title, html_str = await _render_check_html(check_id, current_user)
+        title, html_str = await _render_check_html(
+            check_id, current_user, include=req.include,
+            corrections=req.corrections, summary=req.summary)
     except HTTPException:
         raise
     except Exception as e:
@@ -3551,7 +3568,11 @@ async def publish_check(check_id: int, req: _PublishRequest,
                 raise HTTPException(status_code=404, detail="Check not found")
             from backend import export as _export
             try:
-                pdf_bytes = await asyncio.to_thread(_export.render_check_to_pdf, check)
+                pdf_bytes = await asyncio.to_thread(
+                    _export.render_check_to_pdf, check,
+                    corrections=req.corrections,
+                    sections=_export.parse_sections(req.include),
+                    summary=req.summary)
             except _export.PdfEngineUnavailableError as e:
                 # No PDF engine in this bundle: quick-link needs a PDF, so tell
                 # the user to use Publish-to-web or download HTML/MD instead.
@@ -7351,28 +7372,18 @@ async def verify_single_reference(
 
     # Assemble a verified result on top of the existing ref so the row
     # keeps its id/index but picks up the new status/errors/url.
-    sanitized = []
-    for err in (errors or []):
-        e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
-        details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
-        if not e_type and not details:
-            continue
-        sanitized.append({"error_type": e_type, "error_details": details})
-
-    has_error = any((s.get('error_type') and s.get('error_type') != 'unverified') for s in sanitized)
-    if verified_data and not has_error:
-        status = "verified"
-    elif verified_data:
-        status = "warning"
-    elif sanitized:
-        status = "unverified"
-    else:
-        status = "unverified"
+    # Use the same classifier as the batch path (backend/reference_status.py):
+    # this endpoint used to fold warning_type into error_type, which made
+    # status="error" unreachable (a real author mismatch was shown as a mild
+    # warning) while simultaneously putting warnings in `errors`, so the
+    # status icon contradicted the row's own status.
+    status, sanitized = classify_verification_result(dict(target), verified_data, errors, url)
+    ref_errors, ref_warnings = split_errors_and_warnings(sanitized)
 
     updated = dict(target)
     updated["status"] = status
-    updated["errors"] = [s for s in sanitized if s.get('error_type') and s.get('error_type') != 'unverified']
-    updated["warnings"] = []  # warnings come back through error_type for now
+    updated["errors"] = ref_errors
+    updated["warnings"] = ref_warnings
     updated["verified_url"] = url
     if verified_data:
         # Surface the canonical metadata in dedicated `verified_*` fields

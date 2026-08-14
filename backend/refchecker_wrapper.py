@@ -30,6 +30,7 @@ if _src_path not in sys.path and os.path.exists(_src_path):
 from backend.concurrency import create_limiter, get_default_max_concurrent
 from backend.auth import is_multiuser_mode
 from backend.database import get_data_dir
+from backend.reference_status import classify_verification_result, split_errors_and_warnings
 
 from refchecker.utils.text_utils import extract_latex_references
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
@@ -200,6 +201,39 @@ def _sentence_tokenize(text):
     return merged
 
 
+# Title comparison on the cached-verification path uses the SAME scorer and the
+# SAME acceptance threshold as every live checker, so a reference is judged by
+# one rule whether it was verified fresh or replayed from the cross-paper cache.
+# The primary cut-off is the shared config value, not a local constant.
+def _shared_title_similarity(a: str, b: str):
+    """Shared title similarity, or None if the scorer is unavailable."""
+    try:
+        from refchecker.utils.text_utils import calculate_title_similarity
+        return calculate_title_similarity((a or "").lower(), (b or "").lower())
+    except Exception:
+        logger.debug("shared title similarity unavailable", exc_info=True)
+        return None
+
+
+def _title_match_threshold() -> float:
+    try:
+        from refchecker.config.settings import get_config
+        return float(get_config()["text_processing"]["similarity_threshold"])
+    except Exception:
+        return 0.8
+
+
+# At or above this, the checkers consider the titles the same paper.
+_TITLE_MATCH_THRESHOLD = _title_match_threshold()
+# Well below the acceptance threshold the cache has most likely matched a
+# different work, which is an error rather than a wording discrepancy. Derived
+# from the shared threshold so there is still only one number to tune. Kept well
+# clear of the acceptance band deliberately: spelling variants of the same title
+# ("optimization"/"optimisation") score around 0.4 on the shared scorer, and
+# those are a discrepancy to flag, not grounds for calling it a different paper.
+_TITLE_MISMATCH_THRESHOLD = _TITLE_MATCH_THRESHOLD * 0.5
+
+
 def _diff_cited_vs_truth(reference, truth):
     """Compare a cited reference against a known-verified truth row.
 
@@ -269,13 +303,20 @@ def _diff_cited_vs_truth(reference, truth):
             return ""
         return _norm(parts[-1])
 
-    # ── Title (v0.7.55 per ML round 2) ────────────────────────────────
+    # ── Title ─────────────────────────────────────────────────────────
     # A fuzzy hit landed us here; if the fuzzy 60–80 char prefix match
     # had divergent suffix the cited paper might not actually be the
-    # cached paper. Compare normalized titles via token-set Jaccard:
-    #   >= 0.85  → silent (genuinely the same paper)
-    #   0.55..0.85 → warning
-    #   < 0.55  → error (likely mismatched cache record)
+    # cached paper.
+    #
+    # This MUST use the same similarity function and the same acceptance
+    # threshold as every live checker (crossref, semantic_scholar,
+    # local_semantic_scholar, openalex, arxiv). This path exists only in
+    # the WebUI — the CLI and bulk runners have no cross-paper cache — so
+    # a private formula here meant the same reference could be judged by
+    # different rules depending purely on whether it happened to be
+    # cached, which is exactly the divergence AGENTS.md forbids. The old
+    # raw token-Jaccard with hand-picked 0.55/0.85 cut-offs disagreed with
+    # the shared scorer across the whole middle of its range.
     def _title_tokens(s):
         s = (s or "").strip().lower()
         s = _re_dvt.sub(r"[^a-z0-9 ]+", " ", s)
@@ -292,30 +333,26 @@ def _diff_cited_vs_truth(reference, truth):
     except Exception:
         _subtitle_ok = False
     if cited_title and truth_title and not _subtitle_ok:
-        ct = _title_tokens(cited_title)
-        tt = _title_tokens(truth_title)
-        if ct and tt:
-            inter = len(ct & tt)
-            union = len(ct | tt)
-            jacc = inter / union if union else 0.0
-            if jacc < 0.55:
+        sim = _shared_title_similarity(cited_title, truth_title)
+        if sim is not None and sim < _TITLE_MATCH_THRESHOLD:
+            if sim < _TITLE_MISMATCH_THRESHOLD:
                 errors.append({
                     "error_type": "title",
                     "error_details": (
                         f"Cited title differs sharply from the cached "
-                        f"verification of this paper (Jaccard {jacc:.2f}). "
+                        f"verification of this paper (similarity {sim:.2f}). "
                         f"The cache may have matched a similarly-titled "
                         f"but distinct work."
                     ),
                     "cited_value": cited_title[:200],
                     "actual_value": truth_title[:200],
                 })
-            elif jacc < 0.85:
+            else:
                 warnings.append({
                     "warning_type": "title",
                     "warning_details": (
                         f"Cited title differs slightly from the cached "
-                        f"truth (Jaccard {jacc:.2f})."
+                        f"truth (similarity {sim:.2f})."
                     ),
                     "cited_value": cited_title[:200],
                     "actual_value": truth_title[:200],
@@ -1335,123 +1372,19 @@ class ProgressRefChecker:
         
         Shared by both async and sync verification methods.
         """
-        # Normalize errors to align with CLI behavior
+        # Normalize errors and derive the status via the canonical classifier
+        # in backend/reference_status.py, which the single-reference re-verify
+        # endpoint shares so both routes agree on severity.
         logger.info(f"_format_verification_result: raw errors={errors}")
-        sanitized = []
-        for err in (errors or []):
-            e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
-            details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
-            if not e_type and not details:
-                continue
-            # Track if this was originally an info_type (suggestion, not error)
-            is_info = 'info_type' in err
-            # Track if this was originally a warning_type (warning, not error)
-            is_warning = 'warning_type' in err
-            logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
-            # Backfill actual_value from the typed correction fields: "missing"
-            # issues (year/venue/title/authors) populate ONLY ref_*_correct, not
-            # actual_value, so the corrected-bibtex builder would otherwise drop
-            # exactly the value the warning told the user to add.
-            _actual = err.get('actual_value')
-            if not _actual:
-                _actual = (err.get('ref_year_correct') or err.get('ref_venue_correct')
-                           or err.get('ref_title_correct') or err.get('ref_authors_correct')
-                           or err.get('ref_doi_correct'))
-            _san = {
-                # Preserve original error_type for suggestion_type mapping;
-                # use is_suggestion flag for categorization instead.
-                # Map 'timeout' to 'unverified' since timeouts mean we couldn't verify
-                "error_type": 'unverified' if e_type == 'timeout' else (e_type or 'unknown'),
-                "error_details": details if e_type != 'timeout' else 'Verification timed out',
-                "cited_value": err.get('cited_value'),
-                "actual_value": _actual,
-                "is_suggestion": is_info,  # Preserve info_type as suggestion flag
-                "is_warning": is_warning,  # Preserve warning_type as warning flag
-            }
-            # Carry the typed correction fields through so the FE corrected-bibtex
-            # builder can recover year/venue/title/authors even when the checker
-            # only set the typed field (belt-and-suspenders with the backfill).
-            for _k in ("ref_year_correct", "ref_venue_correct", "ref_title_correct", "ref_authors_correct", "ref_doi_correct"):
-                if err.get(_k):
-                    _san[_k] = err.get(_k)
-            sanitized.append(_san)
-
-        # Determine status - items originally from warning_type are warnings, items from error_type are errors
-        # Items originally from info_type are suggestions, not errors
-        # Items originally from warning_type are warnings, not errors
-        # Items with error_type (including year/venue/author when missing) are errors
-        has_errors = any(
-            e.get('error_type') not in ['unverified'] 
-            and not e.get('is_suggestion')
-            and not e.get('is_warning')
-            # 'url' errors where the URL references the paper are informational,
-            # not real errors — the webpage checker confirmed the cited URL
-            # contains the paper title.
-            and not (
-                e.get('error_type') == 'url'
-                and 'url references paper' in (e.get('error_details') or '').lower()
-            )
-            for e in sanitized
+        status, sanitized = classify_verification_result(reference, verified_data, errors, url)
+        is_unverified = any(
+            (e.get('error_type') or e.get('warning_type')) in ('unverified', 'timeout')
+            for e in (errors or [])
         )
-        has_warnings = any(
-            e.get('is_warning')
-            and not e.get('is_suggestion') 
-            for e in sanitized
-        )
-        has_suggestions = any(e.get('is_suggestion') for e in sanitized)
-        is_unverified = any(e.get('error_type') == 'unverified' for e in sanitized)
-        # Check if the URL was confirmed to reference the paper (webpage checker verified it)
         url_references_paper = any(
             'url references paper' in (e.get('error_details') or '').lower()
             for e in (errors or [])
         )
-
-        if is_unverified:
-            from refchecker.checkers.web_search import is_academic_url
-
-            cited_url = reference.get('cited_url') or reference.get('url') or url or ''
-            real_errors = [
-                e for e in sanitized
-                if e.get('error_type') != 'unverified'
-                and not e.get('is_suggestion')
-                and not e.get('is_warning')
-            ]
-            cited_url_lower = cited_url.lower()
-            is_direct_pdf = cited_url_lower.split('?', 1)[0].endswith('.pdf')
-            if (
-                real_errors
-                and all(e.get('error_type') == 'url' for e in real_errors)
-                and not is_academic_url(cited_url)
-                and (not is_direct_pdf or 'openai.com' in cited_url_lower)
-            ):
-                sanitized = [e for e in sanitized if e.get('error_type') != 'url']
-                has_errors = False
-
-        if has_errors:
-            status = 'error'
-        elif has_warnings:
-            status = 'warning'
-        elif has_suggestions:
-            status = 'suggestion'
-        elif is_unverified and url_references_paper:
-            # The cited URL was checked and confirmed to contain the paper —
-            # treat as verified even though it wasn't found in academic databases.
-            status = 'verified'
-            # Strip the unverified + url-references-paper errors since they're
-            # now resolved — the URL confirms the paper exists.
-            sanitized = [
-                e for e in sanitized
-                if e.get('error_type') != 'unverified'
-                and not (
-                    e.get('error_type') == 'url'
-                    and 'url references paper' in (e.get('error_details') or '').lower()
-                )
-            ]
-        elif is_unverified:
-            status = 'unverified'
-        else:
-            status = 'verified'
-
         # Extract authoritative URLs with proper type detection
         authoritative_urls = []
         verified_via_cited_url = status == 'verified' and url_references_paper
