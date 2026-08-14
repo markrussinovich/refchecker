@@ -540,6 +540,33 @@ class _Occurrence:
         self.marker = marker
 
 
+_DASH_CHARS = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+# "[26]–[29]" / "(3)-(7)": a range written with a bracket around each endpoint
+# rather than inside one marker. Only whitespace and a dash may sit between.
+_SPAN_BRIDGE_RE = re.compile(r"^\s*[%s]\s*$" % _DASH_CHARS)
+
+
+def _span_bridged_range(body, prev_match, cur_match, prev_inner, cur_inner):
+    """Endpoints of a bracket-per-endpoint range, or None.
+
+    IEEE and many other styles write a citation span as ``[26]-[29]`` rather
+    than ``[26-29]``. Both markers match the scheme pattern individually, so
+    without this the interior references (27, 28) are never counted as cited
+    and get reported as uncited -- a false accusation against a correctly
+    cited paper.
+    """
+    if prev_match is None:
+        return None
+    between = body[prev_match.end():cur_match.start()]
+    if not _SPAN_BRIDGE_RE.match(between):
+        return None
+    lo_m = re.match(r"^(\d{1,3})$", prev_inner.strip())
+    hi_m = re.match(r"^(\d{1,3})$", cur_inner.strip())
+    if not lo_m or not hi_m:
+        return None
+    return int(lo_m.group(1)), int(hi_m.group(1))
+
+
 def _expand_marker(ascii_text, cap):
     """Yield (number, is_range_error_reason_or_None) for a marker's content.
 
@@ -553,7 +580,7 @@ def _expand_marker(ascii_text, cap):
         token = token.strip()
         if not token:
             continue
-        rng = re.match(r"^(\d{1,3})\s*[\-–]\s*(\d{1,3})$", token)
+        rng = re.match(r"^(\d{1,3})\s*[%s]\s*(\d{1,3})$" % _DASH_CHARS, token)
         if rng:
             lo, hi = int(rng.group(1)), int(rng.group(2))
             if hi < lo:
@@ -605,6 +632,8 @@ def _extract_numeric_occurrences(body, scheme, ref_count, max_index=0):
     occurrences = []
     raw_out_of_range = []  # (number, offset, marker)
     range_errors = []      # (reason, lo, hi, offset, marker)
+    prev_match = None      # previous accepted marker, for "[26]-[29]" spans
+    prev_inner = ""
 
     for m in pat.finditer(body):
         marker = m.group(0)
@@ -624,6 +653,11 @@ def _extract_numeric_occurrences(body, scheme, ref_count, max_index=0):
         ascii_text = marker.translate(_SUPERSCRIPT_MAP)
         # Strip the surrounding bracket/paren for content parsing.
         inner = ascii_text.strip("[]() \t")
+        # Citation indices are 1-based, so a marker containing a bare 0 is
+        # interval or coordinate notation ("assign a score in [0, 1]"), not a
+        # citation. Without this it is reported as a citation of reference 0.
+        if re.search(r"(?<![\d.])0(?![\d.])", inner):
+            continue
         # Superscripts have no delimiters; treat each maximal digit run.
         if scheme == "superscript":
             # Superscript footnote guard: a lone superscript number > 200 is a
@@ -632,6 +666,37 @@ def _extract_numeric_occurrences(body, scheme, ref_count, max_index=0):
             if len(inner_nums) == 1 and int(inner_nums[0]) > 200:
                 continue
         numbers, raw_out, errs = _expand_marker(inner, cap)
+        span_numbers = []
+
+        # "[26]-[29]": fill in the interior of a range whose endpoints are
+        # bracketed separately. Only for the delimited schemes -- a superscript
+        # span is already a single marker.
+        if scheme != "superscript":
+            span = _span_bridged_range(body, prev_match, m, prev_inner, inner)
+            if span:
+                lo, hi = span
+                span_marker = "%s%s%s" % (prev_match.group(0),
+                                          body[prev_match.end():m.start()].strip(),
+                                          marker)
+                if hi < lo:
+                    range_errors.append(("reversed", lo, hi, offset, span_marker))
+                elif hi - lo > _MAX_RANGE_SPAN:
+                    range_errors.append(("too_wide", lo, hi, offset, span_marker))
+                else:
+                    # Attribute the interior to where the span STARTS. Using the
+                    # closing marker's offset would make 2..5 in "[1]-[6]" look
+                    # like they first appear after 6, i.e. a false out-of-order.
+                    span_offset = prev_match.start()
+                    for n in range(lo + 1, hi):
+                        if 1 <= n <= cap:
+                            span_numbers.append(n)
+                        else:
+                            raw_out_of_range.append((n, span_offset, span_marker))
+                    for n in span_numbers:
+                        occurrences.append(_Occurrence(n, span_offset, span_marker))
+
+        prev_match, prev_inner = m, inner
+
         for n in numbers:
             occurrences.append(_Occurrence(n, offset, marker))
         for n in raw_out:
@@ -1145,16 +1210,41 @@ def inline_citation_report(paper_text, references):
             ref_index=idx,
         ))
 
-    # --- STEP 5d: GAP (medium) -----------------------------------------------
-    if cited_indices:
+    # --- STEP 5d/5f: references that are never cited inline -------------------
+    # A listed reference that no marker points at is ONE fact. It used to be
+    # reported twice -- once as 'gap' (hole inside the cited range) and again as
+    # 'uncited' (entry never cited) -- so a paper with 8 unused references
+    # showed 16 findings. The two are now a partition: 'gap' for a hole inside
+    # the cited span, 'uncited' for entries outside it.
+    #
+    # Both are gated on coverage. 'uncited' is the highest false-positive-risk
+    # check: it accuses the author based on the PARSER's own recall. If we
+    # matched fewer than half the listed references, the dominant hypothesis is
+    # parser under-recall (OCR, exotic markers), not a genuinely uncited
+    # bibliography -> suppress to avoid alarms. The same reasoning applies to a
+    # hole in the sequence, which previously bypassed the gate entirely.
+    coverage = (len(cited_indices) / float(ref_count)) if ref_count else 0.0
+    if coverage >= 0.5 and cited_indices:
         lo = min(cited_indices)
-        for k in range(lo, max_cited + 1):
-            if k not in cited_indices and k in ref_indices:
+        for pos, ref in enumerate(references):
+            idx = index_by_pos[pos]
+            if idx in cited_indices:
+                continue
+            title = _short_title(_ref_title(ref))
+            tail = (" (%r)" % title) if title else ""
+            if lo <= idx <= max_cited:
                 issues.append(_issue(
                     "gap", "medium",
-                    "Reference %d is never cited inline though %d-%d are." % (
-                        k, lo, max_cited),
-                    ref_index=k,
+                    "Reference %d%s is never cited inline, though citations "
+                    "range from %d to %d." % (idx, tail, lo, max_cited),
+                    ref_index=idx,
+                ))
+            else:
+                issues.append(_issue(
+                    "uncited", "medium",
+                    "Reference %d%s is in the list but never cited in the text." % (
+                        idx, tail),
+                    ref_index=idx,
                 ))
 
     # Ordering convention (alphabetical / appearance / reverse-appearance). Used
@@ -1185,25 +1275,6 @@ def inline_citation_report(paper_text, references):
                     "citation [%d]; first-mention order is not ascending." % (
                         marker, prev_max),
                     marker=marker, ref_index=n,
-                ))
-
-    # --- STEP 5f: UNCITED references (medium) --------------------------------
-    # 'uncited' is the highest false-positive-risk check: it accuses the author
-    # based on the PARSER's own recall. If we matched fewer than half the listed
-    # references, the dominant hypothesis is parser under-recall (OCR, exotic
-    # markers), not a genuinely uncited bibliography -> suppress to avoid alarms.
-    coverage = (len(cited_indices) / float(ref_count)) if ref_count else 0.0
-    if coverage >= 0.5:
-        for pos, ref in enumerate(references):
-            idx = index_by_pos[pos]
-            if idx not in cited_indices:
-                title = _short_title(_ref_title(ref))
-                tail = (" (%r)" % title) if title else ""
-                issues.append(_issue(
-                    "uncited", "medium",
-                    "Reference %d%s is in the list but never cited in the text." % (
-                        idx, tail),
-                    ref_index=idx,
                 ))
 
     # --- STEP 6: counts ------------------------------------------------------
