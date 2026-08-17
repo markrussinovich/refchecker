@@ -1742,13 +1742,17 @@ function ProfileLinkIcon({ icon }) {
   )
 }
 
-// Fixed dimensions for the author hover card. The card fills in from several
-// async sources, so sizing it to its content made it grow and re-flow under
-// the pointer mid-read; these hold it steady. HOVER_CARD_H comfortably fits
-// the fullest hover layout (header + affiliation + metrics line + chips +
-// ORCID + three recent papers + footer); anything longer scrolls in the body.
+// Fixed WIDTH for the author hover card. The card fills in from several async
+// sources, so sizing it to its content made its width drift from author to
+// author and re-flow as data landed. Height is deliberately NOT fixed: the
+// sections genuinely vary (plenty of authors have no recent-work list), and
+// reserving room for the tallest layout left a large blank gap on every card
+// that didn't fill it. The growth that a variable height would otherwise cause
+// is addressed by loading the profile before the card opens (see onEnter).
 const HOVER_CARD_W = 360
-const HOVER_CARD_H = 284
+// Typical loaded height, used only to decide which way to open. It doesn't
+// constrain the card — it just beats guessing at a minimum.
+const HOVER_CARD_TYPICAL_H = 260
 const PINNED_CARD_W = 460
 
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, paperYear }) {
@@ -1769,6 +1773,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   const wrapperRef = useRef(null)
   const popoverRef = useRef(null)
   const enterTimer = useRef(null)
+  const prefetchTimer = useRef(null)
   const leaveTimer = useRef(null)
   // Popover placement so it always fits + scrolls even when the author sits low
   // on the page. Measured from the anchor's viewport rect: open UPWARD when
@@ -1829,10 +1834,15 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       .catch(() => { setFindState('miss') })
   }
 
-  // 250ms hover delay so brushing past names doesn't flash the popover.
+  // 250ms hover delay so brushing past names doesn't flash the popover. The
+  // profile fetch starts earlier, at 100ms: it overlaps the remaining delay so
+  // a deliberate hover usually opens the card already populated, at its final
+  // height, instead of visibly growing a beat later. 100ms is still long enough
+  // that sweeping the pointer across a list of names fetches nothing.
   const onEnter = () => {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
     if (!e) return
+    prefetchTimer.current = setTimeout(() => { loadProfile() }, 100)
     enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
   // Moving the pointer off BOTH the author name and the popover always
@@ -1842,6 +1852,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   // stranded on screen after the pointer has moved away.
   const scheduleClose = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
     // 180ms is enough to cross the small gap between the name and the popover.
     leaveTimer.current = setTimeout(() => { setPinned(false); setOpen(false) }, 180)
@@ -1852,6 +1863,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   const pin = () => {
     if (!e) return
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
     setOpen(true)
     setPinned(true)
@@ -1903,6 +1915,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
 
   useEffect(() => () => {
     if (enterTimer.current) clearTimeout(enterTimer.current)
+    if (prefetchTimer.current) clearTimeout(prefetchTimer.current)
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
   }, [])
 
@@ -1932,7 +1945,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       // that the card has a known fixed height, that's the exact threshold
       // rather than a guessed minimum, so it stops being clamped and scrolled
       // below when it would have fitted whole above.
-      const openUp = spaceBelow < HOVER_CARD_H && spaceAbove > spaceBelow
+      const openUp = spaceBelow < HOVER_CARD_TYPICAL_H && spaceAbove > spaceBelow
       const avail = openUp ? spaceAbove : spaceBelow
       const maxH = Math.max(MIN_H, Math.min(cap70, avail))
       // Clamp left so a popover anchored near the right edge doesn't run off
@@ -2086,18 +2099,15 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             ...(placement.dir === 'up'
               ? { bottom: placement.bottom ?? 8 }
               : { top: placement.top ?? 8 }),
-            // Fixed size. The card's sections arrive asynchronously — the by-id
-            // profile, then the corroborated name/title lookup — so a
-            // content-sized box visibly grew and re-flowed under the pointer
-            // while the reader was already looking at it, and its width drifted
-            // per author. Pinning both dimensions makes it land once, at the
-            // same size every time. R11: the pinned panel is wider, and keeps
-            // its content height so the full recent-papers list has room.
+            // Fixed width so the card doesn't change shape from author to
+            // author, and so nothing re-flows sideways as data lands. Height
+            // follows the content: reserving room for the tallest possible
+            // layout left a dead gap under every card without a recent-work
+            // list. R11: the pinned panel is wider.
             width: pinned ? PINNED_CARD_W : HOVER_CARD_W,
-            height: pinned ? undefined : HOVER_CARD_H,
-            // Still yields to the ACTUAL space available (min(70vh, space−margin))
-            // so the body is never clipped below the viewport; max-height wins
-            // over height, and the inner body scrolls what doesn't fit.
+            // Caps to the ACTUAL space available (min(70vh, space−margin))
+            // so the body is never clipped below the viewport; the inner body
+            // scrolls whatever doesn't fit.
             maxHeight: pinned ? '80vh' : placement.maxHeight,
             // Column layout so the footer can sit at the bottom edge rather
             // than floating mid-card above the reserved space.
@@ -2247,8 +2257,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
               <div className="space-y-1.5">
                 {(pinned ? ep.papers : ep.papers.slice(0, 3)).map((p, i) => (
                   // One line per paper in the hover card, so three long titles
-                  // can't wrap into eleven lines and overflow the fixed height;
-                  // the full title is on the tooltip and the pinned panel wraps
+                  // can't wrap into eleven lines and dominate the card; the
+                  // full title is on the tooltip and the pinned panel wraps
                   // it in full. The year never truncates — it is doing as much
                   // work as the title in placing the paper.
                   pinned ? (

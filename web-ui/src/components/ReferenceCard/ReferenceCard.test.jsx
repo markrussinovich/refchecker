@@ -668,9 +668,12 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
 
 // The author card's contents arrive from several async sources, so a
 // content-sized box grew and re-flowed under the pointer while the reader was
-// already looking at it. Its size must be fixed up front and survive the data
-// landing.
-describe('ReferenceCard — author card is a fixed size', () => {
+// already looking at it. Its WIDTH is fixed up front and must survive the data
+// landing. Its HEIGHT deliberately follows the content — reserving room for
+// the tallest layout left a dead band under every card without a recent-work
+// list — so the growth is headed off by fetching the profile before the card
+// opens instead.
+describe('ReferenceCard — author card sizing', () => {
   afterEach(() => {
     mockFetchAuthorProfile.mockReset()
     mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
@@ -678,7 +681,7 @@ describe('ReferenceCard — author card is a fixed size', () => {
     mockFindAuthorProfile.mockResolvedValue({ data: { available: false } })
   })
 
-  it('keeps the same width and height as the profile data lands', async () => {
+  it('keeps the same width as the profile data lands, without reserving blank height', async () => {
     vi.useRealTimers()
     // Hold the profile open so the card can be measured mid-load, then
     // released with a payload that adds every optional section at once.
@@ -699,9 +702,11 @@ describe('ReferenceCard — author card is a fixed size', () => {
     const tooltip = await screen.findByRole('tooltip')
 
     const before = { w: tooltip.style.width, h: tooltip.style.height }
-    // A real size, not "auto" — the card is sized before it knows its content.
+    // A real width, not "auto" — the card is sized before it knows its content.
     expect(before.w).toMatch(/^\d+px$/)
-    expect(before.h).toMatch(/^\d+px$/)
+    // Height is NOT pinned: a card with no recent-work list must be allowed to
+    // be short rather than padded out to the tallest possible layout.
+    expect(before.h).toBe('')
 
     release({
       data: {
@@ -750,8 +755,8 @@ describe('ReferenceCard — author card is a fixed size', () => {
     const tooltip = await screen.findByRole('tooltip')
 
     const line = await within(tooltip).findByText(longTitle)
-    // Clipped to one line so three such titles can't blow past the fixed
-    // height, with the full text still reachable on hover.
+    // Clipped to one line so three such titles can't dominate the card, with
+    // the full text still reachable on hover.
     expect(line.className).toMatch(/\btruncate\b/)
     expect(line.closest('[title]').getAttribute('title')).toBe(longTitle)
     // The year is never sacrificed to the truncation.
@@ -763,7 +768,7 @@ describe('ReferenceCard — author card is a fixed size', () => {
     expect(within(panel).getByText(new RegExp(longTitle)).className).not.toMatch(/\btruncate\b/)
   })
 
-  it('sizes two different authors identically', async () => {
+  it('gives two different authors the same width', async () => {
     vi.useRealTimers()
     // One author resolves nothing, the other a full profile: the sparse card
     // must not be a different size from the rich one.
@@ -793,11 +798,10 @@ describe('ReferenceCard — author card is a fixed size', () => {
 
     fireEvent.mouseEnter(sparseAnchor)
     let tip = await screen.findByRole('tooltip')
-    const sparse = { w: tip.style.width, h: tip.style.height }
+    const sparse = { w: tip.style.width }
     // Guard against the "both are auto" trap: an unsized card would make the
     // comparison below pass trivially.
     expect(sparse.w).toMatch(/^\d+px$/)
-    expect(sparse.h).toMatch(/^\d+px$/)
     fireEvent.mouseLeave(sparseAnchor)
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
@@ -806,6 +810,62 @@ describe('ReferenceCard — author card is a fixed size', () => {
     await waitFor(() => expect(within(tip).getByText('5,000')).toBeTruthy())
 
     expect(tip.style.width).toBe(sparse.w)
-    expect(tip.style.height).toBe(sparse.h)
+  })
+
+  // With the height no longer padded out to a fixed value, the card must not
+  // visibly grow after it opens. The fetch is therefore kicked off partway
+  // through the hover delay so the data is usually already in hand.
+  it('starts fetching the profile before the card opens', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
+      const reference = {
+        status: 'verified',
+        title: 'Prefetch paper',
+        year: 2020,
+        authors: ['Early Fetch'],
+        enrichment: { authors: [{ name: 'Early Fetch', s2_author_id: '77005' }] },
+        errors: [], warnings: [], suggestions: [],
+      }
+      render(<ReferenceCard reference={reference} index={0} />)
+      fireEvent.mouseEnter(screen.getByText('Early Fetch'))
+
+      // Partway through the 250ms hover delay: fetching already, not shown yet.
+      act(() => { vi.advanceTimersByTime(120) })
+      expect(mockFetchAuthorProfile).toHaveBeenCalled()
+      expect(screen.queryByRole('tooltip')).toBeNull()
+
+      await act(async () => { vi.advanceTimersByTime(200) })
+      expect(screen.queryByRole('tooltip')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A pointer sweeping across a list of names must not fire a request per name.
+  it('does not fetch when the pointer only brushes past a name', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
+      const reference = {
+        status: 'verified',
+        title: 'Brush paper',
+        year: 2020,
+        authors: ['Brushed Past'],
+        enrichment: { authors: [{ name: 'Brushed Past', s2_author_id: '77006' }] },
+        errors: [], warnings: [], suggestions: [],
+      }
+      render(<ReferenceCard reference={reference} index={0} />)
+      const anchor = screen.getByText('Brushed Past')
+      fireEvent.mouseEnter(anchor)
+      act(() => { vi.advanceTimersByTime(60) })
+      fireEvent.mouseLeave(anchor)
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      expect(mockFetchAuthorProfile).not.toHaveBeenCalled()
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
