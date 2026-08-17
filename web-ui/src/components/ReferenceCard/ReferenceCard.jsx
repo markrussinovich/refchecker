@@ -10,6 +10,7 @@ import {
   CITATION_STYLE_DEFAULTS,
   copyToClipboard,
   displayReferenceValue,
+  countLabel,
 } from '../../utils/formatters'
 import {
   getEffectiveReferenceStatus,
@@ -762,7 +763,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                       title="Times cited across the literature (OpenAlex/S2)"
                       style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}
                     >
-                      {' · '}{litCount.toLocaleString()} citations
+                      {' · '}{countLabel(litCount, 'citation')}
                     </span>
                   )}
                 </span>
@@ -1792,10 +1793,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       .catch(() => { /* keep basic card */ })
   }
 
-  // R10 (A3): on-demand name/title resolution for an ID-less author. Calls the
+  // Name/title resolution against OpenAlex, which is what surfaces an ORCID for
+  // an author whose enrichment record carries none. Calls the
   // corroboration-gated backend; a confident hit becomes the popover profile,
   // a miss flips to a quiet "no confident match". Real-data gated end-to-end —
   // nothing is shown unless the backend confirmed a single matching author.
+  // Runs automatically when the card opens (see the effect below); the cache
+  // keeps a re-hover free, and a miss is remembered so it never re-requests.
   const runFindProfile = () => {
     if (findState === 'loading' || findState === 'found') return
     const fkey = `${name}|${paperTitle || ''}`
@@ -1946,10 +1950,35 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   // after the backend confirmed a single matching author.
   const effectiveProfile = (profile?.available ? profile : null) || foundProfile || profile
   // R36: honour an ORCID surfaced by the fetched S2/OpenAlex profile too,
-  // not just the one carried on the enrichment record `e`. Real-data gated:
-  // resolves to a real id or null, never a guess.
-  const resolvedOrcid = (effectiveProfile?.available && effectiveProfile?.orcid) || e?.orcid || null
+  // not just the one carried on the enrichment record `e`. A corroborated
+  // found profile counts as well: Semantic Scholar's author API returns no
+  // ORCID at all, so for an S2-only author the name/title lookup is the ONLY
+  // way one ever resolves. Real-data gated: resolves to a real id or null,
+  // never a guess.
+  const resolvedOrcid = (effectiveProfile?.available && effectiveProfile?.orcid)
+    || (foundProfile?.available && foundProfile?.orcid)
+    || e?.orcid
+    || null
   const orcidUrl = resolvedOrcid ? `https://orcid.org/${resolvedOrcid}` : null
+
+  // Resolve the ORCID automatically when the card opens rather than making the
+  // reader click "Find profile" for it. Two cases reach here:
+  //   * an ID-less author, where the lookup is the whole profile; and
+  //   * an author with only a Semantic Scholar id, whose by-id profile can
+  //     never carry an ORCID because S2 doesn't publish one.
+  // Gated on `paperTitle` because the backend corroborates the name against a
+  // work with this title — without it the lookup would have to guess, so it is
+  // simply not made. Deliberately waits for the by-id profile to land first, so
+  // an author whose ORCID arrives that way costs no extra request. Results
+  // (including misses) are cached per name+title, so re-hovering is free.
+  useEffect(() => {
+    if (!open || !e || !paperTitle) return
+    if (resolvedOrcid) return
+    if (!idLess && !profile) return
+    runFindProfile()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, e, paperTitle, resolvedOrcid, idLess, profile])
+
   // Fold a found OpenAlex id (R10) into the profile links so the resolved
   // author's OpenAlex page is reachable even though `e` carried no id.
   const resolvedOpenalexId = e?.openalex_id || (foundProfile?.available ? foundProfile.openalex_id : null) || null
@@ -2136,22 +2165,22 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
           )}
 
           {/* R10 (A3): ID-less author resolution. An author with no s2/openalex
-              id can't load a by-id profile, so offer a corroboration-gated
-              "Find profile" lookup (name + this paper's title). A confident hit
-              flows into `effectiveProfile` above and renders real metrics; a
-              miss shows a quiet "no confident match" — never a fabricated
-              profile. Hidden once a profile has been resolved by id or by find. */}
+              id can't load a by-id profile, so a corroboration-gated lookup
+              (name + this paper's title) runs automatically when the card
+              opens. A confident hit flows into `effectiveProfile` above and
+              renders real metrics; a miss shows a quiet "no confident match" —
+              never a fabricated profile. Only the ID-less case reports its
+              progress here: for an author who already has a profile, the
+              lookup is just a background attempt at a missing ORCID, and
+              announcing "no confident match" under a populated card would
+              misdescribe what failed. */}
           {idLess && !(foundProfile?.available) && (
             <div className="px-3 pb-2.5" style={{ fontSize: 11 }}>
               {findState === 'idle' && (
-                <button type="button" onClick={runFindProfile}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors${paperTitle ? ' hover:brightness-90 dark:hover:brightness-125' : ''}`}
-                  title={paperTitle ? 'Look up this author on OpenAlex, corroborated by this paper' : 'A paper title is required to find this author confidently'}
-                  disabled={!paperTitle}
-                  style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-accent)', cursor: paperTitle ? 'pointer' : 'not-allowed', opacity: paperTitle ? 1 : 0.6, border: 'none' }}>
-                  <ProfileLinkIcon icon="openalex" />
-                  Find profile
-                </button>
+                <span style={{ color: 'var(--color-text-muted)' }}
+                  title="Resolving an author by name alone needs the citing paper's title to corroborate against. Without one, nothing is looked up rather than risk attaching the wrong person.">
+                  No paper title to search by
+                </span>
               )}
               {findState === 'loading' && (
                 <span style={{ color: 'var(--color-text-muted)' }}>Searching for a confident match…</span>
