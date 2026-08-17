@@ -665,3 +665,147 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(screen.queryByText(/Unknown mismatch/)).toBeNull()
   })
 })
+
+// The author card's contents arrive from several async sources, so a
+// content-sized box grew and re-flowed under the pointer while the reader was
+// already looking at it. Its size must be fixed up front and survive the data
+// landing.
+describe('ReferenceCard — author card is a fixed size', () => {
+  afterEach(() => {
+    mockFetchAuthorProfile.mockReset()
+    mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
+    mockFindAuthorProfile.mockReset()
+    mockFindAuthorProfile.mockResolvedValue({ data: { available: false } })
+  })
+
+  it('keeps the same width and height as the profile data lands', async () => {
+    vi.useRealTimers()
+    // Hold the profile open so the card can be measured mid-load, then
+    // released with a payload that adds every optional section at once.
+    let release
+    mockFetchAuthorProfile.mockReturnValue(new Promise(res => { release = res }))
+    mockFindAuthorProfile.mockResolvedValue({ data: { available: false } })
+
+    const reference = {
+      status: 'verified',
+      title: 'Sizing paper',
+      year: 2020,
+      authors: ['Grace Sized'],
+      enrichment: { authors: [{ name: 'Grace Sized', s2_author_id: '77001' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.mouseEnter(screen.getByText('Grace Sized'))
+    const tooltip = await screen.findByRole('tooltip')
+
+    const before = { w: tooltip.style.width, h: tooltip.style.height }
+    // A real size, not "auto" — the card is sized before it knows its content.
+    expect(before.w).toMatch(/^\d+px$/)
+    expect(before.h).toMatch(/^\d+px$/)
+
+    release({
+      data: {
+        available: true,
+        name: 'Grace Sized',
+        affiliations: ['A University', 'B Institute'],
+        hIndex: 30, i10Index: 44, citationCount: 9000, paperCount: 120,
+        orcid: '0000-0002-1825-0097',
+        homepage: 'https://example.edu/grace',
+        papers: [
+          { title: 'First paper', year: 2021 },
+          { title: 'Second paper', year: 2020 },
+          { title: 'Third paper', year: 2019 },
+          { title: 'Fourth paper', year: 2018 },
+        ],
+      },
+    })
+    // Wait for the fullest possible layout to actually be on screen.
+    await waitFor(() => expect(within(tooltip).getByText('9,000')).toBeTruthy())
+    expect(within(tooltip).getByText(/0000-0002-1825-0097/)).toBeTruthy()
+
+    expect(tooltip.style.width).toBe(before.w)
+    expect(tooltip.style.height).toBe(before.h)
+  })
+
+  it('holds each recent paper to one line in the hover card, in full when pinned', async () => {
+    vi.useRealTimers()
+    const longTitle = 'A Very Long Paper Title That Would Otherwise Wrap Across Several Lines And Overflow The Card'
+    mockFetchAuthorProfile.mockResolvedValue({
+      data: {
+        available: true,
+        name: 'Verbose Author',
+        papers: [{ title: longTitle, year: 2021 }],
+      },
+    })
+    const reference = {
+      status: 'verified',
+      title: 'Sizing paper three',
+      year: 2020,
+      authors: ['Verbose Author'],
+      enrichment: { authors: [{ name: 'Verbose Author', s2_author_id: '77004' }] },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    fireEvent.mouseEnter(screen.getByText('Verbose Author'))
+    const tooltip = await screen.findByRole('tooltip')
+
+    const line = await within(tooltip).findByText(longTitle)
+    // Clipped to one line so three such titles can't blow past the fixed
+    // height, with the full text still reachable on hover.
+    expect(line.className).toMatch(/\btruncate\b/)
+    expect(line.closest('[title]').getAttribute('title')).toBe(longTitle)
+    // The year is never sacrificed to the truncation.
+    expect(within(tooltip).getByText(/2021/)).toBeTruthy()
+
+    // Pinning is a deliberate request for the whole record: no clipping there.
+    fireEvent.click(within(tooltip).getByRole('button', { name: /pin author card open/i }))
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).getByText(new RegExp(longTitle)).className).not.toMatch(/\btruncate\b/)
+  })
+
+  it('sizes two different authors identically', async () => {
+    vi.useRealTimers()
+    // One author resolves nothing, the other a full profile: the sparse card
+    // must not be a different size from the rich one.
+    mockFetchAuthorProfile.mockImplementation(({ author_id }) => Promise.resolve(
+      author_id === '77003'
+        ? { data: { available: true, name: 'Rich Author', hIndex: 40, citationCount: 5000, paperCount: 80, papers: [{ title: 'A paper', year: 2022 }] } }
+        : { data: { available: false } }
+    ))
+    const reference = {
+      status: 'verified',
+      title: 'Sizing paper two',
+      year: 2020,
+      authors: ['Sparse Author', 'Rich Author'],
+      enrichment: {
+        authors: [
+          { name: 'Sparse Author', s2_author_id: '77002' },
+          { name: 'Rich Author', s2_author_id: '77003' },
+        ],
+      },
+      errors: [], warnings: [], suggestions: [],
+    }
+    render(<ReferenceCard reference={reference} index={0} />)
+    // Capture the anchors first: once a card opens it repeats the name, so a
+    // by-text lookup would then be ambiguous.
+    const sparseAnchor = screen.getByText('Sparse Author')
+    const richAnchor = screen.getByText('Rich Author')
+
+    fireEvent.mouseEnter(sparseAnchor)
+    let tip = await screen.findByRole('tooltip')
+    const sparse = { w: tip.style.width, h: tip.style.height }
+    // Guard against the "both are auto" trap: an unsized card would make the
+    // comparison below pass trivially.
+    expect(sparse.w).toMatch(/^\d+px$/)
+    expect(sparse.h).toMatch(/^\d+px$/)
+    fireEvent.mouseLeave(sparseAnchor)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+
+    fireEvent.mouseEnter(richAnchor)
+    tip = await screen.findByRole('tooltip')
+    await waitFor(() => expect(within(tip).getByText('5,000')).toBeTruthy())
+
+    expect(tip.style.width).toBe(sparse.w)
+    expect(tip.style.height).toBe(sparse.h)
+  })
+})
