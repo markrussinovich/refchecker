@@ -313,9 +313,15 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         borderColor: 'var(--color-border)',
       }}
     >
-      {/* Header row */}
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
+      {/* Header row. The right-hand controls are anchored: the left group takes
+          the slack and wraps within itself, and the right group never shrinks
+          or wraps to its own line. Without this, activating a filter widened
+          the right group enough to wrap it below the title (where
+          justify-between left-aligns it), so the Export button jumped. Items
+          are top-aligned so the button also can't drift vertically when the
+          left group wraps to a second line. */}
+      <div className="flex items-start justify-between mb-3 gap-2">
+        <div className="flex items-center gap-3 flex-wrap min-w-0 flex-1">
           <h3
             className="font-semibold text-sm"
             style={{ color: 'var(--color-text-primary)' }}
@@ -339,13 +345,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           <PerStageChip stats={stats} references={references} />
         </div>
         {/* Right side controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* Filter indicator — single 'Clear filters' chip whenever any
               of the multi-select Summary chips is active. */}
           {isFilterActive && (
             <button
               onClick={() => useCheckStore.getState().clearStatusFilter()}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity hover:opacity-80"
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity hover:opacity-80 min-w-0 max-w-[220px]"
               style={{
                 backgroundColor: 'var(--color-bg-tertiary)',
                 color: 'var(--color-text-primary)',
@@ -353,10 +359,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               }}
               title="Clear all active filters"
             >
-              <span>
+              {/* Capped and truncated: with four or five filters active the
+                  label would otherwise crowd out the left-hand badges. */}
+              <span className="truncate">
                 Filtered: {statusFilter.join(', ')}
               </span>
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>

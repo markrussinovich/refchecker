@@ -1,7 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import StatsSection from './StatsSection'
 import HealthBadge from './HealthBadge'
+import { useCheckStore } from '../../stores/useCheckStore'
 
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -418,6 +419,70 @@ describe('StatsSection filter chips follow the control design system (Z3)', () =
       // Resting (unselected) toggle state is exposed honestly.
       expect(chip.getAttribute('aria-pressed')).toBe('false')
     }
+  })
+})
+
+// Applying a filter inserts the "Filtered: …" chip into the header's
+// right-hand control group. That used to widen the group enough to wrap it
+// onto its own row — where `justify-between` left-aligns a lone item — so the
+// Export button jumped across and down the header. Its position must not
+// depend on whether a filter is active.
+describe('StatsSection export control stays anchored when a filter is applied', () => {
+  const renderWithFilter = (statusFilter) => {
+    useCheckStore.getState().statusFilter = statusFilter
+    const references = [
+      makeRef('error', { errors: [{ error_type: 'author', message: 'author mismatch' }] }),
+      makeRef('verified'),
+    ]
+    const utils = render(
+      <StatsSection
+        stats={{ total_refs: 2, processed_refs: 2 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Anchored Paper"
+        paperSource="https://example.com/anchored"
+      />
+    )
+    const exportBtn = screen.getByTitle('Export results')
+    const group = exportBtn.closest('div').parentElement
+    const headerRow = exportBtn.closest('.justify-between')
+    return { ...utils, exportBtn, group, headerRow }
+  }
+
+  afterEach(() => {
+    // The mocked store is shared across the file — leave it clean.
+    useCheckStore.getState().statusFilter = []
+  })
+
+  it('leaves the header layout unchanged whether or not a filter is active', () => {
+    const plainRun = renderWithFilter([])
+    const plain = {
+      group: plainRun.group.className,
+      header: plainRun.headerRow.className,
+      lastChild: plainRun.group.lastElementChild === plainRun.exportBtn.closest('div'),
+    }
+    expect(screen.queryByTitle(/clear all active filters/i)).toBeNull()
+    plainRun.unmount()
+
+    const filtered = renderWithFilter(['error', 'warning', 'suggestion'])
+    // The chip really is present, so this is a like-for-like comparison.
+    expect(screen.getByTitle(/clear all active filters/i)).toBeTruthy()
+    expect(filtered.group.className).toBe(plain.group)
+    expect(filtered.headerRow.className).toBe(plain.header)
+    // Export is still the final control on the row, so the chip is added to
+    // its left and cannot displace it from the right edge.
+    expect(filtered.group.lastElementChild === filtered.exportBtn.closest('div')).toBe(true)
+    expect(plain.lastChild).toBe(true)
+  })
+
+  it('pins the control group against wrapping and shrinking', () => {
+    const { group, headerRow } = renderWithFilter(['error'])
+    // A wrapping header row is what let the group drop to a second line.
+    expect(headerRow.className).not.toMatch(/\bflex-wrap\b/)
+    // A shrinkable group would let the chip squeeze the button instead.
+    expect(group.className).toMatch(/\bflex-shrink-0\b/)
+    // Top-aligned, so a wrapping left-hand group can't re-centre the button.
+    expect(headerRow.className).toMatch(/\bitems-start\b/)
   })
 })
 
