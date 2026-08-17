@@ -1,7 +1,40 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex, normalizeAuthors, isEtAlSentinel, hasEtAlSentinel } from './formatters'
+import { formatDate, formatAuthors, truncate, formatFileSize, getStatusColors, formatReference, displayReferenceValue, exportReferenceAsBibtex, normalizeAuthors, isEtAlSentinel, hasEtAlSentinel, plural, countLabel } from './formatters'
 
 describe('formatters', () => {
+  describe('plural / countLabel', () => {
+    it('uses the singular at exactly 1 and the plural everywhere else', () => {
+      expect(plural(1, 'reference')).toBe('reference')
+      expect(plural(0, 'reference')).toBe('references')
+      expect(plural(2, 'reference')).toBe('references')
+    })
+
+    it('accepts an explicit plural for irregular forms', () => {
+      expect(plural(1, 'an error', 'errors')).toBe('an error')
+      expect(plural(3, 'an error', 'errors')).toBe('errors')
+    })
+
+    it('treats numeric strings like numbers (counts often arrive from JSON)', () => {
+      expect(plural('1', 'ref')).toBe('ref')
+      expect(plural('4', 'ref')).toBe('refs')
+    })
+
+    it('countLabel pairs the number with the right form', () => {
+      expect(countLabel(1, 'Suggestion')).toBe('1 Suggestion')
+      expect(countLabel(2, 'Suggestion')).toBe('2 Suggestions')
+      expect(countLabel(0, 'reference')).toBe('0 references')
+    })
+
+    it('countLabel formats large numbers for readability', () => {
+      expect(countLabel(1234, 'citation')).toBe('1,234 citations')
+    })
+
+    it('countLabel treats missing counts as zero rather than printing NaN', () => {
+      expect(countLabel(undefined, 'ref')).toBe('0 refs')
+      expect(countLabel(null, 'ref')).toBe('0 refs')
+    })
+  })
+
   describe('formatDate', () => {
     it('should format ISO date string', () => {
       const result = formatDate('2024-01-08T10:30:00')

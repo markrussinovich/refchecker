@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { plural } from '../../utils/formatters'
 
 /**
  * Displays batch progress summary when viewing a batch of papers
@@ -126,7 +127,7 @@ export default function BatchProgressBar({ batchChecks, batchLabel }) {
             {stats.totalErrors > 0 && (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--color-error)' }}>
-                  {stats.totalErrors} errors
+                  {stats.totalErrors} {plural(stats.totalErrors, 'error')}
                 </span>
               </div>
             )}
@@ -134,7 +135,7 @@ export default function BatchProgressBar({ batchChecks, batchLabel }) {
             {stats.totalWarnings > 0 && (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: 'var(--color-warning)' }}>
-                  {stats.totalWarnings} warnings
+                  {stats.totalWarnings} {plural(stats.totalWarnings, 'warning')}
                 </span>
               </div>
             )}

@@ -159,8 +159,8 @@ describe('HealthBadge counts agree with StatsSection chip counts (R16)', () => {
     // badge ("N references with warnings only") — both rows now read
     // "references with <issue>", so the error title appears on the row-2
     // chip too; assert at least one carrier shows the badge's count.
-    const errChips = screen.getAllByTitle(/references? with errors/i)
-    const warnChip = screen.getByTitle(/references? with warnings only/i)
+    const errChips = screen.getAllByTitle(/references? with (an error|errors)/i)
+    const warnChip = screen.getByTitle(/references? with (a warning|warnings) only/i)
     expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
     expect(within(warnChip).getByText(String(warnFromBadge))).toBeTruthy()
   })
@@ -198,7 +198,7 @@ describe('HealthBadge counts agree with StatsSection chip counts (R16)', () => {
         paperSource="https://example.com/unverified"
       />
     )
-    const errChips = screen.getAllByTitle(/references? with errors/i)
+    const errChips = screen.getAllByTitle(/references? with (an error|errors)/i)
     expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
   })
 
@@ -238,7 +238,7 @@ describe('HealthBadge counts agree with StatsSection chip counts (R16)', () => {
         paperSource="https://example.com/halluc"
       />
     )
-    const errChips = screen.getAllByTitle(/references? with errors/i)
+    const errChips = screen.getAllByTitle(/references? with (an error|errors)/i)
     expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
   })
 })
@@ -286,8 +286,8 @@ describe('HealthBadge and StatsSection share one canonical summary (R48)', () =>
     )
     // Report-card chips read the same canonical buckets.
     const verChip = screen.getByTitle(/references? fully verified/i)
-    const warnChip = screen.getByTitle(/references? with warnings only/i)
-    const errChips = screen.getAllByTitle(/references? with errors/i)
+    const warnChip = screen.getByTitle(/references? with (a warning|warnings) only/i)
+    const errChips = screen.getAllByTitle(/references? with (an error|errors)/i)
     expect(within(verChip).getByText(String(verFromBadge))).toBeTruthy()
     expect(within(warnChip).getByText(String(warnFromBadge))).toBeTruthy()
     expect(errChips.some(c => within(c).queryByText(String(errFromBadge)))).toBe(true)
@@ -418,6 +418,40 @@ describe('StatsSection filter chips follow the control design system (Z3)', () =
       // Resting (unselected) toggle state is exposed honestly.
       expect(chip.getAttribute('aria-pressed')).toBe('false')
     }
+  })
+})
+
+// A chip label is a count noun, so it must agree with the number beside it —
+// "1 Suggestion", not "1 Suggestions". Status chips ("Unverified") are
+// adjectives and must NOT gain an "s".
+describe('StatsSection filter chip labels agree with their counts', () => {
+  it('uses singular labels at a count of 1 and plural above it', () => {
+    const references = [
+      makeRef('error', { errors: [{ error_type: 'author', message: 'author mismatch' }] }),
+      makeRef('warning', { warnings: [{ message: 'venue differs' }] }),
+      makeRef('warning', { warnings: [{ message: 'year differs' }] }),
+      makeRef('verified', { suggestions: [{ message: 'add a DOI' }] }),
+      makeRef('unverified'),
+    ]
+    render(
+      <StatsSection
+        stats={{ total_refs: 5, processed_refs: 5 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Plural Paper"
+        paperSource="https://example.com/plural"
+      />
+    )
+    const chipText = screen.getAllByRole('button')
+      .filter(b => b.hasAttribute('aria-pressed'))
+      .map(b => b.textContent)
+
+    expect(chipText).toContain('1Error')
+    expect(chipText).toContain('2Warnings')
+    expect(chipText).toContain('1Suggestion')
+    // Adjectival status chip: never pluralized.
+    expect(chipText).toContain('1Unverified')
+    expect(chipText.join('|')).not.toMatch(/1Suggestions|1Errors|1Unverifieds/)
   })
 })
 

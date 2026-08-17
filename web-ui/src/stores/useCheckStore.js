@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { logger } from '../utils/logger'
+import { countLabel } from '../utils/formatters'
 import { useHistoryStore } from './useHistoryStore'
 
 /**
@@ -675,7 +676,7 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'references_extracted':
-        store.setStatusMessage(`Found ${data.total_refs || data.count || 0} references, starting verification...`)
+        store.setStatusMessage(`Found ${countLabel(data.total_refs || data.count || 0, 'reference')}, starting verification...`)
         if (data.references) {
           store.setReferences(data.references)
         }
@@ -733,7 +734,7 @@ export const useCheckStore = create((set, get) => ({
           progress: data.progress_percent || 0,
           statusMessage: data.processed_refs >= data.total_refs && data.total_refs > 0
             ? 'Finishing hallucination check...'
-            : `Processed ${data.processed_refs} of ${data.total_refs} references...`,
+            : `Processed ${data.processed_refs} of ${countLabel(data.total_refs, 'reference')}...`,
         })
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'in_progress',
@@ -891,7 +892,7 @@ export const useCheckStore = create((set, get) => ({
           latestProgress = data.progress_percent || 0
           latestStatusMessage = data.processed_refs >= data.total_refs && data.total_refs > 0
             ? 'Finishing hallucination check...'
-            : `Processed ${data.processed_refs} of ${data.total_refs} references...`
+            : `Processed ${data.processed_refs} of ${countLabel(data.total_refs, 'reference')}...`
           historyPayload = {
             status: 'in_progress',
             total_refs: data.total_refs,

@@ -2,7 +2,7 @@ import { useState, useMemo, memo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useStyleStore } from '../../stores/useStyleStore'
-import { formatDate, filterIssuesForStyle } from '../../utils/formatters'
+import { formatDate, filterIssuesForStyle, plural, countLabel } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
@@ -194,11 +194,11 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
       color = 'var(--color-hallucination)'
     }
     if (refsWithErrors > 0) {
-      parts.push(`${refsWithErrors} refs with errors`)
+      parts.push(`${countLabel(refsWithErrors, 'ref')} with errors`)
       if (color === 'var(--color-success)') color = 'var(--color-error)'
     }
     if (refsWithWarningsOnly > 0) {
-      parts.push(`${refsWithWarningsOnly} refs with warnings`)
+      parts.push(`${countLabel(refsWithWarningsOnly, 'ref')} with warnings`)
       if (color === 'var(--color-success)') color = 'var(--color-warning)'
     }
     if (unverifiedCount > 0) {
@@ -298,13 +298,13 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                         ? 'Cancelled'
                         : (isInProgress 
                             ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
-                            : `${totalRefs} refs`)))}
+                            : countLabel(totalRefs, 'ref'))))}
             </span>
             {/* Show error/warning/suggestion counts with compact icons (only after refs start processing) */}
             {!isPlaceholder && (processedRefs > 0 || isComplete) && (
               <>
                 {refsWithErrors > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-error)' }} title={`${refsWithErrors} ref${refsWithErrors === 1 ? '' : 's'} with errors`}>
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-error)' }} title={`${countLabel(refsWithErrors, 'ref')} with ${plural(refsWithErrors, 'an error', 'errors')}`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                     </svg>
@@ -312,7 +312,7 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                   </span>
                 )}
                 {refsWithWarningsOnly > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-warning)' }} title={`${refsWithWarningsOnly} ref${refsWithWarningsOnly === 1 ? '' : 's'} with warnings`}>
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-warning)' }} title={`${countLabel(refsWithWarningsOnly, 'ref')} with ${plural(refsWithWarningsOnly, 'a warning', 'warnings')}`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
@@ -320,7 +320,7 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                   </span>
                 )}
                 {refsWithSuggestionsOnly > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-suggestion)' }} title={`${refsWithSuggestionsOnly} ref${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions`}>
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-suggestion)' }} title={`${countLabel(refsWithSuggestionsOnly, 'ref')} with ${plural(refsWithSuggestionsOnly, 'a suggestion', 'suggestions')}`}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
                     </svg>
@@ -328,7 +328,7 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                   </span>
                 )}
                 {unverifiedCount > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} title={`${unverifiedCount} unverified ref${unverifiedCount === 1 ? '' : 's'}`}>
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} title={countLabel(unverifiedCount, 'unverified ref')}>
                     <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                     </svg>
@@ -336,7 +336,7 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                   </span>
                 )}
                 {hallucinationCount > 0 && (
-                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-hallucination)' }} title={`${hallucinationCount} likely hallucinated ref${hallucinationCount === 1 ? '' : 's'}`}>
+                  <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-hallucination)' }} title={countLabel(hallucinationCount, 'likely hallucinated ref')}>
                     <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="12" cy="12" r="10" />
                       <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />

@@ -7,6 +7,7 @@ import {
   getAdminCheckDetail,
 } from '../../utils/api'
 import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { plural } from '../../utils/formatters'
 
 /**
  * Admin analytics dashboard.
@@ -182,7 +183,7 @@ function DailyChart({ daily }) {
             height={h}
             fill="var(--color-accent)"
           >
-            <title>{`${d.day}: ${d.checks} checks, ${d.references_checked} refs, ${d.hallucinations} hallucinated`}</title>
+            <title>{`${d.day}: ${d.checks} ${plural(d.checks, 'check')}, ${d.references_checked} ${plural(d.references_checked, 'ref')}, ${d.hallucinations} hallucinated`}</title>
           </rect>
         )
       })}
@@ -384,12 +385,12 @@ function UsersTab({ data, onSelectUser, showInactive, onToggleInactive }) {
             </div>
             <div className="text-right shrink-0">
               <div className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                {num(u.checks)} checks
+                {num(u.checks)} {plural(u.checks, 'check')}
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {u.checks > 0 ? (
                   <>
-                    {num(u.references_checked)} refs ·{' '}
+                    {num(u.references_checked)} {plural(u.references_checked, 'ref')} ·{' '}
                     <span style={{ color: 'var(--color-hallucination)' }}>
                       {num(u.hallucinations)} hallucinated
                     </span>
@@ -466,17 +467,17 @@ function PapersTab({ data, onSelectCheck }) {
                 ) : (
                   <>
                     <span style={{ color: 'var(--color-text-secondary)' }}>
-                      {num(p.total_refs)} refs
+                      {num(p.total_refs)} {plural(p.total_refs, 'ref')}
                     </span>
                     <span style={{ color: 'var(--color-success)' }}>
                       {num(p.refs_verified)} verified
                     </span>
                     {p.errors > 0 && (
-                      <span style={{ color: 'var(--color-error)' }}>{num(p.errors)} errors</span>
+                      <span style={{ color: 'var(--color-error)' }}>{num(p.errors)} {plural(p.errors, 'error')}</span>
                     )}
                     {p.warnings > 0 && (
                       <span style={{ color: 'var(--color-warning)' }}>
-                        {num(p.warnings)} warnings
+                        {num(p.warnings)} {plural(p.warnings, 'warning')}
                       </span>
                     )}
                     {p.hallucinations > 0 && (
@@ -565,8 +566,8 @@ function SessionsTab({ sessions, loading, onSelectCheck, onBack, user }) {
               {formatTime(s.started_at)}
             </div>
             <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {formatDuration(s.duration_seconds)} · {num(s.checks)} papers ·{' '}
-              {num(s.references_checked)} refs ·{' '}
+              {formatDuration(s.duration_seconds)} · {num(s.checks)} {plural(s.checks, 'paper')} ·{' '}
+              {num(s.references_checked)} {plural(s.references_checked, 'ref')} ·{' '}
               <span style={{ color: 'var(--color-hallucination)' }}>
                 {num(s.hallucinations)} hallucinated
               </span>
@@ -585,7 +586,7 @@ function SessionsTab({ sessions, loading, onSelectCheck, onBack, user }) {
                   {c.paper_title || c.paper_source || `Check ${c.id}`}
                 </span>
                 <span className="shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
-                  {num(c.total_refs)} refs
+                  {num(c.total_refs)} {plural(c.total_refs, 'ref')}
                   {c.hallucination_count > 0 && (
                     <span style={{ color: 'var(--color-hallucination)' }}>
                       {' '}

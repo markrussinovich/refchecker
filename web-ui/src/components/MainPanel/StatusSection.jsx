@@ -5,6 +5,7 @@ import { useDocViewerStore } from '../../stores/useDocViewerStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { countLabel } from '../../utils/formatters'
 import { useGesturePinchZoom } from '../../utils/useGesturePinchZoom'
 import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import Button from '../common/Button'
@@ -835,14 +836,14 @@ export default function StatusSection() {
       if (displayProcessedRefs > 0 && displayProcessedRefs >= displayTotalRefs && displayTotalRefs > 0) {
         displayMessage = 'Finishing hallucination check...'
       } else if (displayProcessedRefs > 0) {
-        displayMessage = `Processed ${displayProcessedRefs} of ${displayTotalRefs} references...`
+        displayMessage = `Processed ${displayProcessedRefs} of ${countLabel(displayTotalRefs, 'reference')}...`
       } else if (displayTotalRefs > 0) {
-        displayMessage = `Found ${displayTotalRefs} references, starting verification...`
+        displayMessage = `Found ${countLabel(displayTotalRefs, 'reference')}, starting verification...`
       } else {
         displayMessage = 'Extracting references...'
       }
     } else if (displayStatus === 'completed') {
-      displayMessage = `Completed • ${displayTotalRefs} references checked`
+      displayMessage = `Completed • ${countLabel(displayTotalRefs, 'reference')} checked`
     } else if (displayStatus === 'cancelled') {
       displayMessage = 'Check cancelled'
     } else if (displayStatus === 'error') {

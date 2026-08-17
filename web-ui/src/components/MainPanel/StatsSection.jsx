@@ -13,7 +13,9 @@ import {
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
   filterIssuesForStyle,
-  downloadAsFile
+  downloadAsFile,
+  plural,
+  countLabel
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 
@@ -112,7 +114,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // All filter types including verified
+  // All filter types including verified.
+  // `noun` marks the count nouns ("1 Error" / "2 Errors"); filters without one
+  // are adjectives describing the reference ("1 Unverified") and never
+  // pluralize, so they carry only a fixed label.
   const allFilters = {
     verified: {
       id: 'verified',
@@ -123,18 +128,21 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     error: {
       id: 'error',
       label: 'Errors',
+      noun: 'Error',
       color: 'var(--color-error)',
       bgColor: 'var(--color-error-bg)',
     },
     warning: {
       id: 'warning',
       label: 'Warnings',
+      noun: 'Warning',
       color: 'var(--color-warning)',
       bgColor: 'var(--color-warning-bg)',
     },
     suggestion: {
       id: 'suggestion',
       label: 'Suggestions',
+      noun: 'Suggestion',
       color: 'var(--color-suggestion)',
       bgColor: 'var(--color-suggestion-bg)',
     },
@@ -495,7 +503,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           }}
           onMouseEnter={() => setHoveredChip('verified')}
           onMouseLeave={() => setHoveredChip(prev => (prev === 'verified' ? null : prev))}
-          title={`${refsVerified} reference${refsVerified === 1 ? '' : 's'} fully verified`}
+          title={`${countLabel(refsVerified, 'reference')} fully verified`}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
@@ -517,7 +525,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           }}
           onMouseEnter={() => setHoveredChip('error')}
           onMouseLeave={() => setHoveredChip(prev => (prev === 'error' ? null : prev))}
-          title={refsWithErrors > 0 ? `${refsWithErrors} reference${refsWithErrors === 1 ? '' : 's'} with errors` : 'No references with errors'}
+          title={refsWithErrors > 0 ? `${countLabel(refsWithErrors, 'reference')} with ${plural(refsWithErrors, 'an error', 'errors')}` : 'No references with errors'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
@@ -540,7 +548,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           }}
           onMouseEnter={() => setHoveredChip('warning')}
           onMouseLeave={() => setHoveredChip(prev => (prev === 'warning' ? null : prev))}
-          title={refsWithWarningsOnly > 0 ? `${refsWithWarningsOnly} reference${refsWithWarningsOnly === 1 ? '' : 's'} with warnings only` : 'No references with warnings only'}
+          title={refsWithWarningsOnly > 0 ? `${countLabel(refsWithWarningsOnly, 'reference')} with ${plural(refsWithWarningsOnly, 'a warning', 'warnings')} only` : 'No references with warnings only'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <path d="M12 2L2 20h20L12 2z" fill="var(--color-warning)" />
@@ -561,7 +569,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             }}
             onMouseEnter={() => setHoveredChip('suggestion')}
             onMouseLeave={() => setHoveredChip(prev => (prev === 'suggestion' ? null : prev))}
-            title={`${refsWithSuggestionsOnly} reference${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions only`}
+            title={`${countLabel(refsWithSuggestionsOnly, 'reference')} with ${plural(refsWithSuggestionsOnly, 'a suggestion', 'suggestions')} only`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-suggestion)' }}>
               <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
@@ -581,7 +589,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             }}
             onMouseEnter={() => setHoveredChip('unverified')}
             onMouseLeave={() => setHoveredChip(prev => (prev === 'unverified' ? null : prev))}
-            title={`${refsUnverified} reference${refsUnverified === 1 ? '' : 's'} could not be verified`}
+            title={`${countLabel(refsUnverified, 'reference')} could not be verified`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
@@ -602,7 +610,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             }}
             onMouseEnter={() => setHoveredChip('hallucination')}
             onMouseLeave={() => setHoveredChip(prev => (prev === 'hallucination' ? null : prev))}
-            title={`${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated`}
+            title={`${countLabel(refsHallucinated, 'reference')} likely hallucinated`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" fill="var(--color-hallucination)" />
@@ -631,6 +639,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           </span>
           {issueFilters.filter(f => f.value > 0).map(filter => {
             const isSelected = statusFilter.includes(filter.id)
+            // Count nouns agree with the number ("1 Suggestion" / "2
+            // Suggestions"); adjectival filters ("Unverified") never change.
+            const chipLabel = filter.noun ? plural(filter.value, filter.noun, filter.label) : filter.label
+            const chipTitle = filter.noun
+              ? `${countLabel(filter.value, 'reference')} with ${filter.value === 1 ? 'a ' : ''}${chipLabel.toLowerCase()}`
+              : `${countLabel(filter.value, `${chipLabel.toLowerCase()} reference`)}`
             return (
               <button
                 key={filter.id}
@@ -654,10 +668,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                 }}
                 onMouseEnter={() => setHoveredChip(`issue:${filter.id}`)}
                 onMouseLeave={() => setHoveredChip(prev => (prev === `issue:${filter.id}` ? null : prev))}
-                title={`${filter.value} reference${filter.value === 1 ? '' : 's'} with ${filter.label.toLowerCase()}`}
+                title={chipTitle}
               >
                 <span className="font-semibold">{filter.value}</span>
-                <span>{filter.label}</span>
+                <span>{chipLabel}</span>
               </button>
             )
           })}

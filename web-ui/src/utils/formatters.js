@@ -4,6 +4,38 @@
 import { shouldSuppressVenueWarning, venuesCoreMatch } from './venueAbbreviations'
 
 /**
+ * Pick the singular or plural form of a noun for a count.
+ *
+ * Exists because counts and their nouns were being concatenated by hand all
+ * over the UI, which reads fine at 2+ and wrong at exactly 1 ("1 Suggestions",
+ * "1 refs", "1 errors"). Defaults to the regular English `-s` plural; pass an
+ * explicit plural for irregulars.
+ *
+ * @param {number} count
+ * @param {string} singular - e.g. 'reference'
+ * @param {string} [plural] - defaults to `${singular}s`
+ * @returns {string} the correct noun form ALONE (does not include the number)
+ */
+export function plural(count, singular, plural_) {
+  return Number(count) === 1 ? singular : (plural_ ?? `${singular}s`)
+}
+
+/**
+ * "1 reference" / "3 references" — the count and its correctly-formed noun.
+ * Numbers are locale-formatted so large counts read "1,234 references".
+ *
+ * @param {number} count
+ * @param {string} singular
+ * @param {string} [plural_] - defaults to `${singular}s`
+ * @returns {string}
+ */
+export function countLabel(count, singular, plural_) {
+  const n = Number(count) || 0
+  return `${n.toLocaleString()} ${plural(n, singular, plural_)}`
+}
+
+
+/**
  * Format a date for display
  * @param {string|Date} date - Date to format
  * @returns {string} Formatted date string
