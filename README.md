@@ -19,7 +19,7 @@
   <a href="#web-ui">Web UI</a> •
   <a href="#cli">CLI</a> •
   <a href="#hallucination-detection">Hallucination Detection</a> •
-  <a href="#-the-paper-phantom-references">The Paper</a> •
+  <a href="docs/PAPER.md">The Paper</a> •
   <a href="#deployment">Deployment</a>
 </p>
 
@@ -47,41 +47,22 @@
 
 ---
 
-## 📄 The paper: *Phantom References*
+## Overview
 
-> **[Phantom References: Hallucinated Citations That Survive Peer Review at Top-Tier Conferences](https://arxiv.org/abs/2607.00738)**
-> Mark Russinovich, Ram Shankar Siva Kumar, Ahmed Salem — arXiv:2607.00738
+RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
-RefChecker is the verification pipeline built for this study, and the study is the flagship
-demonstration of its **[bulk scanning](#bulk-checking)** capability: we pointed RefChecker at
-the accepted camera-ready papers of **ICLR, ICML, NeurIPS, and USENIX Security** and audited
-their bibliographies end to end.
+Use it three ways from one shared engine: a **[Web UI](#web-ui)** (also packaged as a native desktop app), a **[CLI](#cli)** for single papers and scripted runs, and an **[HTTP API](docs/web-ui.md)**. Start at **[Quick Start](#quick-start)**.
 
-**What the scan found — published papers really do carry wrong and even fabricated references:**
+*Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
 
-- **Hallucinated citations have entered the archival record.** Measured with a deliberately
-  conservative definition: only *identity-level* failures — works that do not exist, or
-  substantial author-list mismatches — explicitly excluding ordinary bibliographic drift
-  such as venue/year differences, publication-status updates, or minor name variants.
-- **Reference-level rates are usually below 1%**, but proceedings are large enough that the
-  paper level tells the story: in **2025, roughly one in twenty NeurIPS and USENIX Security
-  papers** contained **at least two** likely hallucinated academic-paper-like references.
-- **Post-ChatGPT increases** in several venues, including a tail of papers with **5+ failures
-  in a single bibliography** — and likely hallucinated citations even among **award-winning
-  papers**.
-- **Peer review alone does not reliably enforce citation integrity** — yet auditing is
-  tractable: about **$0.04 per paper** in one venue-scale scan.
-
-That is exactly the workflow this repo supports: run the same engine across a whole
-conference, a reading list, or your own draft before you submit. See
-**[Bulk Checking](#bulk-checking)** and **[OpenReview Integration](#openreview-integration)**
-to reproduce it.
-
-<sub>Please cite the paper if RefChecker helps your work.</sub>
+> 📄 **The research behind it.** RefChecker is the verification pipeline built for
+> *[Phantom References: Hallucinated Citations That Survive Peer Review at Top-Tier Conferences](https://arxiv.org/abs/2607.00738)*,
+> which audited the accepted papers of ICLR, ICML, NeurIPS, and USENIX Security end to end —
+> and found hallucinated citations in the archival record. **[Read the summary →](docs/PAPER.md)**
 
 ---
 
-### ✨ What the desktop app adds
+## ✨ What the desktop app adds
 
 The desktop app wraps the same engine in a native Tauri shell and layers on a full
 review workspace. **The highlights below are grouped and collapsed** — click any
@@ -164,12 +145,6 @@ section to expand it.
 
 ---
 
-RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
-
-*Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
-
----
-
 ## 🆕 Recent updates
 
 <details open>
@@ -208,7 +183,8 @@ See the [full release list](https://github.com/markrussinovich/refchecker/releas
 
 ## Contents
 
-- [The Paper: *Phantom References*](#-the-paper-phantom-references)
+- [The Paper: *Phantom References*](docs/PAPER.md)
+- [What the desktop app adds](#-what-the-desktop-app-adds)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Feature Matrix (Web / Desktop / CLI / API)](#feature-matrix-web--desktop--cli--api)
@@ -1128,6 +1104,8 @@ The downloader also writes a `latest_snapshot.txt` file next to the SQLite datab
 
 Detailed project documentation lives under [docs/README.md](docs/README.md):
 
+- [The paper: *Phantom References*](docs/PAPER.md) — the venue-scale scan RefChecker
+  was built for, what it found, and how to reproduce it.
 - [Feature guide & access-method matrix](docs/FEATURES.md) — per-feature guides
   across web / desktop / CLI / API, with CLI usage examples that match
   `refchecker-webui check --help`.

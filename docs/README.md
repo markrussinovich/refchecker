@@ -4,6 +4,7 @@ Canonical project documentation lives in this directory.
 
 ## Guides
 
+- [The Paper: *Phantom References*](PAPER.md) — the study RefChecker was built for: a venue-scale scan of ICLR, ICML, NeurIPS, and USENIX Security, what it found, and how to reproduce it
 - [Feature Guide & Access-Method Matrix](FEATURES.md) — per-feature guides across web / desktop / CLI / API, with CLI usage examples that match `refchecker-webui check --help`
 - [Multi-User & Teams Setup](MULTIUSER.md) — enable accounts, Teams, and presence from the in-app form (hot-reload) or via environment variables
 - [Web UI Guide](web-ui.md) — setup, runtime modes, API-backed and local database configuration, API surface, the `refchecker-webui check` single-paper CLI, and troubleshooting
