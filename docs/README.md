@@ -9,6 +9,7 @@ Canonical project documentation lives in this directory.
 - [Multi-User & Teams Setup](MULTIUSER.md) — enable accounts, Teams, and presence from the in-app form (hot-reload) or via environment variables
 - [Web UI Guide](web-ui.md) — setup, runtime modes, API-backed and local database configuration, API surface, the `refchecker-webui check` single-paper CLI, and troubleshooting
 - [Testing Guide](testing.md) — suite structure, recommended pytest commands, markers, and debugging workflow
+- [Release Notes](RELEASE-NOTES.md) — highlights for each recent desktop-app and engine release
 
 ## Access methods
 
