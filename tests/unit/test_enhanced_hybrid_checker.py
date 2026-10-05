@@ -225,6 +225,45 @@ def test_verify_reference_records_matched_database_from_local_checker():
 
 
 @patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
+def test_institutional_report_fallback_resolves_technical_report(_mock_sleep):
+    checker = _build_checker()
+    checker.crossref = NoMatchChecker()
+
+    class FakeInstitutionalReports:
+        def verify_reference(self, reference):
+            return (
+                {
+                    'title': reference['title'],
+                    'authors': reference['authors'],
+                    'year': 1992,
+                    'venue': 'University of Chicago Department of Statistics',
+                    'volume': '348',
+                    'url': 'https://example.edu/tr348.pdf',
+                    '_matched_database': 'Official Institutional Report Index',
+                },
+                [],
+                'https://example.edu/tr348.pdf',
+            )
+
+    checker.institutional_reports = FakeInstitutionalReports()
+    checker.official_proceedings = None
+    checker.datacite = None
+    reference = {
+        'title': 'A note on importance sampling using standardized weights',
+        'authors': ['Kong, Augustine'],
+        'year': 1992,
+        'journal': 'University of Chicago, Dept. of Statistics, Tech. Rep',
+        'volume': '348',
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data['_matched_database'] == 'Official Institutional Report Index'
+    assert errors == []
+    assert url.endswith('tr348.pdf')
+
+
+@patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
 def test_official_proceedings_fallback_resolves_workshop_abstract(_mock_sleep):
     checker = _build_checker()
     checker.crossref = NoMatchChecker()

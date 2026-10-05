@@ -206,6 +206,11 @@ class EnhancedHybridReferenceChecker:
             'OfficialProceedingsChecker',
             'official proceedings checker',
         )
+        self.institutional_reports = self._initialize_checker(
+            'institutional_reports',
+            'InstitutionalReportsChecker',
+            'institutional reports checker',
+        )
 
         # DataCite checker: free, unauthenticated fallback for DOIs
         # registered through DataCite (Zenodo, Figshare, OSF, Dryad, …)
@@ -1874,6 +1879,20 @@ class EnhancedHybridReferenceChecker:
             best_incomplete = crossref_result if crossref_result else openalex_result
             logger.debug("Enhanced Hybrid: No complete data found, using incomplete data as fallback")
             return best_incomplete
+
+        # PHASE 3.3: Official institutional indexes for technical reports.
+        if getattr(self, 'institutional_reports', None):
+            self._append_attempted_api(attempted_apis, 'institutional_reports')
+            try:
+                report_data, report_errors, report_url = (
+                    self.institutional_reports.verify_reference(reference)
+                )
+            except Exception as exc:
+                logger.debug(f"Enhanced Hybrid: Institutional report check failed: {exc}")
+                report_data = None
+            if report_data:
+                logger.debug("Enhanced Hybrid: Institutional report verification succeeded")
+                return report_data, report_errors, report_url
 
         # PHASE 3.4: Official event programs for lightly indexed workshop
         # abstracts and posters.
