@@ -464,6 +464,66 @@ class CrossRefReferenceChecker:
         
         logger.debug("No URL found in CrossRef work data")
         return None
+
+    def _primary_page_confirms_cited_author(
+        self,
+        reference: Dict[str, Any],
+        work_data: Dict[str, Any],
+    ) -> bool:
+        """Confirm a posted-content author from its canonical cited page."""
+        if work_data.get('type') != 'posted-content':
+            return False
+
+        cited_url = str(reference.get('url') or reference.get('cited_url') or '').strip()
+        cited_authors = reference.get('authors') or []
+        if not cited_url or not isinstance(cited_authors, list) or len(cited_authors) != 1:
+            return False
+
+        canonical_urls = {
+            str(link.get('URL', '')).strip().rstrip('/').lower()
+            for link in work_data.get('link', [])
+            if isinstance(link, dict) and link.get('URL')
+        }
+        if cited_url.rstrip('/').lower() not in canonical_urls:
+            return False
+
+        author = cited_authors[0]
+        if isinstance(author, dict):
+            author = author.get('name', '')
+        author = str(author).strip()
+        if not author:
+            return False
+
+        if ',' in author:
+            surname = author.split(',', 1)[0]
+        else:
+            normalized = normalize_author_name(author)
+            surname = normalized.split()[-1] if normalized else ''
+        surname = re.sub(r'[^a-z0-9]+', '', surname.lower())
+        if len(surname) < 4:
+            return False
+
+        try:
+            response = requests.get(cited_url, headers=self.headers, timeout=10)
+        except requests.RequestException:
+            return False
+        if response.status_code != 200:
+            return False
+
+        page_html = response.text or response.content.decode('utf-8', errors='ignore')
+        mailto_values = re.findall(r'href=["\']mailto:([^"\']+)', page_html, re.IGNORECASE)
+        if any(surname in re.sub(r'[^a-z0-9]+', '', value.lower()) for value in mailto_values):
+            return True
+
+        meta_authors = re.findall(
+            r'<meta[^>]+name=["\']author["\'][^>]+content=["\']([^"\']+)',
+            page_html,
+            re.IGNORECASE,
+        )
+        return any(
+            surname in re.sub(r'[^a-z0-9]+', '', value.lower())
+            for value in meta_authors
+        )
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -588,6 +648,14 @@ class CrossRefReferenceChecker:
             crossref_authors = work_data.get('author', [])
             authors_match, author_error = self.compare_authors(authors, crossref_authors)
             
+            if not authors_match:
+                if self._primary_page_confirms_cited_author(reference, work_data):
+                    logger.debug(
+                        "CrossRef author metadata conflicts with the canonical posted-content page; "
+                        "using primary-page author evidence"
+                    )
+                    authors_match = True
+
             if not authors_match:
                 # Extract correct author names for error reporting
                 correct_author_names = []
