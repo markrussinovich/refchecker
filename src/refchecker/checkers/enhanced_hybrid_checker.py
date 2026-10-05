@@ -201,6 +201,12 @@ class EnhancedHybridReferenceChecker:
                 email=contact_email
             )
 
+        self.official_proceedings = self._initialize_checker(
+            'official_proceedings',
+            'OfficialProceedingsChecker',
+            'official proceedings checker',
+        )
+
         # DataCite checker: free, unauthenticated fallback for DOIs
         # registered through DataCite (Zenodo, Figshare, OSF, Dryad, …)
         # rather than CrossRef. CrossRef/OpenAlex/Semantic Scholar only
@@ -1868,6 +1874,21 @@ class EnhancedHybridReferenceChecker:
             best_incomplete = crossref_result if crossref_result else openalex_result
             logger.debug("Enhanced Hybrid: No complete data found, using incomplete data as fallback")
             return best_incomplete
+
+        # PHASE 3.4: Official event programs for lightly indexed workshop
+        # abstracts and posters.
+        if getattr(self, 'official_proceedings', None):
+            self._append_attempted_api(attempted_apis, 'official_proceedings')
+            try:
+                proceedings_data, proceedings_errors, proceedings_url = (
+                    self.official_proceedings.verify_reference(reference)
+                )
+            except Exception as exc:
+                logger.debug(f"Enhanced Hybrid: Official proceedings check failed: {exc}")
+                proceedings_data = None
+            if proceedings_data:
+                logger.debug("Enhanced Hybrid: Official proceedings verification succeeded")
+                return proceedings_data, proceedings_errors, proceedings_url
 
         # PHASE 3.5: DataCite fallback. CrossRef/OpenAlex/Semantic Scholar
         # only inconsistently index DOIs registered through DataCite

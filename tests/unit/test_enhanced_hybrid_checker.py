@@ -225,6 +225,42 @@ def test_verify_reference_records_matched_database_from_local_checker():
 
 
 @patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
+def test_official_proceedings_fallback_resolves_workshop_abstract(_mock_sleep):
+    checker = _build_checker()
+    checker.crossref = NoMatchChecker()
+
+    class FakeOfficialProceedings:
+        def verify_reference(self, reference):
+            return (
+                {
+                    'title': reference['title'],
+                    'authors': reference['authors'],
+                    'year': 2020,
+                    'venue': 'SciNLP 2020',
+                    'url': 'https://scinlp.org/history/2020/pdfs/softcite.pdf',
+                    '_matched_database': 'Official Workshop Program',
+                },
+                [],
+                'https://scinlp.org/history/2020/pdfs/softcite.pdf',
+            )
+
+    checker.official_proceedings = FakeOfficialProceedings()
+    checker.datacite = None
+    reference = {
+        'title': 'Softcite: Automatic Extraction of Software Mentions in Research Literature',
+        'authors': ['Caifan Du', 'James Howison', 'Patrice Lopez'],
+        'year': 2020,
+        'venue': 'SciNLP',
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data['_matched_database'] == 'Official Workshop Program'
+    assert errors == []
+    assert url.endswith('softcite.pdf')
+
+
+@patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
 def test_datacite_fallback_resolves_zenodo_doi_when_other_apis_miss(_mock_sleep):
     """DataCite is tried as a last-resort fallback for DOIs that CrossRef/
     OpenAlex/Semantic Scholar don't resolve (e.g. Zenodo-registered DOIs) —
