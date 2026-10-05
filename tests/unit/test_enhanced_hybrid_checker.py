@@ -224,6 +224,49 @@ def test_verify_reference_records_matched_database_from_local_checker():
     assert verified_data["_matched_checker"] == "local_s2"
 
 
+@patch('refchecker.checkers.enhanced_hybrid_checker.time.sleep', return_value=None)
+def test_datacite_fallback_resolves_zenodo_doi_when_other_apis_miss(_mock_sleep):
+    """DataCite is tried as a last-resort fallback for DOIs that CrossRef/
+    OpenAlex/Semantic Scholar don't resolve (e.g. Zenodo-registered DOIs) —
+    this is the fix for the Zenodo false-positive pattern identified in
+    arXiv:2607.22693."""
+    checker = _build_checker()
+    checker.dblp = None
+    checker.openreview = None
+
+    class FakeDataCite:
+        def verify_reference(self, reference):
+            return (
+                {
+                    'title': reference.get('title', ''),
+                    'authors': ['Chiara Di Giambattista'],
+                    'year': 2025,
+                    'venue': 'Zenodo',
+                    'doi': '10.5281/zenodo.17199853',
+                    'url': 'https://doi.org/10.5281/zenodo.17199853',
+                    '_matched_database': 'DataCite',
+                },
+                [],
+                'https://doi.org/10.5281/zenodo.17199853',
+            )
+
+    checker.datacite = FakeDataCite()
+
+    reference = {
+        'title': 'OpenCitations snapshot',
+        'doi': '10.5281/zenodo.17199853',
+        'year': 2025,
+        'authors': ['Chiara Di Giambattista'],
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data is not None
+    assert verified_data['_matched_database'] == 'DataCite'
+    assert errors == []
+    assert url == 'https://doi.org/10.5281/zenodo.17199853'
+
+
 def test_major_author_discrepancy_recognizes_no_matching_authors_error():
     checker = _build_checker()
 

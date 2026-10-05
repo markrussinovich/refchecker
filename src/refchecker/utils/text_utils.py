@@ -3696,10 +3696,15 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         if not text:
             return False
         text_clean = str(text).strip().lower()
-        # Check for standalone et al variants
+        # Check for standalone et al variants. APA-style reference lists
+        # (used by many ML papers, e.g. OpenAI/Meta/Qwen technical reports)
+        # elide long author lists with a single-glyph horizontal ellipsis
+        # '\u2026' as its own list entry — e.g. ["OpenAI", "Agarwal, S.",
+        # "Ahmad, L.", "\u2026", "Zhu, W."] — rather than the ASCII "...".
+        # Recognize both so the elision is treated the same as "et al".
         et_al_variants = [
             'et al', 'et al.', 'et.al', 'et.al.', 
-            'and others', 'and other', 'etc', 'etc.', '...'
+            'and others', 'and other', 'etc', 'etc.', '...', '\u2026'
         ]
         return text_clean in et_al_variants
     
@@ -3715,6 +3720,8 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             r'\bet\s*\.?\s*al\.?$',    # "et.al" or similar variations
             r'\betc\.?$',              # "etc" or "etc." at end
             r'\s+\.\.\.$',             # "..." at end (sometimes used like et al)
+            r'\s*\u2026$',             # Unicode horizontal ellipsis '…' at end
+            r'^\u2026\s*',             # or at the start ('… Zhu, W.')
         ]
         return any(re.search(pattern, text_lower) for pattern in et_al_patterns)
     
@@ -3746,6 +3753,8 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             author_clean = re.sub(r'\s+et\s*\.?\s*al\.?$', '', author_clean, flags=re.IGNORECASE)
             author_clean = re.sub(r'\s+etc\.?$', '', author_clean, flags=re.IGNORECASE)
             author_clean = re.sub(r'\s+\.\.\.$', '', author_clean)
+            author_clean = re.sub(r'\s*\u2026\s*$', '', author_clean)
+            author_clean = re.sub(r'^\u2026\s*', '', author_clean)
             author_clean = author_clean.strip()
             
             if author_clean:  # Only add if something remains after removing "et al"

@@ -37,6 +37,7 @@ from typing import Dict, List, Tuple, Optional, Any
 
 from refchecker.utils.database_config import DATABASE_LABELS, DATABASE_LOOKUP_ORDER
 from refchecker.utils.reference_fixups import fixup_reference_fields
+from refchecker.utils.doi_utils import construct_doi_url, is_valid_doi_format, normalize_doi
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,17 @@ class EnhancedHybridReferenceChecker:
                 email=contact_email
             )
 
+        # DataCite checker: free, unauthenticated fallback for DOIs
+        # registered through DataCite (Zenodo, Figshare, OSF, Dryad, …)
+        # rather than CrossRef. CrossRef/OpenAlex/Semantic Scholar only
+        # inconsistently index DataCite-registered DOIs, which was the
+        # largest false-positive source identified in the "Detecting
+        # Hallucinated and Suspicious Citations" study (arXiv:2607.22693)
+        # — always enabled since it's a last-resort, DOI-gated check.
+        self.datacite = self._initialize_checker(
+            'datacite', 'DataCiteChecker', 'DataCite API'
+        )
+
         # Paperclip is an OPTIONAL secondary tier — biomedical full-text
         # corpus (PMC, bioRxiv, medRxiv) plus arXiv. Auth-gated.
         #
@@ -234,7 +246,7 @@ class EnhancedHybridReferenceChecker:
         all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
         for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
                         self.openalex, self.crossref, self.openreview, self.dblp,
-                        self.acl_anthology, self.paperclip):
+                        self.acl_anthology, self.paperclip, self.datacite):
             if checker is not None:
                 checker.cache_dir = cache_dir
 
@@ -1856,7 +1868,25 @@ class EnhancedHybridReferenceChecker:
             best_incomplete = crossref_result if crossref_result else openalex_result
             logger.debug("Enhanced Hybrid: No complete data found, using incomplete data as fallback")
             return best_incomplete
-        
+
+        # PHASE 3.5: DataCite fallback. CrossRef/OpenAlex/Semantic Scholar
+        # only inconsistently index DOIs registered through DataCite
+        # (Zenodo, Figshare, OSF, Dryad, …) — if the reference carries
+        # such a DOI and nothing above resolved it, ask DataCite directly
+        # before giving up. Cheap: a single unauthenticated GET, and it's
+        # a no-op (returns None fast) for any DOI it doesn't have, so this
+        # never slows down the common CrossRef-covered case.
+        if getattr(self, 'datacite', None):
+            self._append_attempted_api(attempted_apis, 'datacite')
+            try:
+                dc_data, dc_errors, dc_url = self.datacite.verify_reference(reference)
+            except Exception as exc:
+                logger.debug(f"Enhanced Hybrid: DataCite check failed: {exc}")
+                dc_data = None
+            if dc_data:
+                logger.debug("Enhanced Hybrid: DataCite verification succeeded")
+                return dc_data, dc_errors, dc_url
+
         # If all APIs failed, return unverified with source tracking metadata
         active_failures = [api for api in failed_apis if api.get('active', True)]
         failed_count = len(active_failures)
@@ -1873,7 +1903,17 @@ class EnhancedHybridReferenceChecker:
         # PHASE 4: If the reference has a URL, try web page verification as final fallback.
         # This handles non-academic references (websites, datasets, tools) whose
         # cited URL is valid and contains the reference title.
+        #
+        # When the reference only carries a DOI (no explicit 'url'/'cited_url'
+        # field — common for DOI-only citations to non-paper sources that
+        # neither CrossRef/OpenAlex/S2 nor DataCite resolved), synthesize the
+        # doi.org URL so this last-resort page-content check still fires
+        # instead of silently skipping straight to "unverified".
         web_url = reference.get('cited_url') or reference.get('url', '')
+        if not web_url:
+            cited_doi = reference.get('doi')
+            if cited_doi and is_valid_doi_format(normalize_doi(cited_doi)):
+                web_url = construct_doi_url(cited_doi)
         if web_url and web_url.startswith('http'):
             try:
                 from refchecker.checkers.webpage_checker import WebPageChecker

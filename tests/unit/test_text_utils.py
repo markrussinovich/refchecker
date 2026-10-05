@@ -1090,6 +1090,46 @@ class TestAuthorComparisonBugFixes:
         assert match_result, error_message
         assert "with et al" in error_message.lower()
 
+    def test_unicode_ellipsis_elided_author_list_matches(self):
+        """APA-style reference lists elide long author lists with a single
+        Unicode ellipsis glyph '\u2026' as its own list entry (e.g. OpenAI's
+        GPT-OSS/GEPA-style technical reports), not the ASCII '...'. This was
+        a concrete false-positive source identified in arXiv:2607.22693 —
+        the ellipsis wasn't recognized as an 'et al' marker, so the elided
+        entry was compared as literal text and the whole author list failed."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["OpenAI", "Agarwal, S.", "Ahmad, L.", "\u2026", "Zhu, W."]
+        correct_authors = [
+            "OpenAI",
+            "Sandhini Agarwal",
+            "Lama Ahmad",
+            "Ilge Akkaya",
+            "Zhu, W.",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "et al" in error_message.lower()
+
+    def test_unicode_ellipsis_trailing_author_entry_matches(self):
+        """The ellipsis may also trail the last named author in one entry
+        (e.g. 'Zhu, W. \u2026') rather than standing alone."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["OpenAI", "Agarwal, S.", "Ahmad, L. \u2026"]
+        correct_authors = [
+            "OpenAI",
+            "Sandhini Agarwal",
+            "Lama Ahmad",
+            "Ilge Akkaya",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+
     def test_team_author_et_al_handles_malformed_s2_surname(self):
         """The exact Gemma Team pattern should survive S2's malformed surname encoding."""
         from refchecker.utils.text_utils import compare_authors
