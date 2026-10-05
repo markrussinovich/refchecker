@@ -43,6 +43,11 @@ logger = logging.getLogger(__name__)
 # Get configuration
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
+OPENALEX_WORK_FIELDS = (
+    "id,doi,title,display_name,publication_year,authorships,type,open_access,"
+    "primary_location,locations,referenced_works,ids,cited_by_count,concepts,"
+    "awards,funders,biblio,abstract_inverted_index,publication_date"
+)
 
 class OpenAlexReferenceChecker:
     """
@@ -92,7 +97,7 @@ class OpenAlexReferenceChecker:
         params = {
             "search": query,
             "per_page": min(limit, 25),  # OpenAlex max per page is 200, but we limit for performance
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio,abstract_inverted_index,publication_date"
+            "select": OPENALEX_WORK_FIELDS,
         }
         
         # Add year filter if provided
@@ -152,7 +157,7 @@ class OpenAlexReferenceChecker:
         endpoint = f"{self.base_url}/works/doi:{clean_doi}"
         
         params = {
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio,abstract_inverted_index,publication_date"
+            "select": OPENALEX_WORK_FIELDS,
         }
         
         # Make the request with retries and backoff
