@@ -15,6 +15,10 @@ class WebPageChecker:
     """
     Checker for verifying web page references (documentation, tutorials, etc.)
     """
+
+    _OFFICIAL_PORTAL_ORGANIZATIONS = {
+        'ec.europa.eu': ('european commission', 'european union'),
+    }
     
     def __init__(self, request_delay: float = 1.0):
         """
@@ -172,6 +176,12 @@ class WebPageChecker:
             
             # Parse HTML content
             soup = BeautifulSoup(response.content, 'html.parser')
+
+            official_portal = self._verify_official_dynamic_portal(
+                reference, web_url, response, soup,
+            )
+            if official_portal:
+                return official_portal, [], web_url
             
             # Extract page metadata
             page_title = self._extract_page_title(soup)
@@ -590,6 +600,12 @@ class WebPageChecker:
             
             # Parse HTML content
             soup = BeautifulSoup(response.content, 'html.parser')
+
+            official_portal = self._verify_official_dynamic_portal(
+                reference, web_url, response, soup,
+            )
+            if official_portal:
+                return official_portal, [], web_url
             
             # Extract page content for searching
             page_title = self._extract_page_title(soup)
@@ -711,6 +727,12 @@ class WebPageChecker:
             
             # Parse HTML content
             soup = BeautifulSoup(response.content, 'html.parser')
+
+            official_portal = self._verify_official_dynamic_portal(
+                reference, web_url, response, soup,
+            )
+            if official_portal:
+                return official_portal, [], web_url
             
             # Extract page content for searching
             page_title = self._extract_page_title(soup)
@@ -808,6 +830,65 @@ class WebPageChecker:
         except Exception as e:
             logger.error(f"Error checking raw URL {web_url}: {e}")
             return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], web_url
+
+    def _verify_official_dynamic_portal(
+        self,
+        reference: Dict[str, Any],
+        web_url: str,
+        response: requests.Response,
+        soup: BeautifulSoup,
+    ) -> Optional[Dict[str, Any]]:
+        """Verify an empty client-rendered shell using official-domain identity."""
+        if soup.get_text(' ', strip=True) or self._extract_page_title(soup) or self._extract_description(soup):
+            return None
+
+        host = urlparse(response.url or web_url).netloc.lower().split(':', 1)[0]
+        organization_domain = None
+        organization_aliases = None
+        for domain, aliases in self._OFFICIAL_PORTAL_ORGANIZATIONS.items():
+            if host == domain or host.endswith(f'.{domain}'):
+                organization_domain = domain
+                organization_aliases = aliases
+                break
+        if not organization_aliases:
+            return None
+
+        cited_authors = reference.get('authors', [])
+        if isinstance(cited_authors, list):
+            cited_authors = ' '.join(
+                author.get('name', '') if isinstance(author, dict) else str(author)
+                for author in cited_authors
+            )
+        normalized_authors = re.sub(r'[^a-z0-9]+', ' ', str(cited_authors).lower()).strip()
+        if not any(alias in normalized_authors for alias in organization_aliases):
+            return None
+
+        portal_slug = host[:-len(organization_domain)].rstrip('.').split('.')[-1]
+        portal_terms = {
+            term for term in re.split(r'[^a-z0-9]+', portal_slug)
+            if len(term) >= 3
+        }
+        title_terms = {
+            term for term in re.split(r'[^a-z0-9]+', str(reference.get('title', '')).lower())
+            if len(term) >= 3
+        }
+        if len(portal_terms) < 2 or not portal_terms.issubset(title_terms):
+            return None
+
+        return {
+            'title': reference.get('title', ''),
+            'authors': reference.get('authors', []),
+            'year': reference.get('year'),
+            'venue': reference.get('venue') or reference.get('journal') or 'Official Web Portal',
+            'url': web_url,
+            '_matched_database': 'Official Web Portal',
+            'web_metadata': {
+                'final_url': response.url,
+                'status_code': response.status_code,
+                'client_rendered': True,
+                'organization_domain': organization_domain,
+            },
+        }
 
     def _is_web_content_venue(self, venue: str, url: str) -> bool:
         """
