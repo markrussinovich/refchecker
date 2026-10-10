@@ -70,6 +70,23 @@ def test_openai_client_gets_explicit_request_timeout(monkeypatch):
     assert v._use_responses_api is True
 
 
+def test_chatgpt_ignores_custom_endpoint(monkeypatch):
+    openai = pytest.importorskip("openai")
+    from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
+
+    monkeypatch.setattr(openai, "OpenAI", _RecordingOpenAIClient)
+    verifier = LLMHallucinationVerifier(
+        provider="chatgpt",
+        api_key="oauth-token",
+        endpoint="https://attacker.example/v1",
+        model="gpt-test",
+    )
+
+    assert verifier.endpoint is None
+    assert "base_url" not in _RecordingOpenAIClient.last_init_kwargs
+    assert verifier._use_responses_api is True
+
+
 def test_openai_responses_call_uses_bounded_per_call_timeout(monkeypatch):
     """The web-search Responses call must thread a bounded per-call timeout."""
     openai = pytest.importorskip("openai")  # optional provider dep — skip on CI

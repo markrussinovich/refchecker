@@ -197,4 +197,38 @@ describe('useConfigStore', () => {
     expect(result.current.selectedHallucinationConfigId).toBe(9)
     expect(api.setDefaultLLMConfig).not.toHaveBeenCalledWith(9)
   })
+
+  it('falls back from a disconnected ChatGPT selection', async () => {
+    const api = await import('../utils/api')
+    api.getLLMConfigs.mockResolvedValueOnce({
+      data: [
+        {
+          id: 10,
+          provider: 'chatgpt',
+          model: 'gpt-6.1-sol',
+          is_default: true,
+          oauth_connected: false,
+        },
+        {
+          id: 11,
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-6',
+          has_key: true,
+        },
+      ],
+    })
+    localStorage.getItem.mockImplementation(() => '10')
+    const { useConfigStore } = await import('./useConfigStore')
+    const { result } = renderHook(() => useConfigStore())
+
+    await act(async () => {
+      await result.current.fetchConfigs()
+    })
+
+    expect(result.current.selectedExtractionConfigId).toBe(11)
+    expect(result.current.selectedHallucinationConfigId).toBe(11)
+    expect(result.current.selectedChatConfigId).toBe(11)
+    expect(result.current.selectedSummaryConfigId).toBe(11)
+    expect(result.current.getSelectedExtractionConfig().id).toBe(11)
+  })
 })

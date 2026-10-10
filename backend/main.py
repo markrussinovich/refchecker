@@ -4,6 +4,7 @@ FastAPI application for RefChecker Web UI
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import asyncio
+import html
 import time
 import uuid
 import os
@@ -96,7 +97,11 @@ from .usage_tracking import (
     rotate_usage_log_if_oversized,
     utcnow_sqlite,
 )
-from refchecker.utils.url_utils import validate_remote_fetch_url, extract_arxiv_id_from_url
+from refchecker.utils.url_utils import (
+    extract_arxiv_id_from_url,
+    normalize_arxiv_id,
+    validate_remote_fetch_url,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -775,10 +780,10 @@ async def _database_refresh_loop() -> None:
 def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
     """Reject web-only providers that are unsafe in multi-user deployments."""
     normalized = (provider_name or "").strip().lower()
-    if is_multiuser_mode() and normalized == "vllm":
+    if is_multiuser_mode() and normalized in {"vllm", "chatgpt"}:
         raise HTTPException(
             status_code=403,
-            detail="vLLM is only supported in single-user local deployments",
+            detail=f"{provider_name} is only supported in single-user local deployments",
         )
 
 
@@ -797,6 +802,31 @@ def _ensure_hallucination_capable_provider(provider_name: Optional[str]) -> None
 def _normalize_llm_provider_name(provider_name: Optional[str]) -> str:
     normalized = (provider_name or "").strip().lower()
     return "google" if normalized == "gemini" else normalized
+
+
+def _chatgpt_credential_owner(user_id: Optional[int]) -> str:
+    """Return the local OSS credential profile."""
+    return "local"
+
+
+def _annotate_chatgpt_configs(
+    configs: list[Dict[str, Any]],
+    user_id: Optional[int],
+) -> list[Dict[str, Any]]:
+    """Mark ChatGPT configs usable only when this user has an OAuth session."""
+    from refchecker.llm.chatgpt_auth import public_status
+
+    status = public_status(_chatgpt_credential_owner(user_id))
+    annotated: list[Dict[str, Any]] = []
+    for config in configs:
+        enriched = dict(config)
+        if _normalize_llm_provider_name(enriched.get("provider")) == "chatgpt":
+            enriched["has_key"] = status["connected"]
+            enriched["oauth_connected"] = status["connected"]
+            enriched["key_source"] = "chatgpt" if status["connected"] else None
+            enriched["account_email"] = status.get("email")
+        annotated.append(enriched)
+    return annotated
 
 
 def _env_llm_config_for_provider(provider_name: str) -> Optional[Dict[str, Any]]:
@@ -924,7 +954,23 @@ async def _resolve_llm_config_for_request(
         else:
             logger.warning(f"LLM config {llm_config_id} not found")
 
-    if not effective_api_key and provider:
+    _ensure_allowed_web_llm_provider(provider)
+
+    if not effective_api_key and provider == "chatgpt":
+        from refchecker.llm.chatgpt_auth import get_access_token
+
+        try:
+            effective_api_key = await asyncio.to_thread(
+                get_access_token,
+                _chatgpt_credential_owner(user_id),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Connect a ChatGPT account before using this configuration: {exc}",
+            ) from exc
+
+    if not effective_api_key and provider and provider != "chatgpt":
         effective_api_key = await _reuse_provider_key_for_new_config(
             provider=provider,
             user_id=user_id,
@@ -933,12 +979,13 @@ async def _resolve_llm_config_for_request(
     if provider:
         from refchecker.config.settings import resolve_api_key, resolve_endpoint
 
-        if not effective_api_key:
+        if not effective_api_key and provider != "chatgpt":
             effective_api_key = resolve_api_key(provider)
         if not endpoint:
             endpoint = resolve_endpoint(provider)
+    if provider == "chatgpt":
+        endpoint = None
 
-    _ensure_allowed_web_llm_provider(provider)
     if require_hallucination_capable:
         _ensure_hallucination_capable_provider(provider)
 
@@ -2425,6 +2472,14 @@ async def start_check(
                 # accept). Genuine unsupported schemes (file:, ftp:, gopher:, …)
                 # are still refused to preserve SSRF/LFI protection.
                 raise HTTPException(status_code=400, detail="Only HTTP(S) URLs are supported")
+            elif not scheme and normalize_arxiv_id(raw_source) is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Enter an HTTP(S) paper URL or valid arXiv ID; "
+                        "paper-title search is not supported."
+                    ),
+                )
             paper_title = source_value
             input_bytes = len((source_value or "").encode("utf-8"))
 
@@ -4890,6 +4945,20 @@ async def start_batch_check(
             )
 
         valid_urls = [u.strip() for u in request.urls if u.strip()]
+        invalid_sources = [
+            source
+            for source in valid_urls
+            if not source.lower().startswith(("http://", "https://"))
+            and normalize_arxiv_id(source) is None
+        ]
+        if invalid_sources:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid paper source: {invalid_sources[0]}. Enter HTTP(S) "
+                    "paper URLs or valid arXiv IDs; paper-title search is not supported."
+                ),
+            )
 
         # Pre-acquire one slot per URL to enforce per-user rate limit atomically
         slots_needed = len(valid_urls)
@@ -5666,13 +5735,94 @@ async def update_check_label(
 
 # LLM Configuration endpoints
 
+
+@app.get("/api/chatgpt/status")
+async def chatgpt_status(current_user: UserInfo = Depends(require_user)):
+    """Return the current user's non-secret ChatGPT connection state."""
+    from refchecker.llm.chatgpt_auth import public_status
+
+    _ensure_allowed_web_llm_provider("chatgpt")
+    user_id = get_user_id_filter(current_user)
+    return public_status(_chatgpt_credential_owner(user_id))
+
+
+@app.post("/api/chatgpt/auth/start")
+async def start_chatgpt_auth(
+    request: Request,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Start OpenAI's OSS loopback PKCE flow for this RefChecker user."""
+    from refchecker.llm.chatgpt_auth import start_authorization
+
+    _ensure_allowed_web_llm_provider("chatgpt")
+    user_id = get_user_id_filter(current_user)
+    port = request.url.port or 80
+    redirect_uri = f"http://127.0.0.1:{port}/api/chatgpt/auth/callback"
+    try:
+        authorization_url = start_authorization(
+            _chatgpt_credential_owner(user_id),
+            redirect_uri,
+        )
+        return Response(
+            content=json.dumps({"authorization_url": authorization_url}),
+            media_type="application/json",
+            headers=_private_artifact_headers(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/chatgpt/auth/callback")
+async def complete_chatgpt_auth(request: Request):
+    """Complete the browser callback; the OAuth state identifies its user."""
+    from refchecker.llm.chatgpt_auth import complete_authorization
+
+    params = {key: value for key, value in request.query_params.items()}
+    try:
+        status = await asyncio.to_thread(complete_authorization, params)
+        email = html.escape(status.get("email") or "your ChatGPT account")
+        heading = "ChatGPT connected"
+        message = f"RefChecker can now use {email}. You can close this window."
+        event = "chatgpt:connected"
+        status_code = 200
+    except Exception as exc:
+        heading = "ChatGPT connection failed"
+        message = html.escape(str(exc))
+        event = "chatgpt:error"
+        status_code = 400
+    body = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{heading}</title>
+<style>body{{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}}</style>
+</head><body><h1>{heading}</h1><p>{message}</p>
+<script>if(window.opener)window.opener.postMessage({json.dumps(event)}, "*");</script>
+</body></html>"""
+    return HTMLResponse(
+        body,
+        status_code=status_code,
+        headers=_private_artifact_headers(),
+    )
+
+
+@app.delete("/api/chatgpt/auth")
+async def disconnect_chatgpt(current_user: UserInfo = Depends(require_user)):
+    """Revoke the current user's renewable ChatGPT session."""
+    from refchecker.llm.chatgpt_auth import disconnect
+
+    _ensure_allowed_web_llm_provider("chatgpt")
+    user_id = get_user_id_filter(current_user)
+    revoked = await asyncio.to_thread(
+        disconnect,
+        _chatgpt_credential_owner(user_id),
+    )
+    return {"connected": False, "remote_revoked": revoked}
+
 @app.get("/api/llm-configs")
 async def get_llm_configs(current_user: UserInfo = Depends(require_user)):
     """Get all LLM configurations (API keys are not returned)"""
     try:
         user_id = get_user_id_filter(current_user)
         configs = await db.get_llm_configs(user_id=user_id)
-        return _merge_env_llm_configs(configs)
+        return _annotate_chatgpt_configs(_merge_env_llm_configs(configs), user_id)
     except Exception as e:
         logger.error(f"Error getting LLM configs: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -5718,7 +5868,7 @@ async def create_llm_config(
             "is_default": False,
             "has_key": bool(store_key),
         }
-        return _merge_env_llm_configs([created])[0]
+        return _annotate_chatgpt_configs(_merge_env_llm_configs([created]), user_id)[0]
     except HTTPException:
         raise
     except Exception as e:
@@ -5770,7 +5920,8 @@ async def update_llm_config(
         if success:
             # Get updated config
             updated = await db.get_llm_configs(user_id=user_id)
-            updated_config = next((c for c in _merge_env_llm_configs(updated) if c["id"] == config_id), None)
+            merged = _annotate_chatgpt_configs(_merge_env_llm_configs(updated), user_id)
+            updated_config = next((c for c in merged if c["id"] == config_id), None)
             return updated_config or {"id": config_id, "message": "Updated"}
         else:
             raise HTTPException(status_code=404, detail="Config not found")
@@ -5835,11 +5986,13 @@ async def validate_llm_config(
     Returns success or error message.
     """
     _ensure_allowed_web_llm_provider(config.provider)
+    user_id = get_user_id_filter(current_user)
 
     # Map providers to their required packages
     PROVIDER_PACKAGES = {
         "anthropic": ("anthropic", "pip install anthropic"),
         "openai": ("openai", "pip install openai"),
+        "chatgpt": ("openai", "pip install openai"),
         "google": ("google.genai", "pip install google-genai"),
         "gemini": ("google.genai", "pip install google-genai"),
     }
@@ -5867,8 +6020,18 @@ async def validate_llm_config(
         llm_config = {}
         if config.model:
             llm_config['model'] = config.model
-        if config.api_key:
-            llm_config['api_key'] = config.api_key
+        effective_api_key = config.api_key
+        if provider_lower == "chatgpt" and not effective_api_key:
+            from refchecker.llm.chatgpt_auth import get_access_token
+            try:
+                effective_api_key = await asyncio.to_thread(
+                    get_access_token,
+                    _chatgpt_credential_owner(user_id),
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=401, detail=str(exc)) from exc
+        if effective_api_key:
+            llm_config['api_key'] = effective_api_key
         if config.endpoint:
             llm_config['endpoint'] = config.endpoint
         
@@ -9757,6 +9920,7 @@ _STATIC_MODEL_FALLBACK = {
     "openai": [
         "gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3", "o3-mini", "o1", "o1-mini",
     ],
+    "chatgpt": ["gpt-6.1-sol"],
     "anthropic": [
         "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5",
         "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest",
@@ -9788,6 +9952,7 @@ async def list_llm_models(req: _ListModelsRequest, current_user: UserInfo = Depe
     provider = (req.provider or "").lower().strip()
     if provider in ("gemini",):
         provider = "google"
+    _ensure_allowed_web_llm_provider(provider)
     api_key = (req.api_key or "").strip() or None
     endpoint = (req.endpoint or "").strip() or None
     if not api_key or not endpoint:
@@ -9800,7 +9965,17 @@ async def list_llm_models(req: _ListModelsRequest, current_user: UserInfo = Depe
     models: list[str] = []
     error: Optional[str] = None
     try:
-        if provider == "openai" and api_key:
+        if provider == "chatgpt":
+            from refchecker.llm.chatgpt_auth import list_models
+
+            user_id = get_user_id_filter(current_user)
+            catalog = await asyncio.to_thread(
+                list_models,
+                _chatgpt_credential_owner(user_id),
+            )
+            models = [entry["slug"] for entry in catalog]
+            source = "live"
+        elif provider == "openai" and api_key:
             import httpx
             r = await asyncio.to_thread(
                 httpx.get, "https://api.openai.com/v1/models",

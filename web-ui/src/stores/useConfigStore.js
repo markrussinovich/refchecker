@@ -8,7 +8,10 @@ const CHAT_SELECTION_KEY = 'refchecker_selected_chat_llm'
 // R34 — Chat-with-PDF and Summarize each get their own model selection.
 // Summarize falls back to the chat → extraction/default chain when unset.
 const SUMMARY_SELECTION_KEY = 'refchecker_selected_summary_llm'
-const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
+const hallucinationCapableProviders = ['openai', 'chatgpt', 'anthropic', 'google', 'azure']
+const isUsableConfig = config => (
+  config?.provider !== 'chatgpt' || Boolean(config.oauth_connected)
+)
 
 function getStoredSelection(key) {
   try {
@@ -60,29 +63,29 @@ export const useConfigStore = create((set, get) => ({
         const configs = response.data
         
         // Find the default config
-        const defaultConfig = configs.find(c => c.is_default)
+        const defaultConfig = configs.find(c => c.is_default && isUsableConfig(c))
         
-        const defaultConfigId = defaultConfig?.id || configs[0]?.id || null
+        const defaultConfigId = defaultConfig?.id || configs.find(isUsableConfig)?.id || null
         const storedExtractionId = get().selectedExtractionConfigId
         const storedHallucinationId = get().selectedHallucinationConfigId
         const storedChatId = get().selectedChatConfigId
         const storedSummaryId = get().selectedSummaryConfigId
-        const extractionConfigId = configs.some(c => c.id === storedExtractionId)
+        const extractionConfigId = configs.some(c => c.id === storedExtractionId && isUsableConfig(c))
           ? storedExtractionId
           : defaultConfigId
-        const hallucinationConfig = configs.find(c => hallucinationCapableProviders.includes(c.provider))
-        const hallucinationConfigId = configs.some(c => c.id === storedHallucinationId && hallucinationCapableProviders.includes(c.provider))
+        const hallucinationConfig = configs.find(c => hallucinationCapableProviders.includes(c.provider) && isUsableConfig(c))
+        const hallucinationConfigId = configs.some(c => c.id === storedHallucinationId && hallucinationCapableProviders.includes(c.provider) && isUsableConfig(c))
           ? storedHallucinationId
           : hallucinationConfig?.id || null
         // Chat (with PDF) works with any configured provider; default to the
         // extraction/default config when nothing is stored.
-        const chatConfigId = configs.some(c => c.id === storedChatId)
+        const chatConfigId = configs.some(c => c.id === storedChatId && isUsableConfig(c))
           ? storedChatId
           : defaultConfigId
         // Summarize works with any configured provider too. It keeps its own
         // selection (R34); fall back to the chat selection — then the
         // extraction/default config — when nothing summary-specific is stored.
-        const summaryConfigId = configs.some(c => c.id === storedSummaryId)
+        const summaryConfigId = configs.some(c => c.id === storedSummaryId && isUsableConfig(c))
           ? storedSummaryId
           : chatConfigId
 
@@ -278,26 +281,26 @@ export const useConfigStore = create((set, get) => ({
 
   getSelectedConfig: () => {
     const { configs, selectedConfigId } = get()
-    return configs.find(c => c.id === selectedConfigId) || null
+    return configs.find(c => c.id === selectedConfigId && isUsableConfig(c)) || null
   },
 
   getSelectedExtractionConfig: () => {
     const { configs, selectedExtractionConfigId, selectedConfigId } = get()
-    return configs.find(c => c.id === (selectedExtractionConfigId || selectedConfigId)) || null
+    return configs.find(c => c.id === (selectedExtractionConfigId || selectedConfigId) && isUsableConfig(c)) || null
   },
 
   getSelectedHallucinationConfig: () => {
     const { configs, selectedHallucinationConfigId, selectedExtractionConfigId, selectedConfigId } = get()
     const selected = configs.find(c => c.id === (selectedHallucinationConfigId || selectedExtractionConfigId || selectedConfigId))
-    if (selected && hallucinationCapableProviders.includes(selected.provider)) return selected
-    return configs.find(c => hallucinationCapableProviders.includes(c.provider)) || null
+    if (selected && hallucinationCapableProviders.includes(selected.provider) && isUsableConfig(selected)) return selected
+    return configs.find(c => hallucinationCapableProviders.includes(c.provider) && isUsableConfig(c)) || null
   },
 
   // Chat-with-PDF accepts any configured provider; fall back to the
   // extraction/default config when no chat-specific selection exists.
   getSelectedChatConfig: () => {
     const { configs, selectedChatConfigId, selectedExtractionConfigId, selectedConfigId } = get()
-    return configs.find(c => c.id === (selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)) || null
+    return configs.find(c => c.id === (selectedChatConfigId || selectedExtractionConfigId || selectedConfigId) && isUsableConfig(c)) || null
   },
 
   // Summarize accepts any configured provider too (R34). It has its own
@@ -306,6 +309,6 @@ export const useConfigStore = create((set, get) => ({
   // unaffected until they explicitly pick a Summarize model.
   getSelectedSummaryConfig: () => {
     const { configs, selectedSummaryConfigId, selectedChatConfigId, selectedExtractionConfigId, selectedConfigId } = get()
-    return configs.find(c => c.id === (selectedSummaryConfigId || selectedChatConfigId || selectedExtractionConfigId || selectedConfigId)) || null
+    return configs.find(c => c.id === (selectedSummaryConfigId || selectedChatConfigId || selectedExtractionConfigId || selectedConfigId) && isUsableConfig(c)) || null
   },
 }))

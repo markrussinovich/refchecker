@@ -32,7 +32,7 @@ def _record_provider_usage(provider: str, model: str, response, kind: str):
     if _usage_tracker is None:
         return
     try:
-        if provider == "openai":
+        if provider in ("openai", "chatgpt"):
             u = _usage_tracker.extract_openai_usage(response)
         elif provider == "anthropic":
             u = _usage_tracker.extract_anthropic_usage(response)
@@ -61,8 +61,12 @@ def _track_openai_usage(response, model: str) -> None:
         usage = getattr(response, "usage", None)
         if usage is None:
             return
-        prompt_t = _safe_int(getattr(usage, "prompt_tokens", 0))
-        out_t = _safe_int(getattr(usage, "completion_tokens", 0))
+        prompt_t = _safe_int(
+            getattr(usage, "prompt_tokens", getattr(usage, "input_tokens", 0))
+        )
+        out_t = _safe_int(
+            getattr(usage, "completion_tokens", getattr(usage, "output_tokens", 0))
+        )
         _check_usage_tracker.record(
             model=model,
             input_tokens=prompt_t,
@@ -547,6 +551,58 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
             raise
+
+
+class ChatGPTProvider(LLMProviderMixin, LLMProvider):
+    """OpenAI Responses provider authenticated by Sign in with ChatGPT."""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.api_key = config.get("api_key")
+        self.credential_owner = config.get("credential_owner", "local")
+        self.client = None
+
+        if not self.api_key:
+            try:
+                from .chatgpt_auth import get_access_token
+                self.api_key = get_access_token(self.credential_owner)
+            except Exception as exc:
+                logger.debug("ChatGPT account is not connected: %s", exc)
+
+        if self.api_key:
+            try:
+                import httpx
+                import openai
+                self.client = openai.OpenAI(
+                    api_key=self.api_key,
+                    base_url="https://api.openai.com/v1",
+                    timeout=httpx.Timeout(90.0, connect=10.0),
+                    max_retries=0,
+                )
+            except ImportError:
+                logger.error("OpenAI library not installed. Install with: pip install openai")
+
+    def is_available(self) -> bool:
+        return self.client is not None and self.api_key is not None
+
+    def extract_references(self, bibliography_text: str) -> List[str]:
+        return self.extract_references_with_chunking(bibliography_text)
+
+    def _call_llm(self, prompt: str) -> str:
+        from .chatgpt_auth import get_access_token, stream_responses_call
+
+        self.api_key = get_access_token(self.credential_owner)
+        self.client.api_key = self.api_key
+        model = self.model or DEFAULT_EXTRACTION_MODELS["chatgpt"]
+        text, response, _ = stream_responses_call(
+            self.client,
+            model=model,
+            instructions=self._get_system_prompt(),
+            input_text=prompt,
+        )
+        _record_provider_usage("chatgpt", model, response, "extraction")
+        _track_openai_usage(response, model)
+        return text
 
 
 class AnthropicProvider(LLMProviderMixin, LLMProvider):

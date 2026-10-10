@@ -124,7 +124,7 @@ academic-refchecker --paper 1706.03762
 academic-refchecker --paper /path/to/paper.pdf
 ```
 
-LLM extraction is generally more accurate, but PDFs can fall back to GROBID when no extraction LLM is configured. Deep hallucination checks require a hallucination-capable LLM provider: OpenAI, Anthropic, Google, or Azure.
+LLM extraction is generally more accurate, but PDFs can fall back to GROBID when no extraction LLM is configured. Deep hallucination checks require a hallucination-capable LLM provider: OpenAI, ChatGPT, Anthropic, Google, or Azure.
 
 > **Tip:** Set `SEMANTIC_SCHOLAR_API_KEY` for 1-2s per reference vs 5-10s without.
 
@@ -136,7 +136,7 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 |----------|-------------|
 | **Input formats** | ArXiv IDs/URLs, PDFs, LaTeX (.tex), BibTeX (.bib/.bbl), plain text |
 | **Verification sources** | Semantic Scholar, OpenAlex, CrossRef, DBLP, ACL Anthology |
-| **LLM extraction** | OpenAI, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
+| **LLM extraction** | OpenAI, ChatGPT plan usage, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
 | **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters, LLM deep web search, and metadata reverification when the LLM finds a better match |
@@ -167,7 +167,7 @@ Legend: ✅ available · — not applicable to that surface · 🌐 needs a host
 | Capability | Web UI | Desktop (Tauri) | CLI | API | Notes |
 |---|:---:|:---:|:---:|:---:|---|
 | Reference verification (S2 / OpenAlex / CrossRef / DBLP / ACL) | ✅ | ✅ | ✅ | ✅ | Core engine; identical results across surfaces |
-| LLM extraction (Anthropic / OpenAI / Google / Azure / vLLM) | ✅ | ✅ | ✅ `--llm-provider` | ✅ | `--no-llm` for regex/structural only |
+| LLM extraction (Anthropic / OpenAI / ChatGPT / Google / Azure / vLLM) | ✅ | ✅ | ✅ `--llm-provider` | ✅ | `--no-llm` for regex/structural only |
 | Hallucination detection (deep web search) | ✅ | ✅ | ✅ `--check-hallucinations` | ✅ | Needs a web-search-capable provider; see [Hallucination Detection](#hallucination-detection) |
 | Inline-citation numbering/ordering check | ✅ | ✅ | ✅ `--check-citation-order` | ✅ | Scheme-aware; **abstains** when unclear |
 | Retraction screening (OpenAlex) | ✅ | ✅ | ✅ `--check-retractions` | ✅ | Flags only references OpenAlex reports retracted |
@@ -298,7 +298,7 @@ pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 
 The Web UI provides real-time progress, check history, batch tracking, and one-click export of corrections.
 
-LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination checks use a separate hallucination LLM selection when one is configured; otherwise the UI falls back to the selected extraction LLM only if that provider supports web search. Local vLLM can be used for extraction, but hallucination checks require OpenAI, Anthropic, Google, or Azure.
+LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination checks use a separate hallucination LLM selection when one is configured; otherwise the UI falls back to the selected extraction LLM only if that provider supports web search. Local vLLM can be used for extraction, but hallucination checks require OpenAI, ChatGPT, Anthropic, Google, or Azure.
 
 ```bash
 refchecker-webui                    # default: http://localhost:8000
@@ -387,7 +387,7 @@ Input (choose one):
                             Custom path for the generated OpenReview paper list
 
 LLM:
-  --llm-provider PROVIDER    openai, anthropic, google, azure, or vllm
+  --llm-provider PROVIDER    openai, chatgpt, anthropic, google, azure, or vllm
   --llm-model MODEL          Override the default model for the provider
   --llm-endpoint URL         Custom endpoint (e.g. local vLLM server)
   --llm-parallel-chunks      Enable parallel LLM chunk processing (default)
@@ -499,7 +499,7 @@ References with only minor issues (year off by one, venue variation) are not fla
 
 Flagged references are sent to the configured hallucination LLM for a mandatory web search. The LLM must look for a dedicated page for the cited work, not just a citation in another paper's reference list. It returns a short verdict plus the best link it found and any found title, authors, and year.
 
-Supported hallucination-check providers are **OpenAI**, **Anthropic**, **Google**, and **Azure**. The CLI can use the extraction provider when it is hallucination-capable, or you can pass `--hallucination-provider` / `--hallucination-model` to use a different model. The Web UI exposes the same split as separate extraction and hallucination selectors in Settings.
+Supported hallucination-check providers are **OpenAI**, **ChatGPT**, **Anthropic**, **Google**, and **Azure**. The CLI can use the extraction provider when it is hallucination-capable, or you can pass `--hallucination-provider` / `--hallucination-model` to use a different model. The Web UI exposes the same split as separate extraction and hallucination selectors in Settings.
 
 ### Stage 3 — Reverification Against LLM-Found Metadata
 
@@ -538,7 +538,7 @@ When enabled (Settings → AI Detection), each checked article's **body text** i
 | Engine | What it is | Cost | Notes |
 |--------|-----------|------|-------|
 | **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via Transformers + PyTorch | Free | One-time model **and** runtime download, both installable from Settings → AI Detection; calibrated, reproducible; no data leaves your machine |
-| **LLM judge** | Reuses your configured LLM provider (OpenAI/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
+| **LLM judge** | Reuses your configured LLM provider (OpenAI/ChatGPT/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
 | **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
 
 The local model needs an inference runtime (`torch` + `transformers`) that is **not** bundled, to keep the desktop app small. Click **Install runtime** under Settings → AI Detection to fetch it on demand (installed into the app's data folder and used without a restart), or install it yourself with `pip install torch transformers`. The LLM-judge and External-API engines need no runtime.
@@ -922,6 +922,7 @@ LLM-powered extraction improves accuracy with complex bibliographies. Hallucinat
 |----------|--------------|---------------|
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4.1` |
+| ChatGPT | Browser sign-in (no API key) | Account model catalog |
 | Google | `GOOGLE_API_KEY` | `gemini-3.1-flash-lite-preview` |
 | Azure | `AZURE_OPENAI_API_KEY` | `gpt-4.1` |
 | vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
@@ -941,7 +942,7 @@ academic-refchecker --paper paper.pdf \
   --hallucination-provider anthropic --hallucination-model claude-sonnet-4-6
 ```
 
-Hallucination-capable providers are OpenAI, Anthropic, Google, and Azure. vLLM can extract references but cannot perform live web search, so pair it with `--hallucination-provider` when you want hallucination checks.
+Hallucination-capable providers are OpenAI, ChatGPT, Anthropic, Google, and Azure. ChatGPT login is available for local, single-user installations and uses the signed-in user's eligible ChatGPT plan through OpenAI's Responses API. vLLM can extract references but cannot perform live web search, so pair it with `--hallucination-provider` when you want hallucination checks.
 
 #### Local Models (vLLM)
 

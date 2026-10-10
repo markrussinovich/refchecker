@@ -127,6 +127,36 @@ def test_source_badge_passthrough_for_abstract():
     assert result["source"] == "abstract"
 
 
+def test_chatgpt_uses_streaming_responses_api(monkeypatch):
+    capture = {}
+    completed = type("Response", (), {"output": [], "usage": None})()
+    events = iter([
+        type("Event", (), {"type": "response.output_text.delta", "delta": "ANSWER"})(),
+        type("Event", (), {"type": "response.completed", "response": completed})(),
+    ])
+
+    class _Responses:
+        def create(self, **kwargs):
+            capture.update(kwargs)
+            return events
+
+    client = type("Client", (), {"responses": _Responses(), "api_key": "old"})()
+    assistant = ArticleAssistant(provider="chatgpt", api_key="old", model="gpt-test")
+    assistant.client = client
+    monkeypatch.setattr(
+        "refchecker.llm.chatgpt_auth.get_access_token",
+        lambda owner: "fresh",
+    )
+
+    result = assistant.summarize("Grounding text.", source="pdf")
+
+    assert result["summary"] == "ANSWER"
+    assert client.api_key == "fresh"
+    assert capture["store"] is False
+    assert capture["stream"] is True
+    assert "temperature" not in capture
+
+
 # --------------------------------------------------------------------------- #
 # Honest 'none' abstain — exercised at the grounding-resolution layer.         #
 # --------------------------------------------------------------------------- #

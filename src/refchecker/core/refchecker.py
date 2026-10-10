@@ -56,7 +56,11 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        display_reference_value,
                        compare_authors)
-from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
+from refchecker.utils.url_utils import (
+    construct_semantic_scholar_url,
+    extract_arxiv_id_from_url,
+    normalize_arxiv_id,
+)
 from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_UPDATE_ORDER
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.utils.reference_fixups import (
@@ -80,7 +84,7 @@ def get_llm_api_key_interactive(provider: str) -> str:
     then prompting interactively if not found.
     
     Args:
-        provider: LLM provider name (openai, anthropic, google, azure, vllm)
+        provider: LLM provider name (openai, chatgpt, anthropic, google, azure, vllm)
     
     Returns:
         API key string or None if not available
@@ -90,6 +94,18 @@ def get_llm_api_key_interactive(provider: str) -> str:
     # vLLM doesn't need an API key
     if provider == 'vllm':
         return None
+    if provider == 'chatgpt':
+        from refchecker.llm.chatgpt_auth import (
+            ChatGPTAuthError,
+            get_access_token,
+            login_interactive,
+        )
+        try:
+            return get_access_token('local')
+        except ChatGPTAuthError:
+            print("\nOpening your browser to continue with ChatGPT...")
+            login_interactive('local')
+            return get_access_token('local')
 
     # Check environment variables via shared resolver
     api_key = resolve_api_key(provider)
@@ -224,7 +240,14 @@ def resolve_input_spec(input_spec):
             )
         return None, expanded_spec
 
-    return spec, None
+    paper_id = normalize_arxiv_id(spec)
+    if paper_id:
+        return paper_id, None
+
+    raise ValueError(
+        "Paper input must be an HTTP(S) paper URL, a valid arXiv ID, "
+        "or a supported local file; paper-title search is not supported."
+    )
 
 
 def load_paper_specs_from_file(list_path):
@@ -7786,8 +7809,8 @@ def main():
                         help="Report format (default: json)")
     
     # LLM configuration arguments
-    parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
-                        help="Enable LLM with specified provider (openai, anthropic, google, azure, vllm)")
+    parser.add_argument("--llm-provider", type=str, choices=["openai", "chatgpt", "anthropic", "google", "azure", "vllm"],
+                        help="Enable LLM with specified provider (openai, chatgpt, anthropic, google, azure, vllm)")
     parser.add_argument("--llm-model", type=str,
                         help="LLM model to use (overrides default for the provider)")
     parser.add_argument("--llm-endpoint", type=str,
@@ -7799,7 +7822,7 @@ def main():
     parser.add_argument("--llm-max-chunk-workers", type=int,
                         help="Maximum number of workers for parallel LLM chunk processing (default: 4)")
     parser.add_argument("--hallucination-provider", type=str,
-                        choices=["openai", "anthropic", "google", "azure"],
+                        choices=["openai", "chatgpt", "anthropic", "google", "azure"],
                         help="Separate LLM provider for hallucination checking (defaults to --llm-provider if it supports hallucination)")
     parser.add_argument("--hallucination-model", type=str,
                         help="Model to use for hallucination checking (defaults to provider's default)")

@@ -4,12 +4,19 @@ import Button from '../common/Button'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useKeyStore } from '../../stores/useKeyStore'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { validateLLMConfig, listLLMModels } from '../../utils/api'
+import {
+  disconnectChatGPT,
+  getChatGPTStatus,
+  listLLMModels,
+  startChatGPTAuth,
+  validateLLMConfig,
+} from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 // Keep in sync with src/refchecker/config/settings.py DEFAULT_EXTRACTION_MODELS
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, hallucinationCapable: true },
+  { id: 'chatgpt', name: 'ChatGPT account', defaultModel: 'gpt-6.1-sol', requiresChatGPTLogin: true, hallucinationCapable: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true, hallucinationCapable: true },
   { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite-preview', requiresKey: true, hallucinationCapable: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
@@ -42,6 +49,8 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   // Test-connection state
   const [testResult, setTestResult] = useState(null) // { ok, message }
   const [testing, setTesting] = useState(false)
+  const [chatGPTStatus, setChatGPTStatus] = useState({ connected: false })
+  const [chatGPTLoading, setChatGPTLoading] = useState(false)
 
   // Reset form when modal opens/closes or editConfig changes
   useEffect(() => {
@@ -61,7 +70,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   }, [isOpen, editConfig, prefillConfig])
 
   const availableProviders = useMemo(
-    () => (multiuser ? PROVIDERS.filter(p => p.id !== 'vllm') : PROVIDERS),
+    () => (multiuser ? PROVIDERS.filter(p => !['vllm', 'chatgpt'].includes(p.id)) : PROVIDERS),
     [multiuser],
   )
   const selectedProvider = availableProviders.find(p => p.id === formData.provider)
@@ -76,6 +85,19 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   )
   const hasReusableProviderKey = !!existingProviderConfig || !!reusableProviderKey
   const hasServerEnvironmentKey = existingProviderConfig?.key_source === 'environment' || existingProviderConfig?.env_key_available
+
+  const refreshChatGPTStatus = async () => {
+    const response = await getChatGPTStatus()
+    setChatGPTStatus(response.data)
+    return response.data
+  }
+
+  useEffect(() => {
+    if (!isOpen || formData.provider !== 'chatgpt') return
+    refreshChatGPTStatus().catch(err => {
+      setError(err.response?.data?.detail || err.message || 'Unable to read ChatGPT connection status')
+    })
+  }, [isOpen, formData.provider])
 
   useEffect(() => {
     if (!multiuser) return
@@ -111,6 +133,54 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     setTestResult(null)
   }
 
+  const handleChatGPTConnect = async () => {
+    setError(null)
+    setChatGPTLoading(true)
+    try {
+      const response = await startChatGPTAuth()
+      const popup = window.open(
+        response.data.authorization_url,
+        'refchecker-chatgpt-auth',
+        'popup,width=620,height=760',
+      )
+      if (!popup) throw new Error('Allow pop-ups for this site, then try again.')
+
+      let connected = false
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        const status = await refreshChatGPTStatus()
+        if (status.connected) {
+          connected = true
+          break
+        }
+        if (popup.closed) break
+      }
+      if (!connected) throw new Error('ChatGPT sign-in was not completed.')
+      await useConfigStore.getState().fetchConfigs()
+      await handleFetchModels()
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'ChatGPT sign-in failed')
+    } finally {
+      setChatGPTLoading(false)
+    }
+  }
+
+  const handleChatGPTDisconnect = async () => {
+    setError(null)
+    setChatGPTLoading(true)
+    try {
+      await disconnectChatGPT()
+      setChatGPTStatus({ connected: false })
+      setModelOptions([])
+      setModelSource(null)
+      await useConfigStore.getState().fetchConfigs()
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'Unable to disconnect ChatGPT')
+    } finally {
+      setChatGPTLoading(false)
+    }
+  }
+
   // Live model lookup — falls back to the curated static list when the
   // provider's /models endpoint isn't available or returns an error.
   const handleFetchModels = async () => {
@@ -123,7 +193,11 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         effectiveKey,
         formData.endpoint.trim() || undefined,
       )
-      setModelOptions(res.data.models || [])
+      const models = res.data.models || []
+      setModelOptions(models)
+      if (formData.provider === 'chatgpt' && !formData.model.trim() && models.length > 0) {
+        setFormData(prev => ({ ...prev, model: models[0] }))
+      }
       setModelSource(res.data.source || 'fallback')
       if (res.data.error) setModelError(res.data.error)
     } catch (err) {
@@ -141,6 +215,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     setTestResult(null)
     if (selectedProvider?.requiresKey && !formData.api_key.trim() && !hasReusableProviderKey) {
       setTestResult({ ok: false, message: 'Enter an API key first.' })
+      return
+    }
+    if (selectedProvider?.requiresChatGPTLogin && !chatGPTStatus.connected) {
+      setTestResult({ ok: false, message: 'Connect a ChatGPT account first.' })
       return
     }
     if (selectedProvider?.requiresEndpoint && !formData.endpoint.trim()) {
@@ -174,6 +252,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   const validate = () => {
     if (selectedProvider?.requiresKey && !editConfig && !formData.api_key.trim() && !hasReusableProviderKey) {
       setError('API key is required')
+      return false
+    }
+    if (selectedProvider?.requiresChatGPTLogin && !chatGPTStatus.connected) {
+      setError('Connect a ChatGPT account first')
       return false
     }
 
@@ -212,7 +294,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
       }
 
       // Validate API connection before saving (only for new configs or when API key is provided)
-      if (selectedProvider?.requiresKey && (effectiveApiKey || (!editConfig && !existingProviderConfig))) {
+      if (
+        (selectedProvider?.requiresKey && (effectiveApiKey || (!editConfig && !existingProviderConfig))) ||
+        selectedProvider?.requiresChatGPTLogin
+      ) {
         setIsValidating(true)
         try {
           const validationData = {
@@ -351,10 +436,44 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
             style={{ color: 'var(--color-text-muted)' }}
           >
             {selectedProvider?.hallucinationCapable
-              ? 'Can be used for extraction and hallucination checks.'
+              ? selectedProvider?.requiresChatGPTLogin
+                ? 'Uses your ChatGPT plan for extraction and hallucination checks.'
+                : 'Can be used for extraction and hallucination checks.'
               : 'Local vLLM is available for extraction only.'}
           </p>
         </div>
+
+        {selectedProvider?.requiresChatGPTLogin && (
+          <div
+            className="p-3 rounded-lg border"
+            style={{
+              backgroundColor: 'var(--color-bg-secondary)',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                  {chatGPTStatus.connected ? 'ChatGPT connected' : 'Connect ChatGPT'}
+                </div>
+                <div className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>
+                  {chatGPTStatus.connected
+                    ? (chatGPTStatus.email || chatGPTStatus.name || 'Plan usage enabled')
+                    : 'Authorize RefChecker to use your ChatGPT plan. No API key is shared.'}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={chatGPTStatus.connected ? handleChatGPTDisconnect : handleChatGPTConnect}
+                disabled={chatGPTLoading}
+                loading={chatGPTLoading}
+              >
+                {chatGPTStatus.connected ? 'Disconnect' : 'Continue with ChatGPT'}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Model — combobox: live dropdown of available models + free text */}
         <div>
@@ -369,27 +488,46 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
             </span>
           </label>
           <div className="flex gap-2">
-            <input
-              type="text"
-              id="model"
-              name="model"
-              list="llm-model-options"
-              autoComplete="off"
-              value={formData.model}
-              onChange={handleChange}
-              placeholder={selectedProvider?.defaultModel || 'Default model'}
-              className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
-              style={{
-                backgroundColor: 'var(--color-bg-secondary)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)',
-              }}
-            />
+            {selectedProvider?.requiresChatGPTLogin && modelOptions.length > 0 ? (
+              <select
+                id="model"
+                name="model"
+                value={formData.model}
+                onChange={handleChange}
+                className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                {modelOptions.map(model => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                id="model"
+                name="model"
+                list="llm-model-options"
+                autoComplete="off"
+                value={formData.model}
+                onChange={handleChange}
+                placeholder={selectedProvider?.defaultModel || 'Default model'}
+                className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+              />
+            )}
             <button
               type="button"
               onClick={handleFetchModels}
               disabled={modelFetching}
-              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              className="w-20 flex-none px-3 py-2 rounded-lg text-sm font-medium border text-center"
               style={{
                 backgroundColor: 'var(--color-bg-primary)',
                 borderColor: 'var(--color-border)',
@@ -406,7 +544,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
           </datalist>
           <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {modelSource === 'live'
-              ? `Live list from provider (${modelOptions.length} models). You can also type any model id.`
+              ? selectedProvider?.requiresChatGPTLogin
+                ? `Live list from your ChatGPT account (${modelOptions.length} models).`
+                : `Live list from provider (${modelOptions.length} models). You can also type any model id.`
               : modelSource === 'fallback'
                 ? `Showing curated fallback list (${modelOptions.length} models). Type any model id, or click Fetch with a valid API key.`
                 : `Default: ${selectedProvider?.defaultModel}. Type any model id, or click Fetch to query the provider with your API key.`}

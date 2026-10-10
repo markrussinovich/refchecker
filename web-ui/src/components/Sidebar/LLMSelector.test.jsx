@@ -47,4 +47,24 @@ describe('LLMSelector', () => {
     expect(screen.queryByText('No LLM configured')).toBeNull()
     expect(screen.getByText('claude-sonnet-4-6')).toBeTruthy()
   })
+
+  it('treats a connected ChatGPT OAuth config as selectable without a browser key', () => {
+    useConfigStore.setState({
+      configs: [{
+        id: 43,
+        provider: 'chatgpt',
+        model: 'gpt-6.1-sol',
+        has_key: true,
+        oauth_connected: true,
+      }],
+      selectedConfigId: 43,
+      selectedExtractionConfigId: 43,
+      isLoading: false,
+    })
+
+    render(<LLMSelector mode="extraction" />)
+
+    expect(screen.queryByText('No LLM configured')).toBeNull()
+    expect(screen.getByText('gpt-6.1-sol')).toBeTruthy()
+  })
 })

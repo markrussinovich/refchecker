@@ -43,6 +43,12 @@ class _OpenAIUsage:
         self.completion_tokens = completion_tokens
 
 
+class _ResponsesUsage:
+    def __init__(self, input_tokens, output_tokens):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
 class _FakeOpenAIResponse:
     def __init__(self, text, prompt_tokens, completion_tokens):
         self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
@@ -116,6 +122,16 @@ def test_snapshot_unknown_check_is_empty_not_error():
     assert snap == {
         "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
         "calls": 0, "by_flow": {}, "by_model": {},
+    }
+
+
+def test_openai_usage_accepts_responses_api_token_fields():
+    from backend.usage_tracker import extract_openai_usage
+
+    response = type("Response", (), {"usage": _ResponsesUsage(321, 45)})()
+    assert extract_openai_usage(response) == {
+        "input_tokens": 321,
+        "output_tokens": 45,
     }
 
 

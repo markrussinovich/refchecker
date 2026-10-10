@@ -10,7 +10,7 @@ The Web UI provides a real-time interface for checking references in single pape
 
 - If an extraction LLM provider is configured, RefChecker uses it for higher-quality extraction from PDFs and unusual bibliography formats.
 - If no extraction LLM is configured, PDF extraction can fall back to GROBID.
-- Hallucination checks use a separate hallucination LLM selection when one is configured. The hallucination provider must be web-search capable: OpenAI, Anthropic, Google, or Azure.
+- Hallucination checks use a separate hallucination LLM selection when one is configured. The hallucination provider must be web-search capable: OpenAI, ChatGPT, Anthropic, Google, or Azure.
 - Local vLLM can be selected for extraction, but it is not offered for hallucination checks because local models cannot perform live web search.
 
 GROBID details:
@@ -121,7 +121,7 @@ When a local database is present, the Web UI uses it first and falls back to the
 
 ### Environment Variables
 
-LLM providers are optional for extraction but required for deep hallucination checks. The UI stores an extraction selection and a hallucination selection separately in the browser. Extraction may use OpenAI, Anthropic, Google, Azure, or vLLM. Hallucination checks only use OpenAI, Anthropic, Google, or Azure.
+LLM providers are optional for extraction but required for deep hallucination checks. The UI stores an extraction selection and a hallucination selection separately in the browser. Extraction may use OpenAI, ChatGPT, Anthropic, Google, Azure, or vLLM. Hallucination checks only use OpenAI, ChatGPT, Anthropic, Google, or Azure. In a local single-user installation, choose **ChatGPT account** and then **Continue with ChatGPT** to use an eligible ChatGPT plan without supplying an API key.
 
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
@@ -275,6 +275,6 @@ web-ui/
 
 ### Hallucination checks are missing
 
-- configure a hallucination-capable provider in Settings: OpenAI, Anthropic, Google, or Azure
+- configure a hallucination-capable provider in Settings: OpenAI, ChatGPT, Anthropic, Google, or Azure
 - make sure the selected hallucination configuration has an API key in the current mode
 - extraction can succeed through GROBID or vLLM without enabling deep hallucination verification

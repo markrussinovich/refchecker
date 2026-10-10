@@ -136,3 +136,14 @@ def test_unsupported_scheme_is_rejected(api_env, source_value):
         _start(api_main, owner, source_value)
     assert exc.value.status_code == 400
     assert "HTTP(S)" in str(exc.value.detail)
+
+
+def test_paper_title_is_rejected_with_clear_message(api_env):
+    api_main, db = api_env
+    owner = _run(_create_user(api_main, db, "gate-title"))
+
+    with pytest.raises(HTTPException) as exc:
+        _start(api_main, owner, "A Survey of Large Language Models")
+
+    assert exc.value.status_code == 400
+    assert "paper-title search is not supported" in str(exc.value.detail)
