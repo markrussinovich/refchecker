@@ -83,6 +83,30 @@ npm run dev
 - Optional local/offline databases via `semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`, and `acl_anthology.db`
 - Theme support and hosted multi-user mode
 - Separate extraction and hallucination LLM selectors with per-config API keys
+- Checked-paper author cards below the paper title, including when opening a
+  paper from a batch or history. Authors are resolved from an indexed work by
+  DOI/arXiv identifier or an unambiguous normalized title match and persisted
+  with the check. Hover over a name for the same cards used for cited
+  authors: affiliations, publication/citation counts, h-index, i10-index, and
+  profile links when available. Google Scholar links are name searches, not
+  verified Google Scholar profiles; metrics come from Semantic Scholar or
+  OpenAlex, not Google Scholar. Unknown/unindexed papers show an explicit
+  unavailable state instead of guessed authors. This display-only enrichment
+  does not change bulk, CLI, or WebUI reference verdicts.
+  Cards stay open only while the pointer is over the name or the card; they
+  cannot be pinned. Clicking a linked author name opens its profile page.
+  The link's hover hint disappears while the author card is visible.
+  For arXiv inputs, arXiv metadata supplies the author list if Semantic Scholar
+  is unavailable or has not indexed the paper yet; author profiles are
+  resolved using each author's name and the paper title.
+
+The owned-check endpoint `GET /api/check/{check_id}/authors` returns the paper's
+resolved author metadata and preloaded profiles. Profiles are fetched when the
+paper's author list loads, with at most three simultaneous author lookups,
+through the same profile APIs used for cited authors. The full card data is
+persisted with the check and reused for six hours, including after a backend
+restart; older cached author lists are upgraded automatically. Missing profiles
+are cached too, so hover does not repeatedly query an unavailable author.
 
 ## Input Modes
 

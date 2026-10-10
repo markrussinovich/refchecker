@@ -11,6 +11,7 @@ import { VerticalZoomControls, FindBar } from '../common/ViewerControls'
 import Button from '../common/Button'
 import ShareModal from '../Modals/ShareModal'
 import DocumentViewer from './DocumentViewer'
+import PaperAuthors from './PaperAuthors'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
@@ -1408,6 +1409,9 @@ export default function StatusSection() {
               </button>
             )}
           </div>
+          {isViewingCheck && ['completed', 'cancelled'].includes(displayStatus) && (
+            <PaperAuthors key={selectedCheckId} checkId={selectedCheckId} />
+          )}
           {/* Hide source info for pasted text since it shows the file path or text content */}
           {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 

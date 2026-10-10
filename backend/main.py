@@ -9287,11 +9287,97 @@ class _AuthorProfileRequest(BaseModel):
     openalex_id: Optional[str] = None    # OpenAlex author id (A…) — fallback for non-S2 authors
 
 
+@app.get("/api/check/{check_id}/authors")
+async def paper_authors(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Resolve and persist the checked paper's authors for the header cards.
+
+    This is display-only enrichment, including for individual papers in a
+    batch. Reference checking and its results are unchanged across paths.
+    """
+    check = await _get_owned_check_or_404(check_id, current_user)
+    metadata = check.get("paper_metadata")
+    import time as _time
+    if (metadata and metadata.get("available")
+            and 0 <= _time.time() - metadata.get("profiles_fetched_at", 0) < _AUTHOR_PROFILE_TTL):
+        return metadata
+    from refchecker.utils.paper_metadata import resolve_paper_authors
+
+    identity = infer_paper_identity(
+        check.get("paper_source"),
+        paper_title=check.get("paper_title"),
+        source_type=check.get("source_type"),
+    )
+    identifier_type = check.get("paper_identifier_type") or identity.get("paper_identifier_type")
+    identifier = check.get("paper_identifier_value") or identity.get("paper_identifier_value")
+    try:
+        if not metadata or not metadata.get("available"):
+            metadata = await asyncio.to_thread(
+                resolve_paper_authors,
+                check.get("paper_title") or "",
+                doi=identifier if identifier_type == "doi" else None,
+                arxiv_id=identifier if identifier_type == "arxiv" else None,
+                cache_dir=await _get_configured_cache_dir(),
+                semantic_scholar_api_key=await _resolve_semantic_scholar_api_key(None),
+            )
+        if metadata.get("available"):
+            metadata = await _preload_paper_author_profiles(metadata, current_user)
+            if not await db.update_check_paper_metadata(check_id, metadata):
+                raise HTTPException(status_code=404, detail="Check no longer exists.")
+        return metadata
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Paper author lookup failed for check %s: %s", check_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Unable to look up this paper's authors. Please retry.")
+
+
 # Module-level TTL cache for S2 author profiles — the hover tooltip can fire
 # many times for the same author across a bibliography; this keeps us well
 # under S2's per-IP rate limit. {author_id: (fetched_monotonic, payload)}
 _AUTHOR_PROFILE_CACHE: dict = {}
 _AUTHOR_PROFILE_TTL = 6 * 60 * 60  # 6 hours
+
+
+async def _preload_paper_author_profiles(metadata: dict, current_user: UserInfo) -> dict:
+    """Hydrate cards before hover, using the same profile APIs as cited authors."""
+    import time as _time
+    semaphore = asyncio.Semaphore(3)
+
+    async def hydrate(author):
+        entry = dict(author)
+        async with semaphore:
+            has_id = entry.get("s2_author_id") or entry.get("openalex_id")
+            profile = await author_profile(
+                _AuthorProfileRequest(
+                    author_id=entry.get("s2_author_id"), openalex_id=entry.get("openalex_id"),
+                ),
+                current_user,
+            ) if has_id else {"available": False}
+            # The name+paper lookup is also how S2-only cards obtain ORCID.
+            if not entry.get("orcid") and not profile.get("orcid") and metadata.get("title"):
+                found = await author_find(
+                    _AuthorFindRequest(
+                        name=entry["name"], title=metadata["title"], year=metadata.get("year"),
+                    ),
+                    current_user,
+                )
+                if found.get("available"):
+                    for field in ("openalex_id", "orcid"):
+                        if found.get(field) and not entry.get(field):
+                            entry[field] = found[field]
+                    profile = _merge_author_profiles(
+                        profile if profile.get("available") else None, found,
+                    )
+            if profile.get("orcid") and not entry.get("orcid"):
+                entry["orcid"] = profile["orcid"]
+            if not profile.get("available"):
+                logger.info("No author profile available while preloading %s", entry.get("name"))
+            entry["profile"] = profile
+            entry["profile_lookup_complete"] = True
+        return entry
+
+    authors = await asyncio.gather(*(hydrate(author) for author in metadata.get("authors", [])))
+    return {**metadata, "authors": authors, "profiles_fetched_at": _time.time()}
 
 
 async def _noop_none() -> None:

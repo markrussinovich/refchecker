@@ -279,7 +279,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(screen.getByRole('button', { name: /show less/i })).toBeTruthy()
   })
 
-  it('R11: clicking the name pins the popover; ×, Escape, and outside-click close it; shows >3 papers', async () => {
+  it('hover cards close with ×, Escape, or outside-click and show all recent papers', async () => {
     vi.useRealTimers()
     mockFetchAuthorProfile.mockResolvedValue({
       data: {
@@ -297,7 +297,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     })
     const reference = {
       status: 'verified',
-      title: 'Pinnable author paper',
+      title: 'Hover author paper',
       authors: ['Jane Smith'],
       year: 2021,
       enrichment: { authors: [{ name: 'Jane Smith', s2_author_id: '99', orcid: '0000-0002-1825-0097' }] },
@@ -305,30 +305,27 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     }
     render(<ReferenceCard reference={reference} index={0} />)
 
-    // Click the name → pins open (a dialog role appears, off-hover).
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     expect(dialog).toBeTruthy()
 
-    // Pinned panel shows the FULL recent-papers list (>3), not the 3-cap.
+    // All recent papers remain available without pinning.
     await waitFor(() => expect(within(dialog).getByText('Paper Four')).toBeTruthy())
     expect(within(dialog).getByText('Paper Five')).toBeTruthy()
 
     // Escape closes it.
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
-    // Re-pin, then close via the × control.
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog2 = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog2 = await screen.findByRole('tooltip')
     fireEvent.click(within(dialog2).getByRole('button', { name: /close author card/i }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
-    // Re-pin, then close via outside-click (mousedown on the body).
-    fireEvent.click(screen.getByText('Jane Smith'))
-    await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    await screen.findByRole('tooltip')
     fireEvent.mouseDown(document.body)
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
   })
 
   it('resolves an ID-less author automatically on open — no click required', async () => {
@@ -456,8 +453,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
 
     await waitFor(() => expect(within(dialog).getByText('0000-0003-1111-2222')).toBeTruthy())
     const orcidLink = within(dialog).getAllByRole('link')
@@ -482,8 +479,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getByText('0000-0001-2345-6789')).toBeTruthy())
     expect(mockFindAuthorProfile).not.toHaveBeenCalled()
   })
@@ -503,8 +500,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
 
     // The visible ORCID NUMBER renders (R53)...
     await waitFor(() => expect(within(dialog).getByText('0000-0001-2345-6789')).toBeTruthy())
@@ -525,10 +522,10 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(mockFetchAuthorProfile).toHaveBeenCalled())
-    // No orcid.org link anywhere in the pinned panel.
+    // No orcid.org link anywhere in the hover card.
     const orcidLink = within(dialog).queryAllByRole('link').find(a => (a.getAttribute('href') || '').includes('orcid.org'))
     expect(orcidLink).toBeUndefined()
   })
@@ -554,8 +551,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Ada Index'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Ada Index'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getAllByText('300').length).toBeGreaterThan(0))
     expect(within(dialog).getAllByText('137').length).toBeGreaterThan(0)
     // Both surfaces render it: the inline header line AND the metric chip row.
@@ -579,8 +576,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Bob Noindex'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Bob Noindex'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getAllByText('9').length).toBeGreaterThan(0))
     expect(within(dialog).queryAllByText(/i10/i).length).toBe(0)
   })
@@ -732,7 +729,7 @@ describe('ReferenceCard — author card sizing', () => {
     expect(tooltip.style.height).toBe(before.h)
   })
 
-  it('holds each recent paper to one line in the hover card, in full when pinned', async () => {
+  it('holds each recent paper to one line with the full title in its tooltip', async () => {
     vi.useRealTimers()
     const longTitle = 'A Very Long Paper Title That Would Otherwise Wrap Across Several Lines And Overflow The Card'
     mockFetchAuthorProfile.mockResolvedValue({
@@ -762,10 +759,7 @@ describe('ReferenceCard — author card sizing', () => {
     // The year is never sacrificed to the truncation.
     expect(within(tooltip).getByText(/2021/)).toBeTruthy()
 
-    // Pinning is a deliberate request for the whole record: no clipping there.
-    fireEvent.click(within(tooltip).getByRole('button', { name: /pin author card open/i }))
-    const panel = await screen.findByRole('dialog')
-    expect(within(panel).getByText(new RegExp(longTitle)).className).not.toMatch(/\btruncate\b/)
+    expect(within(tooltip).queryByRole('button', { name: /pin author card open/i })).toBeNull()
   })
 
   it('gives two different authors the same width', async () => {

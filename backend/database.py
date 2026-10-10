@@ -685,6 +685,8 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN source_type TEXT DEFAULT 'url'")
         if "custom_label" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN custom_label TEXT")
+        if "paper_metadata_json" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN paper_metadata_json TEXT")
         if "suggestions_count" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN suggestions_count INTEGER DEFAULT 0")
         if "refs_with_errors" not in columns:
@@ -1177,6 +1179,8 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
+                    if result.get('paper_metadata_json'):
+                        result['paper_metadata'] = json.loads(result['paper_metadata_json'])
                     # Parse JSON results
                     if result['results_json']:
                         result['results'] = json.loads(result['results_json'])
@@ -1237,6 +1241,17 @@ class Database:
             )
             await db.commit()
             return True
+
+    async def update_check_paper_metadata(self, check_id: int, metadata: Dict[str, Any]) -> bool:
+        """Persist resolved paper authors separately from reference results."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "UPDATE check_history SET paper_metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata), check_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def create_pending_check(self,
                                     paper_title: str,

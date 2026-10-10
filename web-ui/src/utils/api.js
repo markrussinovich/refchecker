@@ -49,6 +49,8 @@ export const setAuthToken = (_token) => {}
 // 8 s for auth bootstrap.
 export const health = () => api.get('/health', { timeout: 5000 })
 
+export const getPaperAuthors = (checkId) => api.get(`/check/${checkId}/authors`)
+
 // -----------------------------------------------------------------------
 // Auth endpoints
 // -----------------------------------------------------------------------

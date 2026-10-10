@@ -25,6 +25,10 @@ vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
+vi.mock('./PaperAuthors', () => ({
+  default: ({ checkId }) => <div data-testid="paper-authors">Authors for check {checkId}</div>,
+}))
+
 vi.mock('../../stores/useCheckStore', () => {
   const state = {
     status: 'idle',
@@ -93,6 +97,12 @@ describe('StatusSection hallucination model display', () => {
 
     const retriedImage = screen.getByAltText('Paper thumbnail')
     expect(retriedImage.getAttribute('src')).toBe('/api/thumbnail/42?phase=completed')
+    expect(screen.getByTestId('paper-authors')).toHaveTextContent('Authors for check 42')
+  })
+
+  it('waits for completion before looking up paper authors', () => {
+    render(<StatusSection />)
+    expect(screen.queryByTestId('paper-authors')).not.toBeInTheDocument()
   })
 })
 

@@ -1410,7 +1410,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 // layout engine (e.g. jsdom in unit tests, where scrollHeight is always 0).
 const AUTHORS_FALLBACK_CAP = 10
 
-function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
+export function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   const citedList = normalizeAuthors(authors)
   // Hooks MUST run before any early return (rules-of-hooks). If a reference's
   // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
@@ -1528,6 +1528,8 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   })()
 
   const lookupEnrichment = (display) => {
+    const exact = (enrichedAuthors || []).find(a => a?.name?.trim() === display.trim())
+    if (exact) return exact
     const lower = norm(display)
     if (!lower) return null
     if (enrichmentByKey.has(lower)) return enrichmentByKey.get(lower)
@@ -1753,15 +1755,11 @@ const HOVER_CARD_W = 360
 // Typical loaded height, used only to decide which way to open. It doesn't
 // constrain the card — it just beats guessing at a minimum.
 const HOVER_CARD_TYPICAL_H = 260
-const PINNED_CARD_W = 460
 
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, paperYear }) {
   const [open, setOpen] = useState(false)
-  // R11: pinned keeps the popover open off-hover until explicitly dismissed
-  // (×, outside-click, or Escape) and switches it to the larger, fully-scrollable
-  // panel that shows the COMPLETE recent-papers list (no slice(0,3) cap).
-  const [pinned, setPinned] = useState(false)
-  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
+  const [profile, setProfile] = useState(() => e?.profile
+    || _authorProfileCache.get(`${e?.s2_author_id || ''}|${e?.openalex_id || ''}`) || null)
   // R10 (A3): an author with NO id (no s2_author_id / openalex_id) can't load a
   // profile. The "Find profile" action resolves one on demand from the bare
   // name + the citing paper's title/year — and only when the backend confirms
@@ -1845,31 +1843,21 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
     prefetchTimer.current = setTimeout(() => { loadProfile() }, 100)
     enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
-  // Moving the pointer off BOTH the author name and the popover always
-  // dismisses it — including when it was clicked open ("pinned"). The card is
-  // still fully interactive while the pointer is on it (the popover's own
-  // onMouseEnter cancels this pending close), but it must never be left
-  // stranded on screen after the pointer has moved away.
+  // Allow crossing the gap from the author link to the interactive hover card.
   const scheduleClose = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
     if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
     // 180ms is enough to cross the small gap between the name and the popover.
-    leaveTimer.current = setTimeout(() => { setPinned(false); setOpen(false) }, 180)
+    leaveTimer.current = setTimeout(() => { setOpen(false) }, 180)
   }
   const onLeave = scheduleClose
-  // R11: pin the popover open (stays open off-hover). Clears any pending
-  // hover-leave close, opens immediately, and loads the rich profile.
-  const pin = () => {
-    if (!e) return
+  const closeCard = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
     if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
-    setOpen(true)
-    setPinned(true)
-    loadProfile()
+    setOpen(false)
   }
-  const closePinned = () => { setPinned(false); setOpen(false) }
 
   // Safety net: a `mouseleave` can be missed entirely (pointer moved very fast,
   // the anchor re-rendered/scrolled out from under the cursor, the window lost
@@ -1895,23 +1883,22 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Dismiss on outside-click (mousedown) or Escape while pinned — mirrors
-  // the export-menu outside-click pattern elsewhere in this file.
+  // Dismiss the hover card on outside-click or Escape too.
   useEffect(() => {
-    if (!pinned) return undefined
+    if (!open) return undefined
     const onDown = (ev) => {
       const inAnchor = wrapperRef.current && wrapperRef.current.contains(ev.target)
       const inPop = popoverRef.current && popoverRef.current.contains(ev.target)
-      if (!inAnchor && !inPop) closePinned()
+      if (!inAnchor && !inPop) closeCard()
     }
-    const onKey = (ev) => { if (ev.key === 'Escape') closePinned() }
+    const onKey = (ev) => { if (ev.key === 'Escape') closeCard() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [pinned])
+  }, [open])
 
   useEffect(() => () => {
     if (enterTimer.current) clearTimeout(enterTimer.current)
@@ -1949,8 +1936,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       const avail = openUp ? spaceAbove : spaceBelow
       const maxH = Math.max(MIN_H, Math.min(cap70, avail))
       // Clamp left so a popover anchored near the right edge doesn't run off
-      // the viewport (the panel is at its widest when pinned).
-      const left = Math.max(MARGIN, Math.min(rect.left, vw - PINNED_CARD_W - MARGIN))
+      // the viewport.
+      const left = Math.max(MARGIN, Math.min(rect.left, vw - HOVER_CARD_W - MARGIN))
       setPlacement({
         dir: openUp ? 'up' : 'down',
         maxHeight: `${maxH}px`,
@@ -1998,6 +1985,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   // (including misses) are cached per name+title, so re-hovering is free.
   useEffect(() => {
     if (!open || !e || !paperTitle) return
+    if (e.profile_lookup_complete) return
     if (resolvedOrcid) return
     if (!idLess && !profile) return
     runFindProfile()
@@ -2022,18 +2010,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={(ev) => {
-            // R11: a plain left-click on an enriched name pins the popover open
-            // instead of navigating; modifier-clicks (open-in-new-tab etc.)
-            // still follow the profile link.
-            if (e && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
-              ev.preventDefault()
-              pin()
-              return
-            }
-            onClickHref(ev)
-          }}
-          title={!e ? tooltipFallback : 'Click to pin this author card open'}
+          onClick={onClickHref}
+          title={open ? undefined : (!e ? tooltipFallback : 'Hover for author details; click to open profile')}
           style={{
             color: 'var(--color-text-secondary)',
             textDecorationColor: 'var(--color-link, #3b82f6)',
@@ -2047,9 +2025,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
         </a>
       ) : (
         <span
-          title={tooltipFallback || undefined}
-          onClick={e ? pin : undefined}
-          style={e ? { cursor: 'pointer' } : undefined}
+          title={open ? undefined : (tooltipFallback || undefined)}
+          style={e ? { cursor: 'help' } : undefined}
         >
           {name}
         </span>
@@ -2086,8 +2063,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
         return createPortal((
         <div
           ref={popoverRef}
-          role={pinned ? 'dialog' : 'tooltip'}
-          aria-label={pinned ? `${dispName} — author details` : undefined}
+          role="tooltip"
           className="rounded-xl text-xs"
           style={{
             // Rendered via a portal into document.body with viewport-fixed
@@ -2103,12 +2079,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             // author, and so nothing re-flows sideways as data lands. Height
             // follows the content: reserving room for the tallest possible
             // layout left a dead gap under every card without a recent-work
-            // list. R11: the pinned panel is wider.
-            width: pinned ? PINNED_CARD_W : HOVER_CARD_W,
+            // list.
+            width: HOVER_CARD_W,
             // Caps to the ACTUAL space available (min(70vh, space−margin))
             // so the body is never clipped below the viewport; the inner body
             // scrolls whatever doesn't fit.
-            maxHeight: pinned ? '80vh' : placement.maxHeight,
+            maxHeight: placement.maxHeight,
             // Column layout so the footer can sit at the bottom edge rather
             // than floating mid-card above the reserved space.
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -2125,8 +2101,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
               and so a fixed-height card with sparse content leaves its blank
               space at the bottom rather than between sections. */}
           <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain' }}>
-          {/* Header: avatar + name + affiliation. Pin (⤢) / close (×) controls
-              sit top-right so the popover can be promoted to a persistent panel. */}
+          {/* Header: avatar + name + affiliation. */}
           <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
             <span className="flex-shrink-0 inline-flex items-center justify-center rounded-full"
               style={{ width: 36, height: 36, background: avatarBg, color: '#fff', fontWeight: 700, fontSize: 13 }}>
@@ -2135,21 +2110,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
                 <div style={{ fontWeight: 600, lineHeight: 1.25, flex: 1, minWidth: 0 }}>{dispName}</div>
-                {pinned ? (
-                  <button type="button" onClick={closePinned} aria-label="Close author card"
+                  <button type="button" onClick={closeCard} aria-label="Close author card"
                     title="Close"
                     className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors rounded"
                     style={{ flexShrink: 0, lineHeight: 1, fontSize: 16, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
                     ×
                   </button>
-                ) : (
-                  <button type="button" onClick={pin} aria-label="Pin author card open"
-                    title="Pin open"
-                    className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors rounded"
-                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 13, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
-                    ⤢
-                  </button>
-                )}
               </div>
               {affs.length > 0 && (
                 <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
@@ -2247,30 +2213,18 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             </div>
           )}
 
-          {/* Recent papers. R11: the hover popover shows the top 3; the pinned
-              panel shows the COMPLETE list (the outer container scrolls). */}
+          {/* The complete recent-work list stays accessible in the scrollable card. */}
           {ep?.available && Array.isArray(ep.papers) && ep.papers.length > 0 && (
             <div className="px-3 pb-2.5">
               <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                Recent work{pinned && ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
+                Recent work{ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
               </div>
               <div className="space-y-1.5">
-                {(pinned ? ep.papers : ep.papers.slice(0, 3)).map((p, i) => (
-                  // One line per paper in the hover card, so three long titles
-                  // can't wrap into eleven lines and dominate the card; the
-                  // full title is on the tooltip and the pinned panel wraps
-                  // it in full. The year never truncates — it is doing as much
-                  // work as the title in placing the paper.
-                  pinned ? (
-                    <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                      {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
-                    </div>
-                  ) : (
+                {ep.papers.map((p, i) => (
                     <div key={i} className="leading-snug flex items-baseline" title={p.title} style={{ color: 'var(--color-text-secondary)' }}>
                       <span className="truncate min-w-0">{p.title}</span>
                       {p.year ? <span className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>&nbsp;· {p.year}</span> : null}
                     </div>
-                  )
                 ))}
               </div>
             </div>

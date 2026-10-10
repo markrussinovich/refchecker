@@ -50,27 +50,38 @@ describe('ReferenceCard author popover — dismissal', () => {
     fireEvent.mouseEnter(authorEl())
     const pop = await screen.findByRole('tooltip', {}, { timeout: 1500 })
     expect(pop).toBeInTheDocument()
+    expect(authorEl()).not.toHaveAttribute('title')
 
     fireEvent.mouseLeave(authorEl())
     await waitFor(
       () => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument(),
       { timeout: 1500 },
     )
+    expect(authorEl()).toHaveAttribute('title', 'Hover for author details; click to open profile')
   })
 
-  it('dismisses a CLICK-opened (pinned) popover when the pointer leaves it', async () => {
+  it('author clicks follow the profile link without pinning a card', async () => {
     render(<ReferenceCard reference={REF} index={1} />)
 
-    // A plain left-click on an enriched author pins the popover open.
-    fireEvent.click(authorEl())
-    const pinned = await screen.findByRole('dialog', {}, { timeout: 1500 })
-    expect(pinned).toBeInTheDocument()
-
-    // Moving off the popover must close it — pinning is NOT a reason to keep
-    // it on screen once the pointer has moved away.
-    fireEvent.mouseLeave(pinned)
+    const link = authorEl()
+    expect(link).toHaveAttribute('href', 'https://orcid.org/0000-0002-1825-0097')
+    expect(link).toHaveAttribute('title', 'Hover for author details; click to open profile')
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    let componentPrevented
+    document.addEventListener('click', e => {
+      componentPrevented = e.defaultPrevented
+      e.preventDefault()
+    }, { once: true })
+    fireEvent(link, event)
+    expect(componentPrevented).toBe(false)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.mouseEnter(link)
+    const card = await screen.findByRole('tooltip')
+    expect(screen.queryByRole('button', { name: /pin author card open/i })).not.toBeInTheDocument()
+    fireEvent.mouseLeave(card)
     await waitFor(
-      () => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+      () => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument(),
       { timeout: 1500 },
     )
   })
