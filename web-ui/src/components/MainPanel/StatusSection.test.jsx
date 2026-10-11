@@ -111,6 +111,23 @@ describe('StatusSection hallucination model display', () => {
 // as a second locatable span and wires the citation span's `refEntryIndex` so
 // the native viewer scrolls + flashes that entry in-document on click.
 describe('buildCitationViewerSpans in-PDF reference jump (R28)', () => {
+  it('opens an original bibliography entry with a title fallback, not an inline citation', () => {
+    const spans = buildCitationViewerSpans({
+      text: 'M. Costa and C. Fournet. Securing AI agents. 2025.',
+      refTitle: 'Securing AI agents', kind: 'ref-entry', refId: '23',
+    })
+    expect(spans).toHaveLength(2)
+    expect(spans[0].quote).toContain('C. Fournet')
+    expect(spans[1].quote).toBe('Securing AI agents')
+    expect(spans.every(span => span.kind === 'ref-entry' && span.refEntryIndex === undefined)).toBe(true)
+  })
+
+  it('does not duplicate a title-only bibliography target from a legacy check', () => {
+    expect(buildCitationViewerSpans({
+      text: 'Securing AI agents', refTitle: 'Securing AI agents', kind: 'ref-entry',
+    })).toHaveLength(1)
+  })
+
   it('appends the reference-list entry span and wires refEntryIndex', () => {
     const spans = buildCitationViewerSpans({
       text: 'The method outperforms the baseline by a wide margin [4].',

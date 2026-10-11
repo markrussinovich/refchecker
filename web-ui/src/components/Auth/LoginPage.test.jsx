@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LoginPage from './LoginPage'
 
@@ -6,14 +6,17 @@ const mocks = vi.hoisted(() => ({
   loginWithGoogle: vi.fn(),
   loginWithGithub: vi.fn(),
   loginWithMicrosoft: vi.fn(),
+  loginWithChatGPT: vi.fn(),
+  providers: ['github'],
 }))
 
 vi.mock('../../stores/useAuthStore', () => ({
   useAuthStore: () => ({
-    providers: ['github'],
+    providers: mocks.providers,
     loginWithGoogle: mocks.loginWithGoogle,
     loginWithGithub: mocks.loginWithGithub,
     loginWithMicrosoft: mocks.loginWithMicrosoft,
+    loginWithChatGPT: mocks.loginWithChatGPT,
     error: null,
   }),
 }))
@@ -21,6 +24,21 @@ vi.mock('../../stores/useAuthStore', () => ({
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.providers = ['github']
+  })
+
+  it('shows ChatGPT only when configured and redirects through its login action', () => {
+    mocks.providers = ['google', 'github', 'chatgpt']
+    render(<LoginPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    expect(mocks.loginWithChatGPT).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeDisabled()
+    expect(mocks.loginWithGoogle).not.toHaveBeenCalled()
+  })
+
+  it('does not advertise an unconfigured ChatGPT provider', () => {
+    render(<LoginPage />)
+    expect(screen.queryByRole('button', { name: 'Continue with ChatGPT' })).toBeNull()
   })
 
   it('shows the expanded hosted-mode description and GitHub repo link', () => {

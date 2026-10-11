@@ -1,7 +1,7 @@
 """
 Auth module for RefChecker multi-user web app.
 - JWT via python-jose stored as HttpOnly cookies
-- OAuth flows: Google, GitHub, Microsoft
+- OAuth flows: Google, GitHub, Microsoft, ChatGPT
 - No AUTH_ENABLED toggle - auth always required
 - Browser-provided API keys are kept client-side and sent per-request when needed
 """
@@ -9,6 +9,10 @@ import os
 import secrets
 import time
 import logging
+import base64
+import hashlib
+import hmac
+import asyncio
 from typing import Optional, Dict, Any
 from urllib.parse import urlencode
 
@@ -70,6 +74,12 @@ MS_REDIRECT_URI: str = _get_env("MS_REDIRECT_URI", "")
 MS_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 MS_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 MS_GRAPH_ME_URL = "https://graph.microsoft.com/v1.0/me"
+
+# Registered identity-only client, separate from ChatGPT plan authorization.
+CHATGPT_CLIENT_ID: str = _get_env("CHATGPT_CLIENT_ID")
+CHATGPT_CLIENT_SECRET: str = _get_env("CHATGPT_CLIENT_SECRET")
+CHATGPT_REDIRECT_URI: str = _get_env("CHATGPT_REDIRECT_URI")
+CHATGPT_STATE_COOKIE = "rc_chatgpt_state"
 
 # Redirect destination after login (default: root)
 SITE_URL: str = _get_env("SITE_URL", "/")
@@ -250,6 +260,84 @@ def get_google_auth_url(request: Request) -> str:
         "access_type": "online",
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+def get_chatgpt_auth_url(request: Request) -> str:
+    """Start identity-only OIDC with PKCE, nonce, and browser-bound state."""
+    from refchecker.llm.chatgpt_auth import AUTHORIZATION_ENDPOINT
+
+    if not is_multiuser_mode() or not CHATGPT_CLIENT_ID:
+        raise HTTPException(status_code=400, detail="ChatGPT account sign-in is not configured.")
+    state = _generate_oauth_state("chatgpt")
+    verifier = secrets.token_urlsafe(48)
+    nonce = secrets.token_urlsafe(32)
+    redirect_uri = CHATGPT_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/chatgpt"
+    _oauth_states[state].update({
+        "code_verifier": verifier, "nonce": nonce,
+        "redirect_uri": redirect_uri, "client_id": CHATGPT_CLIENT_ID,
+    })
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+    return AUTHORIZATION_ENDPOINT + "?" + urlencode({
+        "client_id": CHATGPT_CLIENT_ID, "redirect_uri": redirect_uri,
+        "response_type": "code", "scope": "openid profile email",
+        "state": state, "nonce": nonce,
+        "code_challenge": challenge, "code_challenge_method": "S256",
+    })
+
+
+async def exchange_chatgpt_code(code: str, request: Request) -> Optional[Dict[str, Any]]:
+    """Verify OpenAI identity without persisting tokens or plan credentials."""
+    from refchecker.llm.chatgpt_auth import TOKEN_ENDPOINT, _validate_id_token, ChatGPTAuthError
+    import requests
+
+    state = request.query_params.get("state", "")
+    browser_state = request.cookies.get(CHATGPT_STATE_COOKIE, "")
+    if not state or not browser_state or not hmac.compare_digest(state, browser_state):
+        logger.warning("ChatGPT login rejected: browser state did not match")
+        return None
+    attempt = _oauth_states.pop(state, None)
+    if not attempt or attempt["provider"] != "chatgpt" or time.time() - attempt["created_at"] > 600:
+        logger.warning("ChatGPT login rejected: state missing or expired")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            data = {
+                "grant_type": "authorization_code",
+                "client_id": attempt["client_id"], "code": code,
+                "redirect_uri": attempt["redirect_uri"],
+                "code_verifier": attempt["code_verifier"],
+            }
+            if CHATGPT_CLIENT_SECRET:
+                data["client_secret"] = CHATGPT_CLIENT_SECRET
+            response = await client.post(TOKEN_ENDPOINT, data=data)
+            if response.status_code != 200:
+                _log_oauth_http_failure("ChatGPT", "token exchange", response)
+                return None
+            tokens = response.json()
+        if not tokens.get("id_token"):
+            logger.warning("ChatGPT login rejected: no ID token")
+            return None
+
+        def validate():
+            with requests.Session() as session:
+                return _validate_id_token(
+                    tokens["id_token"], attempt["client_id"], attempt["nonce"],
+                    tokens.get("access_token"), session,
+                )
+
+        claims = await asyncio.to_thread(validate)
+        if not claims.get("exp") or not claims.get("email") or claims.get("email_verified") is not True:
+            logger.warning("ChatGPT login rejected: expiry or verified email missing")
+            return None
+        return {
+            "provider": "chatgpt", "provider_id": claims["sub"],
+            "email": claims["email"], "name": claims.get("name"),
+            "avatar_url": claims.get("picture"),
+        }
+    except (httpx.HTTPError, requests.RequestException, ValueError, KeyError, ChatGPTAuthError) as exc:
+        logger.warning("ChatGPT identity exchange failed (%s)", type(exc).__name__)
+        return None
 
 
 def get_github_auth_url(request: Request) -> str:
@@ -517,6 +605,8 @@ def get_available_providers() -> list[str]:
         providers.append("github")
     if MS_CLIENT_ID and MS_CLIENT_SECRET:
         providers.append("microsoft")
+    if CHATGPT_CLIENT_ID:
+        providers.append("chatgpt")
     return providers
 
 
@@ -530,6 +620,9 @@ _RELOADABLE_CREDENTIAL_KEYS = (
     "GITHUB_CLIENT_SECRET",
     "MS_CLIENT_ID",
     "MS_CLIENT_SECRET",
+    "CHATGPT_CLIENT_ID",
+    "CHATGPT_CLIENT_SECRET",
+    "CHATGPT_REDIRECT_URI",
 )
 
 
@@ -547,6 +640,7 @@ def reload_config(env_overrides: Optional[Dict[str, str]] = None) -> None:
     global GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
     global GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
     global MS_CLIENT_ID, MS_CLIENT_SECRET
+    global CHATGPT_CLIENT_ID, CHATGPT_CLIENT_SECRET, CHATGPT_REDIRECT_URI
 
     if env_overrides:
         for key, value in env_overrides.items():
@@ -559,4 +653,7 @@ def reload_config(env_overrides: Optional[Dict[str, str]] = None) -> None:
     GITHUB_CLIENT_SECRET = _get_env("GITHUB_CLIENT_SECRET")
     MS_CLIENT_ID = _get_env("MS_CLIENT_ID")
     MS_CLIENT_SECRET = _get_env("MS_CLIENT_SECRET")
+    CHATGPT_CLIENT_ID = _get_env("CHATGPT_CLIENT_ID")
+    CHATGPT_CLIENT_SECRET = _get_env("CHATGPT_CLIENT_SECRET")
+    CHATGPT_REDIRECT_URI = _get_env("CHATGPT_REDIRECT_URI")
     MULTIUSER_MODE = is_multiuser_mode()

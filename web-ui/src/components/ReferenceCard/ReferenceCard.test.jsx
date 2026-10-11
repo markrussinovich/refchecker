@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReferenceCard from './ReferenceCard'
+import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
 
 vi.mock('../../utils/formatters', async () => {
   const actual = await vi.importActual('../../utils/formatters')
@@ -30,6 +32,122 @@ vi.mock('../../utils/tauriBridge', async () => {
 })
 
 describe('ReferenceCard', () => {
+  it('warns when no context was located without claiming the reference is unused', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Missing context', status: 'verified', errors: [], warnings: [],
+      }} index={0} />)
+      const section = screen.getByRole('region', { name: 'In this paper' })
+      expect(within(section).getByText('Context warning:')).toBeInTheDocument()
+      expect(section).toHaveTextContent('This may be an uncited reference or a text-extraction limitation.')
+    } finally {
+      act(() => useHistoryStore.setState({ selectedCheckId: previousId }))
+    }
+  })
+
+  it('groups context and bibliography in a separated section above verification', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Layout test', status: 'error', matched_database: 'ArXiv',
+        errors: [{ error_type: 'author', error_details: 'Author mismatch' }],
+        warnings: [], citation_context: 'This paper cites the reference.',
+      }} index={0} />)
+      const error = screen.getByText(/Author mismatch/)
+      const context = screen.getByRole('button', { name: /Context/ })
+      const bibliography = screen.getByRole('button', { name: 'View bibliography entry in paper' })
+      const section = screen.getByRole('region', { name: 'In this paper' })
+      expect(within(section).queryByText('Context warning:')).toBeNull()
+      expect(section).toContainElement(context)
+      expect(section).toContainElement(bibliography)
+      expect(section.querySelector('.border-t')).toBeTruthy()
+      expect(context.compareDocumentPosition(bibliography) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(bibliography.compareDocumentPosition(screen.getByText('Verification')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(bibliography.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      fireEvent.click(context)
+      const excerpt = screen.getByText('This paper cites the reference.')
+      expect(excerpt.compareDocumentPosition(bibliography) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    } finally {
+      act(() => useHistoryStore.setState({ selectedCheckId: previousId }))
+    }
+  })
+
+  it('opens the paper bibliography for legacy checks that lack an original snapshot', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Securing AI agents', status: 'error', errors: [], warnings: [],
+      }} index={22} />)
+      fireEvent.click(screen.getByRole('button', { name: 'View bibliography entry in paper' }))
+      expect(useDocViewerStore.getState().citation).toMatchObject({
+        kind: 'ref-entry', text: 'Securing AI agents', refTitle: 'Securing AI agents', refId: '22',
+      })
+    } finally {
+      act(() => {
+        useHistoryStore.setState({ selectedCheckId: previousId })
+        useDocViewerStore.getState().clearCitation()
+      })
+    }
+  })
+
+  it('does not reopen the unavailable venue tooltip after leaving its hover surface', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Venue hover test', venue: 'arXiv preprint arXiv:2505.23643',
+        status: 'verified', errors: [], warnings: [],
+      }} index={0} />)
+      const venue = screen.getByText('arXiv preprint arXiv:2505.23643').parentElement
+      fireEvent.mouseEnter(venue)
+      await act(async () => { vi.advanceTimersByTime(280) })
+      const tooltip = screen.getByRole('tooltip')
+      expect(venue).not.toHaveAttribute('title')
+      fireEvent.mouseEnter(tooltip, { relatedTarget: venue })
+      act(() => { vi.advanceTimersByTime(50) })
+      fireEvent.mouseLeave(tooltip, { relatedTarget: document.body })
+      act(() => { vi.advanceTimersByTime(151) })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      expect(venue).toHaveAttribute('title')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the extracted citation separately from recovered author metadata', () => {
+    render(<ReferenceCard reference={{
+      title: 'Securing AI agents', authors: ['Manuel Costa', 'Boris Kopf'],
+      status: 'error', errors: [], warnings: [],
+      original_reference: {
+        title: 'Securing AI agents', authors: ['M. Costa', 'C. Fournet'],
+        raw_text: 'M. Costa and C. Fournet. Securing AI agents. 2025.',
+      },
+    }} index={0} />)
+    const toggle = screen.getByText('Original reference (as extracted)')
+    fireEvent.click(toggle)
+    expect(toggle.closest('details')).toHaveAttribute('open')
+    expect(screen.getByText('M. Costa and C. Fournet. Securing AI agents. 2025.')).toBeInTheDocument()
+  })
+
+  it('combines saved cross-check warnings while keeping both earlier venue strings', () => {
+    const intro = 'You cited this same title differently in an earlier check. Confirm which version is correct.'
+    render(<ReferenceCard reference={{
+      title: 'A checked paper', status: 'warning', errors: [],
+      warnings: ['CAMLIS', 'CAMLIS 2024, pages 48-62'].map(venue => ({
+        warning_type: 'cache_inconsistency',
+        warning_details: `${intro} venue — here: arXiv / previously: ${venue}`,
+      })),
+    }} index={0} />)
+    expect(screen.getAllByText('Warning:')).toHaveLength(1)
+    expect(screen.getByText(text => text.includes(intro) && text.includes('previously: CAMLIS;')
+      && text.includes('previously: CAMLIS 2024, pages 48-62'))).toBeInTheDocument()
+  })
+
   it('does not show a spinner for final unverified refs after completion', () => {
     const reference = {
       status: 'unverified',

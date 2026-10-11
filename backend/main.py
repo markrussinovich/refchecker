@@ -58,6 +58,10 @@ from .auth import (
     get_google_auth_url,
     get_github_auth_url,
     get_microsoft_auth_url,
+    get_chatgpt_auth_url,
+    exchange_chatgpt_code,
+    CHATGPT_STATE_COOKIE,
+    COOKIE_SECURE,
     exchange_google_code,
     exchange_github_code,
     exchange_microsoft_code,
@@ -1704,6 +1708,7 @@ _EXCHANGE_FNS = {
     "google": (get_google_auth_url, exchange_google_code),
     "github": (get_github_auth_url, exchange_github_code),
     "microsoft": (get_microsoft_auth_url, exchange_microsoft_code),
+    "chatgpt": (get_chatgpt_auth_url, exchange_chatgpt_code),
 }
 
 
@@ -1753,6 +1758,7 @@ async def get_auth_config(current_user: UserInfo = Depends(require_user)):
             "google": has("GOOGLE_CLIENT_ID") and has("GOOGLE_CLIENT_SECRET"),
             "github": has("GITHUB_CLIENT_ID") and has("GITHUB_CLIENT_SECRET"),
             "microsoft": has("MS_CLIENT_ID") and has("MS_CLIENT_SECRET"),
+            "chatgpt": has("CHATGPT_CLIENT_ID"),
         },
     }
 
@@ -1767,6 +1773,9 @@ class _AuthConfigRequest(BaseModel):
     github_client_secret: Optional[str] = None
     ms_client_id: Optional[str] = None
     ms_client_secret: Optional[str] = None
+    chatgpt_client_id: Optional[str] = None
+    chatgpt_client_secret: Optional[str] = None
+    chatgpt_redirect_uri: Optional[str] = None
 
 
 @app.put("/api/auth/config")
@@ -1791,14 +1800,18 @@ async def set_auth_config(payload: _AuthConfigRequest, current_user: UserInfo = 
     setk("GITHUB_CLIENT_SECRET", payload.github_client_secret)
     setk("MS_CLIENT_ID", payload.ms_client_id)
     setk("MS_CLIENT_SECRET", payload.ms_client_secret)
+    setk("CHATGPT_CLIENT_ID", payload.chatgpt_client_id)
+    setk("CHATGPT_CLIENT_SECRET", payload.chatgpt_client_secret)
+    setk("CHATGPT_REDIRECT_URI", payload.chatgpt_redirect_uri)
 
     has_provider = any([
         existing.get("GOOGLE_CLIENT_ID") and existing.get("GOOGLE_CLIENT_SECRET"),
         existing.get("GITHUB_CLIENT_ID") and existing.get("GITHUB_CLIENT_SECRET"),
         existing.get("MS_CLIENT_ID") and existing.get("MS_CLIENT_SECRET"),
+        existing.get("CHATGPT_CLIENT_ID"),
     ])
     if payload.multiuser and not has_provider:
-        raise HTTPException(status_code=400, detail="Enabling accounts needs at least one provider's client id + secret")
+        raise HTTPException(status_code=400, detail="Enabling accounts needs a configured OAuth provider (ChatGPT requires a registered Client ID).")
 
     lines = [
         "# RefChecker multi-user / OAuth config — written by Settings -> Enable accounts & Teams.",
@@ -1856,7 +1869,16 @@ async def auth_login(provider: str, request: Request):
         provider=provider,
         payload={"multiuser": is_multiuser_mode()},
     )
-    return RedirectResponse(url=url_fn(request))
+    url = url_fn(request)
+    response = RedirectResponse(url=url)
+    if provider == "chatgpt":
+        from urllib.parse import parse_qs, urlparse
+        oauth_state = parse_qs(urlparse(url).query)["state"][0]
+        response.set_cookie(
+            CHATGPT_STATE_COOKIE, oauth_state, httponly=True,
+            secure=COOKIE_SECURE, samesite="lax", max_age=600, path="/api/auth",
+        )
+    return response
 
 
 @app.get("/api/auth/callback/{provider}")
@@ -1869,6 +1891,12 @@ async def auth_callback(
 ):
     """Handle OAuth callback: exchange code, set cookie, redirect to SITE_URL."""
     site = SITE_URL or "/"
+    def login_redirect(url):
+        response = RedirectResponse(url=url)
+        if provider == "chatgpt":
+            response.delete_cookie(CHATGPT_STATE_COOKIE, path="/api/auth")
+        return response
+
     entry = _EXCHANGE_FNS.get(provider)
     if not entry:
         await _log_usage_event_safe(
@@ -1878,7 +1906,7 @@ async def auth_callback(
             status_code=404,
             reason_code="unknown_provider",
         )
-        return RedirectResponse(url=f"{site}?auth_error=unknown_provider")
+        return login_redirect(f"{site}?auth_error=unknown_provider")
 
     if error or not code or not state:
         await _log_usage_event_safe(
@@ -1888,8 +1916,10 @@ async def auth_callback(
             status_code=400,
             reason_code=error or "missing_code",
         )
-        return RedirectResponse(url=f"{site}?auth_error={error or 'missing_code'}")
-    if not _validate_oauth_state(state, provider):
+        return login_redirect(f"{site}?auth_error={error or 'missing_code'}")
+    # ChatGPT consumes its state during exchange to validate PKCE, nonce,
+    # and the browser-bound cookie. Other providers keep their existing flow.
+    if provider != "chatgpt" and not _validate_oauth_state(state, provider):
         await _log_usage_event_safe(
             "auth.login_failed",
             connection=request,
@@ -1897,7 +1927,7 @@ async def auth_callback(
             status_code=400,
             reason_code="invalid_state",
         )
-        return RedirectResponse(url=f"{site}?auth_error=invalid_state")
+        return login_redirect(f"{site}?auth_error=invalid_state")
 
     _, exchange_fn = entry
     user_data = await exchange_fn(code, request)
@@ -1909,7 +1939,7 @@ async def auth_callback(
             status_code=502,
             reason_code="exchange_failed",
         )
-        return RedirectResponse(url=f"{site}?auth_error=exchange_failed")
+        return login_redirect(f"{site}?auth_error=exchange_failed")
 
     user_id = await db.create_or_update_user(**user_data)
     await _log_usage_event_safe(
@@ -1922,7 +1952,7 @@ async def auth_callback(
         payload={"is_admin": bool((await db.get_user_by_id(user_id) or {}).get("is_admin"))},
     )
     token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
-    response = RedirectResponse(url=site)
+    response = login_redirect(site)
     set_auth_cookie(response, token)
     return response
 

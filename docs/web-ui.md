@@ -110,6 +110,51 @@ are cached too, so hover does not repeatedly query an unavailable author.
 
 ## Input Modes
 
+Reference cards include **Original reference (as extracted)** for new checks,
+so expanded/verified author lists and formatted corrections do not obscure
+the citation being checked. Older saved checks without this snapshot still
+show the incorrect field on each error's **cited:** line; their full original
+citation requires opening the source paper or running the check again.
+**View bibliography entry in paper** opens the checked document and highlights
+the extracted entry, falling back to its title when source formatting differs.
+It also works for older checks without an original-citation snapshot.
+Citation **Context**, followed by **View bibliography entry in paper**, appears
+in a separate **In this paper** section with a divider above **Verification**.
+Missing context shows a **Context warning** in that section. This is a
+presentation notice, not a verification verdict: missing extracted context
+does not prove the reference was unused and does not change verdict counts.
+Use **Citation integrity** to check for uncited entries; it abstains when
+citation parsing has insufficient coverage or the scheme is unclear.
+Cross-check warnings are consolidated into one explanation while retaining
+all distinct previous metadata values, including different venue strings.
+Venue hover cards close after leaving the venue/card surface; their native
+hover hints are hidden while either a profile or unavailable-data card is open.
+OpenReview human-verification pages are not accepted as paper metadata,
+including previously cached challenge headings. When metadata lookup is
+blocked, direct-PDF checks use the downloaded PDF's title instead.
+
+### ChatGPT Account Sign-In
+
+Multi-user authentication can offer **Continue with ChatGPT** alongside Google,
+GitHub, and Microsoft. Configure it in **Settings → Accounts → Enable accounts
+& Teams**, or set `CHATGPT_CLIENT_ID`, optional `CHATGPT_CLIENT_SECRET` (if
+issued), and optional `CHATGPT_REDIRECT_URI` in the server environment. Register
+the callback `<SITE_URL>/api/auth/callback/chatgpt` with OpenAI and use HTTPS
+with `HTTPS_ONLY=true` in production.
+
+An identity-only client registered/approved by OpenAI for your deployment is
+required. OpenAI currently describes website sign-in as a selected-partner
+trial; adding this provider does not register or approve the deployment.
+See [OpenAI's sign-in quickstart](https://developers.openai.com/siwc/quickstart).
+Without a configured client ID, the login option is not advertised.
+
+This flow requests only `openid profile email`, verifies the signed ID token
+(issuer, audience, expiry, nonce, subject), binds the callback to the initiating
+browser, and creates the normal RefChecker session. A verified email is
+required for account linking. OpenAI tokens are not persisted. This login
+does **not** connect a ChatGPT subscription or authorize AI requests; the
+separate ChatGPT connection in LLM settings continues to handle plan usage.
+
 ### Single Paper
 
 - enter an ArXiv ID or URL

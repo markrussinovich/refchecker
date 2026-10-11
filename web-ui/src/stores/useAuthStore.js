@@ -100,6 +100,11 @@ export const useAuthStore = create((set, _get) => {
 
     // ------- Logout -------
 
+    loginWithChatGPT: () => {
+      logger.info('AuthStore', 'Redirecting to ChatGPT account sign-in...')
+      window.location.href = '/api/auth/login/chatgpt'
+    },
+
     logout: async () => {
       try {
         await api.authLogout()

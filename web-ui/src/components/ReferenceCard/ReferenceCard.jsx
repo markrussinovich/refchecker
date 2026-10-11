@@ -30,6 +30,7 @@ import {
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 import AdditionalInfoBar from './AdditionalInfoBar'
 import ArticleAssistant from '../MainPanel/ArticleAssistant'
+import { consolidateCacheWarnings } from '../../utils/referenceWarnings'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -274,6 +275,17 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
+  const originalReference = reference.original_reference
+  const originalText = originalReference && (
+    originalReference.raw_text || originalReference.raw ||
+    [
+      normalizeAuthors(originalReference.authors).join(', '),
+      originalReference.title,
+      displayReferenceValue(originalReference.venue),
+      displayReferenceValue(originalReference.year),
+      originalReference.cited_url || originalReference.url,
+    ].filter(Boolean).join('. ')
+  )
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
 
   // R04 FE safety net: if a ref sits in the hallucination "checking" state
@@ -331,6 +343,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // "View in document": ask the preview overlay to locate + highlight this
   // citation context on the native PDF page (same machinery as AI highlights).
   const requestCitation = useDocViewerStore(s => s.requestCitation)
+  const viewBibliographyEntry = () => {
+    const title = originalReference?.title || reference.title || ''
+    const text = originalText || title
+    if (!text) return
+    requestCitation({
+      text, label: 'Original bibliography entry', kind: 'ref-entry',
+      refId: String(reference.id ?? numberToShow), refTitle: title,
+    })
+  }
   const viewContextInDoc = (ctx, i) => {
     // Locate the WHOLE referenced sentence (with its surrounding before/after
     // when present) and colour the highlight by this reference's check status,
@@ -625,7 +646,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // is a known abbreviation of the database venue, the venue warning
   // is a false positive. Suppression runs at render time, so flipping
   // the style dropdown re-evaluates instantly.
-  const displayWarnings = baseDisplayWarnings.filter(w => {
+  const displayWarnings = consolidateCacheWarnings(baseDisplayWarnings).filter(w => {
     // Drop content-free warnings. A warning with no details, no cited/actual
     // values, and no usable type renders as a meaningless "Unknown mismatch"
     // on an otherwise cleanly-verified reference — that's the confusing badge
@@ -771,6 +792,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             )
           })()}
 
+          {originalText && (
+            <details className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <summary className="cursor-pointer">Original reference (as extracted)</summary>
+              <div className="mt-1 whitespace-pre-wrap break-words">{originalText}</div>
+            </details>
+          )}
           {/* When a non-default citation style is picked, render the
               reference once in that style and hide the duplicated
               structured rows below. With Plain text (ACM) selected
@@ -902,6 +929,206 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {(reference.citation_contexts?.length > 0 || reference.citation_context ||
+            (selectedCheckId > 0 && (originalText || reference.title))) && (
+            <section aria-label="In this paper">
+              <div className="my-3 flex items-center gap-3">
+                <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                  In this paper
+                </span>
+                <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
+              </div>
+
+              {!(reference.citation_contexts?.length > 0 || reference.citation_context) && (
+                <div className="mb-2 text-sm" style={{ color: 'var(--color-warning)' }}>
+                  <span className="font-bold">Context warning:</span>{' '}
+                  No citation context was located. This may be an uncited reference or a text-extraction limitation.
+                </div>
+              )}
+
+              {/* Citation context — the actual passage(s) in the paper body
+                  where this reference is cited. v0.7.67: collapsed by
+                  default behind a `▶ Context (N×)` toggle, then renders one
+                  SEPARATE box per occurrence (up to 3) with the citation
+                  marker highlighted so the user can spot misattributions at
+                  a glance. Falls back to the legacy single-string
+                  `citation_context` field when the backend hasn't populated
+                  the new array yet. */}
+              {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
+                <div className="flex mb-1" style={{ minWidth: 0 }}>
+                  <span
+                    className="flex-shrink-0"
+                    style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+                  >
+                    {/* Toggle row — header label + arrow indicator. Whole
+                        row is the click target so users can hit either the
+                        arrow OR the label. Mimics the native <details>
+                        affordance without relying on browser styling. */}
+                    <button
+                      type="button"
+                      onClick={() => setContextOpen((v) => !v)}
+                      aria-expanded={contextOpen}
+                      title={contextOpen ? 'Hide citation contexts' : 'Show citation contexts'}
+                      className="hover:opacity-70 transition-opacity"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        cursor: 'pointer',
+                        color: 'var(--color-text-secondary)',
+                        font: 'inherit',
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                    >
+                      <span style={{ display: 'inline-block', width: '0.9em' }}>
+                        {contextOpen ? '▼' : '▶'}
+                      </span>
+                      {' '}
+                      {reference.citation_count > 1
+                        ? `Context (${reference.citation_count}×)`
+                        : 'Context'}
+                    </button>
+                  </span>
+                  <div
+                    style={{
+                      flex: '1 1 auto',
+                      minWidth: 0,
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    {contextOpen && (
+                      reference.citation_contexts?.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
+                            // Split sentence at marker for inline bold
+                            // without dangerouslySetInnerHTML.
+                            const marker = ctx.marker || ''
+                            const sent = ctx.sentence || ''
+                            const markerRange = findCitationMarkerRange(sent, marker)
+                            const markerAt = markerRange ? markerRange.start : -1
+                            const markerEnd = markerRange ? markerRange.end : -1
+                            const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
+                            const head = markerRange ? sent.slice(0, markerAt) : sent
+                            const tail = markerRange ? sent.slice(markerEnd) : ''
+                            return (
+                              <div
+                                key={i}
+                                style={{
+                                  color: 'var(--color-text-primary)',
+                                  background: 'var(--color-bg-secondary)',
+                                  border: '1px solid var(--color-border, #d4d4d8)',
+                                  borderLeft: '3px solid var(--color-accent, #3b82f6)',
+                                  borderRadius: 6,
+                                  padding: '8px 10px',
+                                  boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
+                                }}
+                                title="Sentence around the citation marker in the source paper"
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    marginBottom: 5,
+                                    color: 'var(--color-text-muted)',
+                                    fontSize: '0.72rem',
+                                    fontStyle: 'normal',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  <span>Excerpt {i + 1}</span>
+                                  {marker && (
+                                    <span
+                                      style={{
+                                        color: 'var(--color-accent, #3b82f6)',
+                                        background: 'var(--color-bg-tertiary)',
+                                        border: '1px solid var(--color-border, #d4d4d8)',
+                                        borderRadius: 999,
+                                        padding: '0 6px',
+                                        textTransform: 'none',
+                                        letterSpacing: 0,
+                                      }}
+                                    >
+                                      {marker}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
+                                    title="Open this passage in the document and highlight it"
+                                    className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                                    style={{
+                                      marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+                                      background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
+                                      borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
+                                      color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
+                                    }}
+                                  >
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                                    View in document
+                                  </button>
+                                </div>
+                                <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
+                                  {ctx.before && (
+                                    <span style={{ color: 'var(--color-text-muted)' }}>
+                                      {ctx.before}{' '}
+                                    </span>
+                                  )}
+                                  <span>
+                                    {head}
+                                  </span>
+                                  {markerRange && (
+                                    <span
+                                      style={{
+                                        fontStyle: 'normal',
+                                        fontWeight: 700,
+                                        color: 'var(--color-accent, #3b82f6)',
+                                      }}
+                                    >
+                                      {markerText}
+                                    </span>
+                                  )}
+                                  <span>{tail}</span>
+                                  {ctx.after && (
+                                    <span style={{ color: 'var(--color-text-muted)' }}>
+                                      {' '}{ctx.after}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <span
+                          style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
+                          title="Sentence around the citation marker in the source paper"
+                        >
+                          {reference.citation_context}
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedCheckId > 0 && (originalText || reference.title) && (
+                <div>
+                  <button
+                    onClick={viewBibliographyEntry}
+                    className="mt-2 text-xs cursor-pointer underline"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    View bibliography entry in paper
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Divider before verification results */}
           {(displayUrls.length > 0 ||
             displayErrors.length > 0 ||
@@ -926,175 +1153,6 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               <span style={{ color: 'var(--color-text)' }}>
                 {matchedDatabase}
               </span>
-            </div>
-          )}
-
-          {/* Citation context — the actual passage(s) in the paper body
-              where this reference is cited. v0.7.67: collapsed by
-              default behind a `▶ Context (N×)` toggle, then renders one
-              SEPARATE box per occurrence (up to 3) with the citation
-              marker highlighted so the user can spot misattributions at
-              a glance. Falls back to the legacy single-string
-              `citation_context` field when the backend hasn't populated
-              the new array yet. */}
-          {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
-            <div className="flex mb-1" style={{ minWidth: 0 }}>
-              <span
-                className="flex-shrink-0"
-                style={{ color: 'var(--color-text-secondary)', width: '120px' }}
-              >
-                {/* Toggle row — header label + arrow indicator. Whole
-                    row is the click target so users can hit either the
-                    arrow OR the label. Mimics the native <details>
-                    affordance without relying on browser styling. */}
-                <button
-                  type="button"
-                  onClick={() => setContextOpen((v) => !v)}
-                  aria-expanded={contextOpen}
-                  title={contextOpen ? 'Hide citation contexts' : 'Show citation contexts'}
-                  className="hover:opacity-70 transition-opacity"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    cursor: 'pointer',
-                    color: 'var(--color-text-secondary)',
-                    font: 'inherit',
-                    textAlign: 'left',
-                    width: '100%',
-                  }}
-                >
-                  <span style={{ display: 'inline-block', width: '0.9em' }}>
-                    {contextOpen ? '▼' : '▶'}
-                  </span>
-                  {' '}
-                  {reference.citation_count > 1
-                    ? `Context (${reference.citation_count}×)`
-                    : 'Context'}
-                </button>
-              </span>
-              <div
-                style={{
-                  flex: '1 1 auto',
-                  minWidth: 0,
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {contextOpen && (
-                  reference.citation_contexts?.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
-                        // Split sentence at marker for inline bold
-                        // without dangerouslySetInnerHTML.
-                        const marker = ctx.marker || ''
-                        const sent = ctx.sentence || ''
-                        const markerRange = findCitationMarkerRange(sent, marker)
-                        const markerAt = markerRange ? markerRange.start : -1
-                        const markerEnd = markerRange ? markerRange.end : -1
-                        const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
-                        const head = markerRange ? sent.slice(0, markerAt) : sent
-                        const tail = markerRange ? sent.slice(markerEnd) : ''
-                        return (
-                          <div
-                            key={i}
-                            style={{
-                              color: 'var(--color-text-primary)',
-                              background: 'var(--color-bg-secondary)',
-                              border: '1px solid var(--color-border, #d4d4d8)',
-                              borderLeft: '3px solid var(--color-accent, #3b82f6)',
-                              borderRadius: 6,
-                              padding: '8px 10px',
-                              boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
-                            }}
-                            title="Sentence around the citation marker in the source paper"
-                          >
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                marginBottom: 5,
-                                color: 'var(--color-text-muted)',
-                                fontSize: '0.72rem',
-                                fontStyle: 'normal',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em',
-                              }}
-                            >
-                              <span>Excerpt {i + 1}</span>
-                              {marker && (
-                                <span
-                                  style={{
-                                    color: 'var(--color-accent, #3b82f6)',
-                                    background: 'var(--color-bg-tertiary)',
-                                    border: '1px solid var(--color-border, #d4d4d8)',
-                                    borderRadius: 999,
-                                    padding: '0 6px',
-                                    textTransform: 'none',
-                                    letterSpacing: 0,
-                                  }}
-                                >
-                                  {marker}
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
-                                title="Open this passage in the document and highlight it"
-                                className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                                style={{
-                                  marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
-                                  borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
-                                  color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
-                                }}
-                              >
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
-                                View in document
-                              </button>
-                            </div>
-                            <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
-                              {ctx.before && (
-                                <span style={{ color: 'var(--color-text-muted)' }}>
-                                  {ctx.before}{' '}
-                                </span>
-                              )}
-                              <span>
-                                {head}
-                              </span>
-                              {markerRange && (
-                                <span
-                                  style={{
-                                    fontStyle: 'normal',
-                                    fontWeight: 700,
-                                    color: 'var(--color-accent, #3b82f6)',
-                                  }}
-                                >
-                                  {markerText}
-                                </span>
-                              )}
-                              <span>{tail}</span>
-                              {ctx.after && (
-                                <span style={{ color: 'var(--color-text-muted)' }}>
-                                  {' '}{ctx.after}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <span
-                      style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
-                      title="Sentence around the citation marker in the source paper"
-                    >
-                      {reference.citation_context}
-                    </span>
-                  )
-                )}
-              </div>
             </div>
           )}
 
@@ -1365,6 +1423,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               </div>
             </div>
           ))}
+
+
         </div>
       </div>
     </div>
@@ -1383,6 +1443,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.status === next.status &&
     prev.title === next.title &&
     prev.authors === next.authors &&
+    prev.original_reference === next.original_reference &&
     prev.year === next.year &&
     prev.venue === next.venue &&
     prev.hallucination_check_pending === next.hallucination_check_pending &&
@@ -2310,11 +2371,22 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
   }
   const vpOnEnter = () => {
     if (vpLeave.current) { clearTimeout(vpLeave.current); vpLeave.current = null }
-    vpEnter.current = setTimeout(() => { setVpOpen(true); loadVenue() }, 280)
+    if (vpEnter.current) clearTimeout(vpEnter.current)
+    if (!vpOpen) {
+      vpEnter.current = setTimeout(() => {
+        vpEnter.current = null
+        setVpOpen(true)
+        loadVenue()
+      }, 280)
+    }
   }
   const vpOnLeave = () => {
     if (vpEnter.current) { clearTimeout(vpEnter.current); vpEnter.current = null }
-    vpLeave.current = setTimeout(() => setVpOpen(false), 150)
+    if (vpLeave.current) clearTimeout(vpLeave.current)
+    vpLeave.current = setTimeout(() => {
+      vpLeave.current = null
+      setVpOpen(false)
+    }, 150)
   }
   useEffect(() => () => {
     if (vpEnter.current) clearTimeout(vpEnter.current)
@@ -2370,7 +2442,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
   // (OpenAlex /sources + DOAJ guidelines) is NOT being shown — otherwise two
   // banners stack on hover. Mirrors the per-author hover, which suppresses the
   // native title once its rich profile card is available.
-  const richPopoverShown = vpOpen && vp && vp.available
+  const richPopoverShown = vpOpen && vp
   const nativeTitle = richPopoverShown ? undefined : title
   const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
   const handle = (ev) => {
@@ -2407,7 +2479,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         </span>
       )}
       {vpOpen && vp && vp.available && (
-        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} className="rounded-xl text-xs"
+        <div role="tooltip" className="rounded-xl text-xs"
           style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, minWidth: 260, maxWidth: 360, maxHeight: '60vh', overflowY: 'auto', background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', boxShadow: '0 12px 40px rgba(0,0,0,0.28)', padding: '10px 12px', whiteSpace: 'normal' }}>
           <div style={{ fontWeight: 700, marginBottom: 3 }}>{vp.display_name}</div>
           {vp.publisher && <div style={{ color: 'var(--color-text-muted)' }}>Publisher: {vp.publisher}</div>}
@@ -2439,7 +2511,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         </div>
       )}
       {vpOpen && vp && vp.available === false && (
-        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave}
+        <div role="tooltip"
           style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, maxWidth: 280, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: '8px 10px', borderRadius: 10, fontSize: 11 }}>
           No additional journal metadata found for this venue.
         </div>

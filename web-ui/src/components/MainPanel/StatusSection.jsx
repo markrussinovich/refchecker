@@ -43,6 +43,17 @@ const _BAND_HL = {
 // Returns [] for no target so callers can render nothing without branching.
 function buildCitationViewerSpans(citationTarget) {
   if (!citationTarget?.text) return []
+  if (citationTarget.kind === 'ref-entry') {
+    const entry = {
+      quote: citationTarget.text, kind: 'ref-entry',
+      refId: citationTarget.refId, refTitle: citationTarget.refTitle,
+      label: citationTarget.label,
+    }
+    // Source LaTeX and extracted citation formatting may not match the PDF.
+    return citationTarget.refTitle && citationTarget.refTitle !== citationTarget.text
+      ? [entry, { ...entry, quote: citationTarget.refTitle, label: 'Bibliography entry (title match)' }]
+      : [entry]
+  }
   const hasRefTitle = !!citationTarget.refTitle
   const spans = [{
     quote: citationTarget.text,

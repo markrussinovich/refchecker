@@ -362,9 +362,26 @@ class PDFProcessor:
         
         # Split into lines and clean
         lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Review PDFs may extract the entire line-number gutter before the title.
+        lines = [line for line in lines if not re.fullmatch(r'\d{1,4}', line)]
         
         if not lines:
             return None
+
+        anonymous_index = next(
+            (i for i, line in enumerate(lines[:15]) if line.lower() == 'anonymous authors'),
+            None,
+        )
+        if anonymous_index is not None:
+            title_lines = [
+                line for line in lines[:anonymous_index]
+                if not re.match(r'^(?:under review|published|accepted)\s+(?:as|at|in)\b', line, re.IGNORECASE)
+            ]
+            if title_lines and all(line.isupper() for line in title_lines):
+                title = re.sub(r'(?<=[A-Z])-\s+(?=[A-Z])', '', ' '.join(title_lines))
+                title = re.sub(r'\s+', ' ', title).strip()
+                if 15 <= len(title) <= 350:
+                    return title
         
         # Skip common header elements (conference names, page numbers, etc.)
         header_patterns = [
