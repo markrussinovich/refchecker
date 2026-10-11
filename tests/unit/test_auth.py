@@ -35,30 +35,45 @@ def _import_auth_direct(env_overrides=None):
         else:
             os.environ[k] = v
 
-    # Stub out backend.database so auth.py's `from .database import db` works
-    stub_db = MagicMock()
-    sys.modules.setdefault("backend", MagicMock(__path__=[str(_BACKEND_DIR)]))
-    sys.modules["backend.database"] = MagicMock(db=stub_db)
-
-    # Remove any previously cached version so env changes take effect
-    sys.modules.pop("backend.auth", None)
-
-    spec = importlib.util.spec_from_file_location(
-        "backend.auth",
-        _BACKEND_DIR / "auth.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["backend.auth"] = module
-    spec.loader.exec_module(module)
-
-    # Restore env
-    for k, orig in original_env.items():
-        if orig is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = orig
+    module_names = ("backend", "backend.database", "backend.auth")
+    original_modules = {name: sys.modules.get(name) for name in module_names}
+    try:
+        # Stub dependencies only while loading this isolated module.
+        stub_db = MagicMock()
+        sys.modules.setdefault("backend", MagicMock(__path__=[str(_BACKEND_DIR)]))
+        sys.modules["backend.database"] = MagicMock(db=stub_db)
+        spec = importlib.util.spec_from_file_location(
+            "backend.auth",
+            _BACKEND_DIR / "auth.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["backend.auth"] = module
+        spec.loader.exec_module(module)
+    finally:
+        for name, original in original_modules.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+        for k, orig in original_env.items():
+            if orig is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = orig
 
     return module
+
+
+def test_isolated_auth_import_preserves_backend_modules():
+    import backend.database
+
+    original_modules = {
+        name: sys.modules.get(name)
+        for name in ("backend", "backend.database", "backend.auth")
+    }
+    _import_auth_direct({"JWT_SECRET_KEY": "test-isolated-import"})
+    for name, original in original_modules.items():
+        assert sys.modules.get(name) is original
 
 
 # ---------------------------------------------------------------------------
@@ -313,4 +328,3 @@ class TestOAuthLogging:
         assert "scope" in caplog.text
         assert "refresh-secret" not in caplog.text
         assert "id-secret" not in caplog.text
-
