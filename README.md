@@ -298,6 +298,20 @@ pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 
 The Web UI provides real-time progress, check history, batch tracking, and one-click export of corrections.
 
+The Summary **Export** menu offers the original bibliography, the full corrected
+bibliography, **corrections only** (entries with verified changes), and a
+side-by-side diff. Corrections use verifier-supplied fields even when no complete
+corrected citation was stored; unresolved findings remain visible in diff reports.
+Corrections-only files contain corrected citations, not verification reports or
+error details, and omit unchanged entries and ordinary metadata enrichment.
+Author names prefer OpenAlex profile links when available. Google Scholar remains
+a secondary card link: a known profile when metadata provides one, otherwise a
+name search. Card statistics come from OpenAlex/Semantic Scholar, not Google Scholar.
+For PDFs, checked-paper authors are extracted from a recognizable title-page
+byline before consulting scholarly indexes, so unindexed papers can show author
+cards too. Affiliations, anonymous bylines, and ambiguous layouts are not treated
+as author names; unavailable scholarly profiles do not fabricate statistics.
+
 LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination checks use a separate hallucination LLM selection when one is configured; otherwise the UI falls back to the selected extraction LLM only if that provider supports web search. Local vLLM can be used for extraction, but hallucination checks require OpenAI, ChatGPT, Anthropic, Google, or Azure.
 
 ```bash

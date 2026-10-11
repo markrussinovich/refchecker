@@ -80,6 +80,7 @@ function buildCitationViewerSpans(citationTarget) {
 // Find. The inline-citation → reference-list jump (R28/R29/R30) lives in the
 // native pdf.js stack (DocumentViewer → NativePdfViewer), NOT here.
 function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, initialPageCount, onClose }) {
+  const [pageImageFailed, setPageImageFailed] = useState(false)
   // Seeded from the parent's prefetched probe when available so the overlay
   // opens directly in its final layout instead of rendering the fit-to-height
   // single image first and then jumping to the full-width multi-page column.
@@ -285,6 +286,12 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, init
 
   const multiPage = pageCount && pageCount > 1
 
+  if (pageImageFailed) {
+    return <DocumentViewer checkId={checkId} spans={(aiDetection?.spans || [])
+      .filter(span => span?.quote).map(span => ({ ...span, band: span.band || aiDetection?.band }))}
+      notice="Page images could not be loaded. Showing the document viewer instead." onClose={onClose} />
+  }
+
   return (
     <div
       className="fixed inset-0 z-50"
@@ -406,11 +413,15 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, init
           >
             {Array.from({ length: pageCount }, (_, i) => (
               <div key={i} ref={(el) => { pageRefs.current[i] = el }} data-page-index={i}
-                style={{ position: 'relative', ...imgStyle, height: 'auto', lineHeight: 0 }}>
+                style={{ position: 'relative', width: `${Math.round(zoom * 90)}vw`, height: 'auto', lineHeight: 0 }}>
                 <img
                   src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
                   alt={`Page ${i + 1} of ${pageCount}`}
                   loading="lazy"
+                  onError={() => {
+                    logger.warn('ThumbnailOverlay', 'PDF page preview failed; opening native document viewer', { checkId, pageIndex: i })
+                    setPageImageFailed(true)
+                  }}
                   style={{ display: 'block', width: '100%', height: 'auto' }}
                   className="rounded-lg shadow-2xl bg-white"
                 />
@@ -471,8 +482,11 @@ function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, aiDetection, init
               style={imgStyle}
               className="rounded-lg shadow-2xl"
               onError={(e) => {
-                if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
+                if (previewUrl && thumbnailUrl && e.target.getAttribute('src') !== thumbnailUrl) {
                   e.target.src = thumbnailUrl
+                } else {
+                  logger.warn('ThumbnailOverlay', 'Paper preview failed; opening document viewer', { checkId })
+                  setPageImageFailed(true)
                 }
               }}
             />
@@ -1649,4 +1663,4 @@ export default function StatusSection() {
 // Exported for unit tests (R28). Co-located with the component per the project's
 // existing pattern (see ExploreGraphView).
 // eslint-disable-next-line react-refresh/only-export-components
-export { buildCitationViewerSpans }
+export { buildCitationViewerSpans, ThumbnailOverlay }

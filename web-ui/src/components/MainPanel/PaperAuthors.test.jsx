@@ -33,6 +33,25 @@ beforeEach(() => {
 })
 
 describe('checked-paper author cards', () => {
+  it('prefers OpenAlex for the author name even when a Google Scholar profile is known', async () => {
+    getPaperAuthors.mockResolvedValueOnce({ data: {
+      ...metadata,
+      authors: [{
+        ...metadata.authors[0], profile_lookup_complete: true,
+        profile: { available: true, homepage: 'https://scholar.google.com/citations?user=Jane123&hl=en' },
+      }],
+    } })
+    render(<PaperAuthors checkId={47} />)
+    const name = await screen.findByRole('link', { name: 'Jane Doe' })
+    expect(name).toHaveAttribute('href', 'https://openalex.org/A98765')
+    expect(screen.queryByText(/Authors from/)).not.toBeInTheDocument()
+    fireEvent.mouseEnter(name)
+    const card = await screen.findByRole('tooltip')
+    expect(within(card).getByRole('link', { name: /Google Scholar/ })).toHaveAttribute(
+      'href', 'https://scholar.google.com/citations?user=Jane123&hl=en',
+    )
+  })
+
   it('shows the existing author card with real stats and Google Scholar link', async () => {
     render(<PaperAuthors checkId={42} />)
     expect(screen.getByRole('status')).toHaveTextContent('Preloading paper authors and profiles')
@@ -108,7 +127,7 @@ describe('checked-paper author cards', () => {
     expect(within(card).getByRole('link', { name: /Google Scholar/ })).toHaveAttribute(
       'href', `https://scholar.google.com/scholar?q=${encodeURIComponent('李明')}`,
     )
-    expect(screen.getByText(/Authors from arXiv/)).toBeInTheDocument()
+    expect(screen.queryByText(/Authors from/)).not.toBeInTheDocument()
   })
 
   it('surfaces a server error and supports retry', async () => {

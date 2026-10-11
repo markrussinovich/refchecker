@@ -148,6 +148,12 @@ class PDFProcessor:
             url = ""
             doi = ""
             arxiv_id = ""
+
+        if file_path.lower().endswith('.pdf') and not authors:
+            from refchecker.utils.paper_metadata import extract_pdf_paper_authors
+            authors = [author["name"] for author in extract_pdf_paper_authors(
+                file_path, metadata.get('title', '') if metadata else "",
+            )]
         
         return Paper(
             title=title,

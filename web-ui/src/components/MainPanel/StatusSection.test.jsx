@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import StatusSection, { buildCitationViewerSpans } from './StatusSection'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import StatusSection, { buildCitationViewerSpans, ThumbnailOverlay } from './StatusSection'
 
 const historyState = vi.hoisted(() => ({
   selectedCheckId: 42,
@@ -28,6 +28,51 @@ vi.mock('../../utils/logger', () => ({
 vi.mock('./PaperAuthors', () => ({
   default: ({ checkId }) => <div data-testid="paper-authors">Authors for check {checkId}</div>,
 }))
+
+vi.mock('./DocumentViewer', () => ({
+  default: ({ checkId, notice, spans, onClose }) => (
+    <div role="dialog" aria-label="Document fallback">
+      <span>{notice}</span><span>Check {checkId}, {spans.length} highlights</span>
+      <button onClick={onClose}>Close document</button>
+    </div>
+  ),
+}))
+
+describe('thumbnail page failures', () => {
+  beforeEach(() => {
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('switches failed raster pages to the document viewer and preserves highlights and close', () => {
+    const close = vi.fn()
+    render(<ThumbnailOverlay checkId={42} initialPageCount={2} onClose={close}
+      aiDetection={{ band: 'high', spans: [{ quote: 'A flagged passage' }] }} />)
+    const page = screen.getByAltText('Page 1 of 2')
+    expect(page.parentElement.style.width).toBe('90vw')
+    expect(page.parentElement.style.maxHeight).toBe('')
+    fireEvent.error(page)
+    expect(screen.queryByAltText('Page 2 of 2')).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Document fallback' })).toBeInTheDocument()
+    expect(screen.getByText(/Check 42, 1 highlights/)).toBeInTheDocument()
+    expect(screen.getByText(/Page images could not be loaded/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Close document'))
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('tries the thumbnail only once before falling back when both preview images fail', () => {
+    render(<ThumbnailOverlay checkId={42} initialPageCount={1} onClose={vi.fn()}
+      previewUrl="/preview.png" thumbnailUrl="/thumbnail.png" />)
+    const image = screen.getByAltText('Paper preview')
+    fireEvent.error(image)
+    expect(image).toHaveAttribute('src', '/thumbnail.png')
+    fireEvent.error(image)
+    expect(screen.getByRole('dialog', { name: 'Document fallback' })).toBeInTheDocument()
+  })
+})
 
 vi.mock('../../stores/useCheckStore', () => {
   const state = {

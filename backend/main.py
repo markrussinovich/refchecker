@@ -9341,13 +9341,16 @@ async def paper_authors(check_id: int, current_user: UserInfo = Depends(require_
     identifier = check.get("paper_identifier_value") or identity.get("paper_identifier_value")
     try:
         if not metadata or not metadata.get("available"):
+            cache_dir = await _get_configured_cache_dir()
+            pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
             metadata = await asyncio.to_thread(
                 resolve_paper_authors,
                 check.get("paper_title") or "",
                 doi=identifier if identifier_type == "doi" else None,
                 arxiv_id=identifier if identifier_type == "arxiv" else None,
-                cache_dir=await _get_configured_cache_dir(),
+                cache_dir=cache_dir,
                 semantic_scholar_api_key=await _resolve_semantic_scholar_api_key(None),
+                pdf_path=pdf_path,
             )
         if metadata.get("available"):
             metadata = await _preload_paper_author_profiles(metadata, current_user)

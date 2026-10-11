@@ -31,6 +31,7 @@ import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 import AdditionalInfoBar from './AdditionalInfoBar'
 import ArticleAssistant from '../MainPanel/ArticleAssistant'
 import { consolidateCacheWarnings } from '../../utils/referenceWarnings'
+import { googleScholarProfileUrl } from '../../utils/authorLinks'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -933,7 +934,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             (selectedCheckId > 0 && (originalText || reference.title))) && (
             <section aria-label="In this paper">
               <div className="my-3 flex items-center gap-3">
-                <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-primary)' }}>
                   In this paper
                 </span>
                 <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
@@ -1135,7 +1136,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             displayWarnings.length > 0 ||
             reference.status === 'unverified') && (
             <div className="my-3 flex items-center gap-3">
-              <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-primary)' }}>
                 Verification
               </span>
               <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
@@ -1637,10 +1638,10 @@ export function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear })
       } : undefined}>
       {list.map((name, i) => {
         const e = lookupEnrichment(name)
-        const profileHref = e?.orcid
-          ? `https://orcid.org/${e.orcid}`
-          : e?.openalex_id
-            ? `https://openalex.org/${e.openalex_id}`
+        const profileHref = e?.openalex_id
+          ? `https://openalex.org/${e.openalex_id}`
+          : e?.orcid
+            ? `https://orcid.org/${e.orcid}`
             : e?.s2_author_id
               ? `https://www.semanticscholar.org/author/${e.s2_author_id}`
               : null
@@ -2058,6 +2059,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   const resolvedOpenalexId = e?.openalex_id || (foundProfile?.available ? foundProfile.openalex_id : null) || null
   const openalexUrl = resolvedOpenalexId ? `https://openalex.org/${resolvedOpenalexId}` : null
   const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
+  const scholarProfileUrl = googleScholarProfileUrl(e, effectiveProfile, profile, foundProfile)
+  const preferredHref = openalexUrl || href
 
   return (
     <span
@@ -2066,12 +2069,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       onMouseLeave={onLeave}
       style={{ position: 'relative', display: 'inline-block' }}
     >
-      {href ? (
+      {preferredHref ? (
         <a
-          href={href}
+          href={preferredHref}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={onClickHref}
+          onClick={openalexUrl ? handleExternalClick(openalexUrl) : onClickHref}
           title={open ? undefined : (!e ? tooltipFallback : 'Hover for author details; click to open profile')}
           style={{
             color: 'var(--color-text-secondary)',
@@ -2112,13 +2115,11 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
           </span>
         )
-        const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
+        const scholarUrl = scholarProfileUrl || `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
         const profileLinks = [
           orcidUrl && { label: 'ORCID', url: orcidUrl, icon: 'orcid' },
           openalexUrl && { label: 'OpenAlex', url: openalexUrl, icon: 'openalex' },
           s2Url && { label: 'Semantic Scholar', url: s2Url, icon: 'semanticscholar' },
-          // Google Scholar has no author API — this is an honest name SEARCH
-          // (not a claimed profile), always available.
           { label: 'Google Scholar', url: scholarUrl, icon: 'googlescholar' },
         ].filter(Boolean)
         return createPortal((

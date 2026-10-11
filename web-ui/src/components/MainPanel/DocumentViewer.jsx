@@ -93,7 +93,7 @@ function mergeRanges(ranges) {
 // is opened with no focus target it opens at fit-width (1).
 const CITE_FOCUS_ZOOM = 1
 
-export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose, onJumpToReference }) {
+export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = null, onClose, onJumpToReference, notice }) {
   // Native PDF first; fall back to the extracted-text view when there's no
   // source PDF (pasted text / .bib / .tex) or pdf.js can't render it.
   const [mode, setMode] = useState('pdf') // 'pdf' | 'text'
@@ -344,6 +344,7 @@ export default function DocumentViewer({ checkId, spans = [], focusSpanIndex = n
                  background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)',
                  border: '1px solid var(--color-border)', borderRadius: 10, overflow: 'hidden',
                  boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+        {notice && <div role="status" style={{ padding: '8px 14px', fontSize: 13 }}>{notice}</div>}
         {/* Solid, themed control bar. Sticky + above the scrolling pages so the
             zoom / find / close controls never disappear over a white PDF page.
             Uses the tertiary surface (a touch darker than the secondary "desk"

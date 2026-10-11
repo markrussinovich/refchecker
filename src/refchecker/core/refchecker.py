@@ -1206,7 +1206,11 @@ class ArxivReferenceChecker:
         
         # Check if it's a URL
         is_url = file_path.startswith('http')
-        return LocalFilePaper(file_path, is_url=is_url, metadata=url_metadata)
+        paper = LocalFilePaper(file_path, is_url=is_url, metadata=url_metadata)
+        if not is_url and file_path.lower().endswith('.pdf') and os.path.isfile(file_path) and not paper.authors:
+            from refchecker.utils.paper_metadata import extract_pdf_paper_authors
+            paper.authors = [author["name"] for author in extract_pdf_paper_authors(file_path)]
+        return paper
 
     def get_api_performance_summary(self):
         """

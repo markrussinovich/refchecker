@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react'
 import { getPaperAuthors } from '../../utils/api'
 import { AuthorsLine } from '../ReferenceCard/ReferenceCard'
 
-const SOURCE_NAMES = { openalex: 'OpenAlex', semantic_scholar: 'Semantic Scholar', arxiv: 'arXiv' }
-
 export default function PaperAuthors({ checkId }) {
   const [result, setResult] = useState({ loading: true, data: null, error: null })
   const [attempt, setAttempt] = useState(0)
@@ -39,10 +37,6 @@ export default function PaperAuthors({ checkId }) {
             paperTitle={result.data.title}
             paperYear={result.data.year}
           />
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Authors from {SOURCE_NAMES[result.data.source] || result.data.source}.
-            {' '}Hover for stats and profile links, including Google Scholar; click a linked name to open its profile.
-          </span>
         </div>
       ) : (
         <span>{result.data?.reason || 'No indexed authors are available for this paper.'}</span>

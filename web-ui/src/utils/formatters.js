@@ -667,7 +667,15 @@ export function filterIssuesForStyle(issues, ref, style) {
 }
 
 
-function getCorrectedReferenceData(ref) {
+export function getCorrectedReferenceData(ref) {
+  if (ref[AS_CITED_EXPORT]) {
+    return {
+      title: ref.title, authors: ref.authors,
+      year: displayReferenceValue(ref.year), venue: displayReferenceValue(ref.venue),
+      doi: ref.doi, arxivId: ref.arxiv_id,
+      citedUrl: ref.cited_url || ref.url, url: ref.cited_url || ref.url,
+    }
+  }
   // Verifier may attach typed URLs (doi, arxiv, journal) in
   // authoritative_urls. Surface them so the URL picker can prefer DOI
   // and arxiv over Semantic Scholar paper pages.
@@ -686,8 +694,8 @@ function getCorrectedReferenceData(ref) {
     for (const i of allIssues) {
       const t = (i?.error_type || i?.warning_type || '').toLowerCase()
       if (t !== 'doi') continue
-      const v = parseErrorDetailsForMarkdown(i?.error_details || i?.warning_details)?.actual
-        || i?.actual_value || i?.ref_doi_correct
+      const v = i?.ref_doi_correct || i?.actual_value
+        || parseErrorDetailsForMarkdown(i?.error_details || i?.warning_details)?.actual
       if (v) return _normalizeDoi(v)
     }
     return null
@@ -708,26 +716,29 @@ function getCorrectedReferenceData(ref) {
   for (const issue of allIssues) {
     const errorType = (issue.error_type || issue.warning_type || '').toLowerCase()
     const parsed = parseErrorDetailsForMarkdown(issue.error_details || issue.warning_details)
-    // Prefer the parsed/explicit actual_value; fall back to the typed correction
-    // fields the backend carries for "missing" issues (year/venue/title/authors/doi),
-    // so the corrected bibtex includes exactly what the warning named.
-    const typedByType = {
+    // Typed corrections may include a complete author list even when the
+    // displayed mismatch names only one author.
+    const values = {
       title: issue.ref_title_correct,
-      author: issue.ref_authors_correct,
       authors: issue.ref_authors_correct,
       year: issue.ref_year_correct,
       venue: issue.ref_venue_correct,
       doi: issue.ref_doi_correct,
       arxiv_id: issue.ref_arxiv_id_correct,
+      url: issue.ref_url_correct,
     }
-    const actualValue = parsed?.actual || issue.actual_value || typedByType[errorType]
+    const field = errorType === 'author' ? 'authors' : errorType
+    if (field in values && !values[field]) {
+      const partialAuthor = field === 'authors' && /^Author\s+\d+/i.test(issue.error_details || issue.warning_details || '')
+      values[field] = issue.actual_value || (partialAuthor ? null : parsed?.actual)
+    }
 
-    if (actualValue) {
-      switch (errorType) {
+    for (const [field, actualValue] of Object.entries(values)) {
+      if (!actualValue || (Array.isArray(actualValue) && actualValue.length === 0)) continue
+      switch (field) {
         case 'title':
           corrected.title = actualValue
           break
-        case 'author':
         case 'authors':
           // Parse author string into array if it's a string
           if (typeof actualValue === 'string') {
@@ -753,6 +764,10 @@ function getCorrectedReferenceData(ref) {
         case 'arxiv_id':
           corrected.arxivId = String(actualValue).replace(/^arxiv:/i, '').trim()
           break
+        case 'url':
+          corrected.url = actualValue
+          corrected.citedUrl = actualValue
+          break
       }
     }
   }
@@ -771,6 +786,20 @@ function getCorrectedReferenceData(ref) {
     }
   }
   
+  const stored = ref.corrected_reference
+  if (stored && typeof stored === 'object') {
+    for (const field of ['title', 'authors', 'year', 'venue', 'doi']) {
+      const value = stored[field]
+      if (value != null && value !== '' && !(Array.isArray(value) && value.length === 0)) corrected[field] = value
+    }
+    if (stored.arxiv_id) corrected.arxivId = stored.arxiv_id
+    if (stored.journal) corrected.venue = stored.journal
+    if (stored.url || stored.verified_url) {
+      corrected.url = stored.url || stored.verified_url
+      corrected.citedUrl = corrected.url
+    }
+    if (stored.doi) corrected.doi = _normalizeDoi(stored.doi)
+  }
   corrected.year = displayReferenceValue(corrected.year)
   corrected.venue = displayReferenceValue(corrected.venue)
   return corrected
@@ -1780,34 +1809,76 @@ export function sortReferencesForExport(references, mode = 'citation') {
 // that the verifier suggested a fix for. Useful when handing the
 // list to a co-author or to a journal-side editor.
 
+// Preserve findings without letting citation formatters reapply their fixes.
+const AS_CITED_EXPORT = Symbol('as-cited-export')
+
+export function asCitedReference(ref) {
+  return { ...ref, ..._citedShellForDiff(ref), [AS_CITED_EXPORT]: true }
+}
+
 function _citedShellForDiff(ref) {
+  const cited = ref.original_reference || ref
   return {
-    title: ref.title,
-    authors: ref.authors,
-    year: ref.year,
-    venue: ref.venue,
-    doi: ref.doi,
-    arxiv_id: ref.arxiv_id,
-    cited_url: ref.cited_url,
+    title: cited.title,
+    authors: cited.authors,
+    year: cited.year,
+    venue: cited.venue || cited.journal,
+    doi: cited.doi,
+    arxiv_id: cited.arxiv_id,
+    cited_url: cited.cited_url || cited.url,
   }
 }
 
 function _correctedShellForDiff(ref) {
-  const c = ref.corrected_reference || {}
+  const c = getCorrectedReferenceData(ref)
   return {
-    title: c.title || ref.title,
-    authors: c.authors || ref.authors,
-    year: c.year || ref.year,
-    venue: c.venue || ref.venue,
-    doi: c.doi || ref.doi,
-    arxiv_id: c.arxiv_id || ref.arxiv_id,
+    ..._citedShellForDiff(ref),
+    title: c.title,
+    authors: c.authors,
+    year: c.year,
+    venue: c.venue,
+    doi: c.doi,
+    arxiv_id: c.arxivId,
+    cited_url: c.citedUrl,
   }
 }
 
-function _refHasCorrection(ref) {
-  const c = ref.corrected_reference
-  if (!c || typeof c !== 'object') return false
-  return Object.keys(c).some(k => c[k] != null && c[k] !== '')
+export function hasReferenceCorrection(ref) {
+  if (!(ref.errors || []).length && !(ref.warnings || []).length &&
+      !Object.values(ref.corrected_reference || {}).some(value =>
+        value != null && value !== '' && !(Array.isArray(value) && value.length === 0))) return false
+  const cited = _citedShellForDiff(ref)
+  const corrected = _correctedShellForDiff(ref)
+  return ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id', 'cited_url'].some(field => {
+    const value = corrected[field]
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return false
+    const normalize = v => field === 'authors'
+      ? normalizeAuthors(v).join(', ')
+      : String(v ?? '').trim()
+    return normalize(value) !== normalize(cited[field])
+  })
+}
+
+export function applyReferenceCorrections(ref) {
+  return { ...ref, ..._correctedShellForDiff(ref) }
+}
+
+export function exportCorrectionsOnly(references, format) {
+  const corrected = (references || []).filter(hasReferenceCorrection)
+    .map(ref => _correctedShellForDiff(ref))
+  if (format === 'bibtex') return exportResultsAsBibtex({ references: corrected })
+  if (format === 'ris') return exportResultsAsRIS({ references: corrected })
+  if (format === 'jsonl') return corrected.map(ref => JSON.stringify(ref)).join('\n')
+  if (format === 'csv') {
+    const fields = ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id', 'cited_url']
+    return [fields.join(','), ...corrected.map(ref =>
+      fields.map(field => _csvField(field === 'authors' ? normalizeAuthors(ref[field]) : ref[field])).join(',')
+    )].join('\n')
+  }
+  return corrected.map((ref, index) => {
+    const citation = exportReferenceAsStyle(ref, 'plaintext', index)
+    return format === 'markdown' ? `${index + 1}. ${citation}` : citation
+  }).join('\n\n')
 }
 
 export function exportDiffAsMarkdown({ paperTitle, references, style = 'apa', options = null }) {
@@ -1816,21 +1887,24 @@ export function exportDiffAsMarkdown({ paperTitle, references, style = 'apa', op
   let n = 0
   for (let i = 0; i < (references || []).length; i++) {
     const r = references[i]
-    if (!_refHasCorrection(r)) continue
+    if (!hasReferenceCorrection(r) && !(r.errors || []).length && !(r.warnings || []).length) continue
     n += 1
     const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
-    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+    const corrected = hasReferenceCorrection(r)
+      ? exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+      : 'No verified correction available; review manually.'
     lines.push(`## [${i + 1}]`)
     lines.push(`**As cited:** ${cited}`)
     lines.push('')
     lines.push(`**Corrected:** ${corrected}`)
-    if ((r.errors || []).length) {
-      const issues = r.errors.map(e => e.error_details || e.error_type).filter(Boolean).join('; ')
+    if ((r.errors || []).length || (r.warnings || []).length) {
+      const issues = [...(r.errors || []), ...(r.warnings || [])]
+        .map(e => e.error_details || e.warning_details || e.error_type || e.warning_type).filter(Boolean).join('; ')
       if (issues) lines.push(`\n_Issues: ${issues}_`)
     }
     lines.push('')
   }
-  if (n === 0) lines.push('_No corrections to export — every reference verified clean._')
+  if (n === 0) lines.push('_No suggested corrections or flagged issues to export._')
   return lines.join('\n')
 }
 
@@ -1839,10 +1913,13 @@ export function exportDiffAsCsv({ references, style = 'apa', options = null }) {
   const rows = [header]
   for (let i = 0; i < (references || []).length; i++) {
     const r = references[i]
-    if (!_refHasCorrection(r)) continue
+    if (!hasReferenceCorrection(r) && !(r.errors || []).length && !(r.warnings || []).length) continue
     const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
-    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
-    const issues = (r.errors || []).map(e => e.error_details || e.error_type).filter(Boolean).join(' | ')
+    const corrected = hasReferenceCorrection(r)
+      ? exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+      : 'No verified correction available; review manually.'
+    const issues = [...(r.errors || []), ...(r.warnings || [])]
+      .map(e => e.error_details || e.warning_details || e.error_type || e.warning_type).filter(Boolean).join(' | ')
     rows.push([i + 1, r.status || '', _csvField(cited), _csvField(corrected), _csvField(issues)].join(','))
   }
   return rows.join('\n')
@@ -1854,7 +1931,7 @@ export function exportCorrectedListAsStyle(references, style, options = null) {
   // me the fixed bib" export.
   return (references || [])
     .map((r, i) => exportReferenceAsStyle(
-      _refHasCorrection(r) ? { ...r, ..._correctedShellForDiff(r) } : r,
+      applyReferenceCorrections(r),
       style,
       i,
       options,

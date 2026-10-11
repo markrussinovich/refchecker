@@ -124,6 +124,110 @@ def test_placeholder_title_does_not_search(clients):
     clients[0].search_works.assert_not_called()
 
 
+def _title_page_pdf(tmp_path, rows, title=TITLE):
+    import fitz
+    path = tmp_path / "paper.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((50, 70), title, fontsize=16)
+        for x, y, text, size in rows:
+            page.insert_text((x, y), text, fontsize=size)
+        document.save(path)
+    return str(path)
+
+
+def test_single_author_pdf_with_empty_metadata_does_not_require_index(clients, tmp_path):
+    path = _title_page_pdf(tmp_path, [
+        (200, 110, "Jane Doe", 12),
+        (180, 130, "Microsoft Azure", 10),
+        (160, 145, "jane@example.com", 10),
+        (50, 180, "Abstract: A study of reliable systems.", 10),
+    ])
+    result = paper_metadata.resolve_paper_authors(TITLE, pdf_path=path)
+    assert result == {
+        "available": True, "title": TITLE, "source": "pdf", "year": None,
+        "authors": [{"name": "Jane Doe"}],
+    }
+    clients[0].search_works.assert_not_called()
+    clients[1].get_paper_by_doi.assert_not_called()
+
+
+def test_multicolumn_names_and_superscripts_preserve_author_order(tmp_path):
+    path = _title_page_pdf(tmp_path, [
+        (60, 110, "Jane Doe", 12),
+        (116, 106, "1", 7),
+        (300, 110, "John Smith", 12),
+        (366, 106, "2", 7),
+        (60, 130, "Example University", 10),
+        (300, 130, "Research Institute", 10),
+        (60, 155, "Alice Jones and Bob Brown", 12),
+        (60, 175, "Department of Computing", 10),
+        (50, 210, "Abstract: A study of reliable systems.", 10),
+    ])
+    assert paper_metadata.extract_pdf_paper_authors(path, TITLE) == [
+        {"name": "Jane Doe"}, {"name": "John Smith"},
+        {"name": "Alice Jones"}, {"name": "Bob Brown"},
+    ]
+
+
+def test_wrapped_title_and_comma_separated_authors(tmp_path):
+    import fitz
+    path = tmp_path / "wrapped.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((50, 70), "A Study of", fontsize=16)
+        page.insert_text((50, 90), "Reliable Systems", fontsize=16)
+        page.insert_text((50, 120), "Jane Doe, John Smith", fontsize=12)
+        page.insert_text((50, 150), "Abstract: Results.", fontsize=10)
+        document.save(path)
+    assert paper_metadata.extract_pdf_paper_authors(str(path), TITLE) == [
+        {"name": "Jane Doe"}, {"name": "John Smith"},
+    ]
+
+
+@pytest.mark.parametrize("rows", [
+    [(100, 110, "Anonymous authors", 12), (50, 150, "Abstract: Results.", 10)],
+    [(100, 110, "Example University", 12), (50, 150, "Abstract: Results.", 10)],
+    [(50, 100, "Abstract: Results.", 10), (100, 200, "Jane Doe", 12)],
+])
+def test_pdf_extraction_abstains_without_real_byline(tmp_path, rows):
+    path = _title_page_pdf(tmp_path, rows)
+    assert paper_metadata.extract_pdf_paper_authors(path, TITLE) == []
+
+
+def test_pdf_title_must_match_before_using_names(tmp_path, clients):
+    path = _title_page_pdf(tmp_path, [(100, 110, "Jane Doe", 12)], title="Different Paper")
+    assert paper_metadata.extract_pdf_paper_authors(path, TITLE) == []
+    clients[0].search_works.return_value = [_work()]
+    assert paper_metadata.resolve_paper_authors(TITLE, pdf_path=path)["source"] == "openalex"
+
+
+def test_shared_local_file_paper_uses_same_pdf_author_extraction(tmp_path):
+    from refchecker.core.refchecker import ArxivReferenceChecker
+    from refchecker.services.pdf_processor import PDFProcessor
+    path = _title_page_pdf(tmp_path, [
+        (200, 110, "Jane Doe", 12), (50, 180, "Abstract: Results.", 10),
+    ])
+    processor = PDFProcessor()
+    paper = processor.create_local_file_paper(path, metadata={"title": TITLE})
+    assert paper.authors == ["Jane Doe"]
+    assert paper_metadata.resolve_paper_authors(TITLE, pdf_path=path)["authors"] == [{"name": "Jane Doe"}]
+    assert processor.create_local_file_paper(path).authors == ["Jane Doe"]
+    checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    assert checker._create_local_file_paper(path).authors == ["Jane Doe"]
+
+
+def test_core_only_installation_extracts_authors_without_pymupdf(tmp_path, monkeypatch):
+    import sys
+    path = _title_page_pdf(tmp_path, [
+        (200, 110, "Jane Doe", 12),
+        (180, 130, "Microsoft Azure", 10),
+        (50, 180, "Abstract: Results.", 10),
+    ])
+    monkeypatch.setitem(sys.modules, "fitz", None)
+    assert paper_metadata.extract_pdf_paper_authors(path, TITLE) == [{"name": "Jane Doe"}]
+
+
 def test_paper_metadata_persists_without_changing_reference_results(tmp_path):
     async def scenario():
         database = Database(str(tmp_path / "history.db"))
@@ -163,6 +267,7 @@ def _endpoint_namespace(check):
         "_get_owned_check_or_404": AsyncMock(return_value=check),
         "_get_configured_cache_dir": AsyncMock(return_value="cache"),
         "_resolve_semantic_scholar_api_key": AsyncMock(return_value=None),
+        "_resolve_pdf_path_for_check": AsyncMock(return_value=None),
         "infer_paper_identity": infer_paper_identity,
         "db": MagicMock(update_check_paper_metadata=AsyncMock(return_value=True)),
         "logger": MagicMock(),
@@ -272,9 +377,23 @@ def test_endpoint_uses_original_title_and_persists(monkeypatch):
     assert asyncio.run(ns["paper_authors"](42, object())) == metadata
     resolver.assert_called_once_with(
         TITLE, doi=None, arxiv_id="2501.12345", cache_dir="cache",
-        semantic_scholar_api_key=None,
+        semantic_scholar_api_key=None, pdf_path=None,
     )
     ns["db"].update_check_paper_metadata.assert_awaited_once_with(42, metadata)
+
+
+def test_endpoint_extracts_uploaded_pdf_authors_and_persists(tmp_path, clients):
+    path = _title_page_pdf(tmp_path, [
+        (200, 110, "Jane Doe", 12), (50, 180, "Abstract: Results.", 10),
+    ])
+    ns = _endpoint_namespace({"paper_title": TITLE, "paper_source": path, "source_type": "file"})
+    ns["_resolve_pdf_path_for_check"].return_value = path
+    result = asyncio.run(ns["paper_authors"](42, object()))
+    assert result["source"] == "pdf"
+    assert result["authors"] == [{"name": "Jane Doe"}]
+    ns["db"].update_check_paper_metadata.assert_awaited_once_with(42, result)
+    ns["_preload_paper_author_profiles"].assert_awaited_once()
+    clients[0].search_works.assert_not_called()
 
 
 def test_endpoint_enforces_ownership_before_lookup(monkeypatch):

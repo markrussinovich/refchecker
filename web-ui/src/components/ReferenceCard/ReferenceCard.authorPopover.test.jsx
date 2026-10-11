@@ -64,7 +64,7 @@ describe('ReferenceCard author popover — dismissal', () => {
     render(<ReferenceCard reference={REF} index={1} />)
 
     const link = authorEl()
-    expect(link).toHaveAttribute('href', 'https://orcid.org/0000-0002-1825-0097')
+    expect(link).toHaveAttribute('href', 'https://openalex.org/A111')
     expect(link).toHaveAttribute('title', 'Hover for author details; click to open profile')
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
     let componentPrevented
