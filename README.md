@@ -202,14 +202,14 @@ Legend: ✅ available · — not applicable to that surface · 🌐 needs a host
 
 ### Web UI
 
-A completed check — summary health, the 2×2 article-tools grid (retractions · gap-finder · citation-numbering · chat & summarize), and AI-generated-text detection with a per-page breakdown:
+A completed check — paper preview and authors, citation-health and issue badges, export, and the 2×2 article-tools grid (retractions · gap-finder · citation-numbering · chat & summarize):
 
-<!-- screenshot: webui-main — completed check: stats badges, 2×2 action grid, AI-detection -->
+<!-- screenshot: webui-main — completed check: paper authors, stats badges, export, 2×2 action grid -->
 ![RefChecker — completed check overview](assets/webui.png)
 
-Per-reference verification and enrichment — matched database, verified/DOI links, citation counts, and the Additional-Info bar (abstract · claim · topics · full link · add-to-library):
+Per-reference detail — citation usage, **In this paper** context and bibliography navigation, separate **Verification** details, source links, citation counts, and enrichment actions:
 
-<!-- screenshot: webui-references — a reference card with verification + enrichment -->
+<!-- screenshot: webui-references — a reference card with in-paper context, verification, and enrichment -->
 ![RefChecker — reference verification detail](assets/webui-references.png)
 
 ### CLI — Startup banner
@@ -535,6 +535,8 @@ Each reference receives a verdict:
 | ✅ **UNLIKELY** | Probably real — found on a dedicated page with matching title/authors, then rechecked against the cited metadata |
 
 Hallucination assessments appear inline in CLI output, in Web UI reference cards, and in structured reports (JSON/JSONL/CSV) via the `hallucination_assessment` field.
+
+F. Badalova and P. Mayr's independent evaluation using their [manually annotated reference dataset](https://doi.org/10.5281/zenodo.23236264) helped identify weaknesses in RefChecker's accuracy and source coverage and informed subsequent improvements; see their accompanying paper, [*Detecting Hallucinated and Suspicious Citations: What Current Tools Can and Cannot Do* (2026)](https://doi.org/10.48550/arXiv.2607.22693).
 
 ---
 
