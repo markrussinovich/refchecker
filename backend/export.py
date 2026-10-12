@@ -285,7 +285,7 @@ def _corrected_str(ref: Dict[str, Any]) -> Optional[str]:
     fixes = _correction_fields(ref)
     if not fixes:
         return None
-    cr = {**ref, **fixes}
+    cr = _style_ref_data(ref)
     return _citation_line(
         cr.get("authors"), cr.get("year"), cr.get("title"),
         cr.get("venue") or cr.get("journal"), cr.get("doi"),
@@ -425,6 +425,7 @@ def _style_ref_data(ref: Dict[str, Any]) -> Dict[str, Any]:
     ``corrected_reference`` (no fabrication — only fields the verifier actually
     confirmed) and falling back to the cited values otherwise."""
     cr = _correction_fields(ref)
+    ref = ref.get("original_reference") or ref
     title = cr.get("title") or ref.get("title") or ""
     authors = cr.get("authors") or ref.get("authors") or []
     year = cr.get("year") or ref.get("year") or ""
@@ -432,6 +433,14 @@ def _style_ref_data(ref: Dict[str, Any]) -> Dict[str, Any]:
     doi = cr.get("doi") or ref.get("verified_doi") or ref.get("doi") or ""
     url = (cr.get("url") or cr.get("verified_url") or ref.get("verified_url")
            or ref.get("cited_url") or ref.get("url") or "")
+    if not (cr.get("url") or cr.get("verified_url")):
+        if cr.get("arxiv_id") and (
+            not url or re.match(r"^https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/", str(url), re.I)
+        ):
+            arxiv_id = re.sub(r"^arxiv:", "", str(cr["arxiv_id"]), flags=re.I).strip()
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+        elif cr.get("doi") and re.match(r"^https?://(?:dx\.)?doi\.org/", str(url), re.I):
+            url = f"https://doi.org/{doi}"
     if not url and doi:
         url = f"https://doi.org/{doi}"
     return {

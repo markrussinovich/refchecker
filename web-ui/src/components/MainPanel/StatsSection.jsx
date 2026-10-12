@@ -261,7 +261,9 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const handleExport = (format) => {
     setShowExportMenu(false)
     setExportMessage('')
-    const sortedRefs = sortReferencesForExport(references, sortMode)
+    const sortedRefs = sortReferencesForExport(
+      exportMode === 'original' ? references.map(asCitedReference) : references, sortMode,
+    )
 
     // 'diff' mode short-circuits format: there are only two file shapes
     // (markdown and csv) that make sense for a side-by-side report.

@@ -11,6 +11,27 @@ vi.mock('../../utils/formatters', async () => ({
 }))
 
 describe('StatsSection correction export controls', () => {
+  it('downloads the author fix as well as both year fixes from a legacy check', () => {
+    render(<StatsSection stats={{ total_refs: 35 }} isComplete paperTitle="Legacy paper"
+      references={[
+        { title: 'First year fix', year: 2025, warnings: [{ error_type: 'year', ref_year_correct: 2024 }] },
+        { title: 'Second year fix', year: 2025, warnings: [{ warning_type: 'year', actual_value: 2024 }] },
+        { title: 'Author fix', authors: ['Correct Author'], errors: [{
+          error_type: 'author', ref_authors_correct: 'Correct Author',
+          error_details: 'Author 2 mismatch:\n cited: Wrong Author\n actual: Correct Author',
+        }] },
+        { title: 'Unresolved venue', warnings: [{ warning_type: 'venue', warning_details: 'Review manually' }] },
+      ]} />)
+    fireEvent.click(screen.getByTitle('Export results'))
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'corrections-only' } })
+    fireEvent.click(screen.getByText(/BibTeX/))
+    const output = vi.mocked(downloadAsFile).mock.lastCall[0]
+    expect(output.match(/^@/gm)).toHaveLength(3)
+    expect(output).toContain('Author fix')
+    expect(output).toContain('Correct Author')
+    expect(output).not.toContain('Unresolved venue')
+  })
+
   it.each([/Markdown \(/, /Plain Text \(/, /CSV \(/, /JSONL \(/])(
     'exports corrected citations rather than an error report through %s', label => {
       render(<StatsSection stats={{ total_refs: 2 }} isComplete paperTitle="Test"

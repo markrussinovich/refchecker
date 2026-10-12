@@ -318,10 +318,11 @@ export function formatIssueLine(issue) {
   if (typeof issue !== 'object') return String(issue)
   if (issue.message) return String(issue.message)
   if (issue.error_details) return String(issue.error_details)
+  if (issue.warning_details) return String(issue.warning_details)
   if (issue.detail) return String(issue.detail)
   if (issue.text) return String(issue.text)
-  if (issue.error_type) {
-    const t = String(issue.error_type)
+  if (issue.error_type || issue.warning_type) {
+    const t = String(issue.error_type || issue.warning_type)
     if (issue.actual_value !== undefined && issue.cited !== undefined) {
       return `${t}: cited '${issue.cited}', actual '${issue.actual_value}'`
     }
@@ -667,57 +668,11 @@ export function filterIssuesForStyle(issues, ref, style) {
 }
 
 
-export function getCorrectedReferenceData(ref) {
-  if (ref[AS_CITED_EXPORT]) {
-    return {
-      title: ref.title, authors: ref.authors,
-      year: displayReferenceValue(ref.year), venue: displayReferenceValue(ref.venue),
-      doi: ref.doi, arxivId: ref.arxiv_id,
-      citedUrl: ref.cited_url || ref.url, url: ref.cited_url || ref.url,
-    }
-  }
-  // Verifier may attach typed URLs (doi, arxiv, journal) in
-  // authoritative_urls. Surface them so the URL picker can prefer DOI
-  // and arxiv over Semantic Scholar paper pages.
-  const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
-  const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
-  const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
-
-  // Check errors and warnings for 'actual' values
-  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
-
-  // A doi-type error/warning that names a DOI is the verifier's correction
-  // and MUST win over whatever (possibly wrong) DOI the citation carried.
-  // Seed corrected.doi from such an issue when present; only fall back to the
-  // cited ref.doi / authoritative DOI URL when no doi-type issue named a value.
-  const _doiIssueValue = (() => {
-    for (const i of allIssues) {
-      const t = (i?.error_type || i?.warning_type || '').toLowerCase()
-      if (t !== 'doi') continue
-      const v = i?.ref_doi_correct || i?.actual_value
-        || parseErrorDetailsForMarkdown(i?.error_details || i?.warning_details)?.actual
-      if (v) return _normalizeDoi(v)
-    }
-    return null
-  })()
-
-  const corrected = {
-    title: ref.title,
-    authors: ref.authors,
-    year: displayReferenceValue(ref.year),
-    venue: displayReferenceValue(ref.venue),
-    doi: _doiIssueValue
-      || ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
-    arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
-    citedUrl: ref.cited_url || null,
-    url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
-  }
-  
-  for (const issue of allIssues) {
+function getVerifiedReferenceCorrections(ref) {
+  const corrected = {}
+  for (const issue of [...(ref.errors || []), ...(ref.warnings || [])]) {
     const errorType = (issue.error_type || issue.warning_type || '').toLowerCase()
     const parsed = parseErrorDetailsForMarkdown(issue.error_details || issue.warning_details)
-    // Typed corrections may include a complete author list even when the
-    // displayed mismatch names only one author.
     const values = {
       title: issue.ref_title_correct,
       authors: issue.ref_authors_correct,
@@ -732,48 +687,71 @@ export function getCorrectedReferenceData(ref) {
       const partialAuthor = field === 'authors' && /^Author\s+\d+/i.test(issue.error_details || issue.warning_details || '')
       values[field] = issue.actual_value || (partialAuthor ? null : parsed?.actual)
     }
+    for (const [field, value] of Object.entries(values)) {
+      if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) continue
+      if (field === 'authors') {
+        corrected.authors = typeof value === 'string'
+          ? value.split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map(name => name.trim()).filter(Boolean)
+          : value
+      } else if (field === 'doi') corrected.doi = _normalizeDoi(value)
+      else if (field === 'arxiv_id') corrected.arxivId = String(value).replace(/^arxiv:/i, '').trim()
+      else if (field === 'url') corrected.url = corrected.citedUrl = value
+      else corrected[field] = value
+    }
+  }
+  const stored = ref.corrected_reference
+  if (stored && typeof stored === 'object') {
+    for (const field of ['title', 'authors', 'year', 'venue', 'doi']) {
+      const value = stored[field]
+      if (value != null && value !== '' && !(Array.isArray(value) && value.length === 0)) corrected[field] = value
+    }
+    if (stored.arxiv_id) corrected.arxivId = stored.arxiv_id
+    if (stored.journal) corrected.venue = stored.journal
+    if (stored.url || stored.verified_url) corrected.url = corrected.citedUrl = stored.url || stored.verified_url
+    if (stored.doi) corrected.doi = _normalizeDoi(stored.doi)
+  }
+  return corrected
+}
 
-    for (const [field, actualValue] of Object.entries(values)) {
-      if (!actualValue || (Array.isArray(actualValue) && actualValue.length === 0)) continue
-      switch (field) {
-        case 'title':
-          corrected.title = actualValue
-          break
-        case 'authors':
-          // Parse author string into array if it's a string
-          if (typeof actualValue === 'string') {
-            // Split on common author separators
-            corrected.authors = actualValue.split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
-              .map(a => a.trim())
-              .filter(a => a.length > 0)
-          } else if (Array.isArray(actualValue)) {
-            corrected.authors = actualValue
-          }
-          break
-        case 'year':
-          corrected.year = displayReferenceValue(actualValue)
-          break
-        case 'venue':
-          corrected.venue = displayReferenceValue(actualValue)
-          break
-        case 'doi':
-          // Verifier-named DOI wins over the cited one (normalize off any
-          // https://doi.org/ prefix so bibtex emits the bare identifier).
-          corrected.doi = _normalizeDoi(actualValue)
-          break
-        case 'arxiv_id':
-          corrected.arxivId = String(actualValue).replace(/^arxiv:/i, '').trim()
-          break
-        case 'url':
-          corrected.url = actualValue
-          corrected.citedUrl = actualValue
-          break
-      }
+export function getCorrectedReferenceData(ref) {
+  if (ref[AS_CITED_EXPORT]) {
+    return {
+      title: ref.title, authors: citationAuthorNames(ref.authors),
+      year: displayReferenceValue(ref.year), venue: displayReferenceValue(ref.venue),
+      doi: ref.doi, arxivId: ref.arxiv_id,
+      citedUrl: ref.cited_url || ref.url, url: ref.cited_url || ref.url,
+    }
+  }
+  // Verifier may attach typed URLs (doi, arxiv, journal) in
+  // authoritative_urls. Surface them so the URL picker can prefer DOI
+  // and arxiv over Semantic Scholar paper pages.
+  const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
+  const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
+  const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
+
+  const corrected = {
+    title: ref.title,
+    authors: ref.authors,
+    year: displayReferenceValue(ref.year),
+    venue: displayReferenceValue(ref.venue),
+    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
+    citedUrl: ref.cited_url || null,
+    url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
+  }
+  
+  const fixes = getVerifiedReferenceCorrections(ref)
+  Object.assign(corrected, fixes)
+  if (!fixes.citedUrl && corrected.citedUrl) {
+    if (fixes.arxivId && /^https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\//i.test(corrected.citedUrl)) {
+      corrected.url = corrected.citedUrl = `https://arxiv.org/abs/${corrected.arxivId}`
+    } else if (fixes.doi && /^https?:\/\/(?:dx\.)?doi\.org\//i.test(corrected.citedUrl)) {
+      corrected.url = corrected.citedUrl = `https://doi.org/${corrected.doi}`
     }
   }
   
   // Check for arXiv suggestion and extract URL
-  if (ref.suggestions?.length > 0) {
+  if (!fixes.arxivId && ref.suggestions?.length > 0) {
     for (const suggestion of ref.suggestions) {
       const details = suggestion.suggestion_details || suggestion
       if (typeof details === 'string') {
@@ -786,23 +764,17 @@ export function getCorrectedReferenceData(ref) {
     }
   }
   
-  const stored = ref.corrected_reference
-  if (stored && typeof stored === 'object') {
-    for (const field of ['title', 'authors', 'year', 'venue', 'doi']) {
-      const value = stored[field]
-      if (value != null && value !== '' && !(Array.isArray(value) && value.length === 0)) corrected[field] = value
-    }
-    if (stored.arxiv_id) corrected.arxivId = stored.arxiv_id
-    if (stored.journal) corrected.venue = stored.journal
-    if (stored.url || stored.verified_url) {
-      corrected.url = stored.url || stored.verified_url
-      corrected.citedUrl = corrected.url
-    }
-    if (stored.doi) corrected.doi = _normalizeDoi(stored.doi)
-  }
   corrected.year = displayReferenceValue(corrected.year)
   corrected.venue = displayReferenceValue(corrected.venue)
+  corrected.authors = citationAuthorNames(corrected.authors)
   return corrected
+}
+
+function citationAuthorNames(authors) {
+  if (typeof authors === 'string') {
+    return authors.split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map(name => name.trim()).filter(Boolean)
+  }
+  return Array.isArray(authors) ? authors.map(_authorToString).filter(Boolean) : []
 }
 
 /**
@@ -954,7 +926,7 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
         lines.push('')
         lines.push('**Warnings:**')
         ref.warnings.forEach(warning => {
-          const parsed = parseErrorDetailsForMarkdown(warning.error_details)
+          const parsed = parseErrorDetailsForMarkdown(warning.error_details || warning.warning_details)
           if (parsed) {
             lines.push(`- ⚠️ ${parsed.prefix}`)
             if (parsed.cited) {
@@ -964,7 +936,7 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
               lines.push(`  - Actual: ${parsed.actual}`)
             }
           } else {
-            lines.push(`- ⚠️ ${warning.error_details || warning.error_type}`)
+            lines.push(`- ⚠️ ${formatIssueLine(warning)}`)
             if (warning.cited_value) {
               lines.push(`  - Cited: ${warning.cited_value}`)
             }
@@ -1079,7 +1051,7 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
       }
       if (ref.warnings?.length > 0) {
         ref.warnings.forEach(w => {
-          lines.push(`    WARNING: ${w.error_details || w.error_type}`)
+          lines.push(`    WARNING: ${formatIssueLine(w)}`)
         })
       }
       const unverifiedError = ref.errors?.find(e => e.error_type === 'unverified')
@@ -1105,6 +1077,7 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
  * @returns {string} BibTeX key
  */
 function generateBibtexKey(ref, index) {
+  if (typeof ref.bibtex_key === 'string' && /^[A-Za-z0-9_:.+-]+$/.test(ref.bibtex_key)) return ref.bibtex_key
   // Try to create key from first author last name + year
   let key = ''
   if (ref.authors?.length > 0) {
@@ -1187,46 +1160,23 @@ export function exportReferenceAsBibtex(ref, index = 0) {
       lines.push(`  booktitle = {${escapeBibtex(corrected.venue)}},`)
     } else if (entryType === 'article') {
       lines.push(`  journal = {${escapeBibtex(corrected.venue)}},`)
+    } else {
+      lines.push(`  howpublished = {${escapeBibtex(corrected.venue)}},`)
     }
   }
   
-  // URL - prefer arXiv from suggestions, then DOI, then authoritative URLs, then cited URL
   if (corrected.arxivUrl) {
     lines.push(`  url = {${corrected.arxivUrl}},`)
-    // Extract arXiv ID
-    const arxivMatch = corrected.arxivUrl.match(/arxiv\.org\/abs\/(.+)/)
-    if (arxivMatch) {
-      lines.push(`  eprint = {${arxivMatch[1]}},`)
-      lines.push(`  archiveprefix = {arXiv},`)
-    }
   } else if (corrected.doi) {
-    // Prefer the corrected/verified DOI (a doi-type error/warning wins over the
-    // cited ref.doi via getCorrectedReferenceData). corrected.doi is already
-    // normalized to the bare identifier (no https://doi.org/ prefix).
     lines.push(`  doi = {${corrected.doi}},`)
   } else {
-    const doiUrl = ref.authoritative_urls?.find(u => u.type === 'doi')
-    const arxivUrl = ref.authoritative_urls?.find(u => u.type === 'arxiv')
-
-    if (doiUrl) {
-      // Extract DOI from URL
-      const doiMatch = doiUrl.url.match(/doi\.org\/(.+)/)
-      if (doiMatch) {
-        lines.push(`  doi = {${doiMatch[1]}},`)
-      } else {
-        lines.push(`  url = {${doiUrl.url}},`)
-      }
-    } else if (arxivUrl) {
-      lines.push(`  url = {${arxivUrl.url}},`)
-      // Extract arXiv ID
-      const arxivMatch = arxivUrl.url.match(/arxiv\.org\/abs\/(.+)/)
-      if (arxivMatch) {
-        lines.push(`  eprint = {${arxivMatch[1]}},`)
-        lines.push(`  archiveprefix = {arXiv},`)
-      }
-    } else if (ref.cited_url) {
-      lines.push(`  url = {${ref.cited_url}},`)
-    }
+    const url = _preferredCitationUrl(corrected)
+    if (url) lines.push(`  url = {${url}},`)
+  }
+  const arxivId = corrected.arxivUrl?.match(/arxiv\.org\/abs\/(.+)/)?.[1] || corrected.arxivId
+  if (arxivId) {
+    lines.push(`  eprint = {${arxivId}},`)
+    lines.push('  archiveprefix = {arXiv},')
   }
   
   lines.push('}')
@@ -1720,7 +1670,7 @@ export function exportReferenceAsMarkdown(ref) {
 
 function _risTypeFor(ref) {
   const venue = (ref.venue || '').toLowerCase()
-  if (ref.arxiv_id || venue.includes('arxiv')) return 'GEN'
+  if (ref.arxivId || venue.includes('arxiv')) return 'GEN'
   if (venue.includes('proceedings') || venue.includes('workshop') || venue.includes('conference')) return 'CPAPER'
   if (venue.includes('thesis') || venue.includes('dissertation')) return 'THES'
   if (venue.includes('book')) return 'BOOK'
@@ -1747,7 +1697,7 @@ export function exportReferenceAsRIS(ref, index = 0) {
   if (corrected.year) lines.push(`PY  - ${corrected.year}`)
   if (corrected.venue) lines.push(type === 'JOUR' ? `JO  - ${corrected.venue}` : `T2  - ${corrected.venue}`)
   if (corrected.doi) lines.push(`DO  - ${corrected.doi}`)
-  if (corrected.arxiv_id) lines.push(`AN  - arXiv:${corrected.arxiv_id}`)
+  if (corrected.arxivId) lines.push(`AN  - arXiv:${corrected.arxivId}`)
   const url = _preferredCitationUrl(corrected)
   if (url) lines.push(`UR  - ${url}`)
   // ID is what Rayyan/EndNote use for de-dup; index is a fine fallback
@@ -1771,7 +1721,7 @@ export const REFERENCE_SORT_MODES = [
 ]
 
 function _firstAuthorKey(ref) {
-  const corrected = getCorrectedReferenceData(ref)
+  const corrected = _correctedShellForDiff(ref)
   const a = corrected.authors
   let first = ''
   if (Array.isArray(a)) first = a[0] || ''
@@ -1795,9 +1745,9 @@ export function sortReferencesForExport(references, mode = 'citation') {
         return (a.index || 0) - (b.index || 0)
       })
     case 'year-desc':
-      return arr.sort((a, b) => (Number(b.year || 0)) - (Number(a.year || 0)))
+      return arr.sort((a, b) => Number(_correctedShellForDiff(b).year || 0) - Number(_correctedShellForDiff(a).year || 0))
     case 'year-asc':
-      return arr.sort((a, b) => (Number(a.year || 0)) - (Number(b.year || 0)))
+      return arr.sort((a, b) => Number(_correctedShellForDiff(a).year || 0) - Number(_correctedShellForDiff(b).year || 0))
     case 'citation':
     default:
       return arr.sort((a, b) => (a.index || 0) - (b.index || 0))
@@ -1826,11 +1776,12 @@ function _citedShellForDiff(ref) {
     doi: cited.doi,
     arxiv_id: cited.arxiv_id,
     cited_url: cited.cited_url || cited.url,
+    bibtex_key: cited.bibtex_key || ref.bibtex_key,
   }
 }
 
 function _correctedShellForDiff(ref) {
-  const c = getCorrectedReferenceData(ref)
+  const c = getCorrectedReferenceData({ ...ref, ..._citedShellForDiff(ref), authoritative_urls: [] })
   return {
     ..._citedShellForDiff(ref),
     title: c.title,
@@ -1844,18 +1795,28 @@ function _correctedShellForDiff(ref) {
 }
 
 export function hasReferenceCorrection(ref) {
-  if (!(ref.errors || []).length && !(ref.warnings || []).length &&
-      !Object.values(ref.corrected_reference || {}).some(value =>
-        value != null && value !== '' && !(Array.isArray(value) && value.length === 0))) return false
   const cited = _citedShellForDiff(ref)
-  const corrected = _correctedShellForDiff(ref)
-  return ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id', 'cited_url'].some(field => {
-    const value = corrected[field]
+  const corrections = getVerifiedReferenceCorrections(ref)
+  const correctionFields = {
+    title: 'title', authors: 'authors', year: 'year', venue: 'venue',
+    doi: 'doi', arxivId: 'arxiv_id', citedUrl: 'cited_url',
+  }
+  return Object.entries(correctionFields).some(([key, field]) => {
+    const value = corrections[key]
     if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return false
     const normalize = v => field === 'authors'
       ? normalizeAuthors(v).join(', ')
       : String(v ?? '').trim()
-    return normalize(value) !== normalize(cited[field])
+    if (normalize(value) !== normalize(cited[field])) return true
+    // Legacy checks may already show recovered metadata, not the cited value.
+    // An explicit fix on that field remains actionable without a snapshot.
+    return !ref.original_reference && [...(ref.errors || []), ...(ref.warnings || [])].some(issue => {
+      const type = (issue.error_type || issue.warning_type || '').toLowerCase()
+      const issueField = type === 'author' ? 'authors' : type === 'url' ? 'cited_url' : type
+      if (issueField !== field) return false
+      const before = issue.cited_value ?? parseErrorDetailsForMarkdown(issue.error_details || issue.warning_details)?.cited
+      return before == null || normalize(before) !== normalize(value)
+    })
   })
 }
 

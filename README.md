@@ -304,6 +304,11 @@ side-by-side diff. Corrections use verifier-supplied fields even when no complet
 corrected citation was stored; unresolved findings remain visible in diff reports.
 Corrections-only files contain corrected citations, not verification reports or
 error details, and omit unchanged entries and ordinary metadata enrichment.
+Explicit issue fixes are included for older checks even when displayed metadata
+already contains the corrected value and no original-citation snapshot was saved.
+Unchanged fields retain the original citation values when available. Exports
+preserve existing BibTeX keys, keep corrected identifiers and their links
+consistent, and sort by the values in the selected bibliography mode.
 Author names prefer OpenAlex profile links when available. Google Scholar remains
 a secondary card link: a known profile when metadata provides one, otherwise a
 name search. Card statistics come from OpenAlex/Semantic Scholar, not Google Scholar.

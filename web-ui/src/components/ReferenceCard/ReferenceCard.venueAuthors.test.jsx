@@ -38,9 +38,9 @@ describe('ReferenceCard VenueLine + author backfill (mount)', () => {
     render(<ReferenceCard reference={baseRef} index={0} />)
     // Cited venue is the source-of-truth display string.
     expect(screen.getByText('Nat. Methods')).toBeInTheDocument()
-    // Backfilled author with an ORCID becomes a profile link.
+    // OpenAlex is preferred when both profile identifiers are available.
     const author = screen.getByRole('link', { name: 'Per Buchwald' })
-    expect(author).toHaveAttribute('href', 'https://orcid.org/0000-0002-1825-0097')
+    expect(author).toHaveAttribute('href', 'https://openalex.org/A111')
   })
 
   it('mounts with no enrichment payload at all (graceful fallback)', () => {

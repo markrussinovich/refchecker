@@ -5,6 +5,7 @@ import {
   exportResultsAsBibtex,
   asCitedReference,
   exportCorrectionsOnly,
+  exportResultsAsMarkdown, exportResultsAsPlainText, exportResultsAsCsv, exportResultsAsJsonl,
 } from './formatters'
 
 const reference = {
@@ -15,6 +16,77 @@ const reference = {
 }
 
 describe('correction exports', () => {
+  it.each(['markdown', 'text', 'bibtex', 'ris', 'jsonl', 'csv'])(
+    'keeps the legacy recovered-author fix alongside both year corrections in %s', format => {
+      const references = Array.from({ length: 35 }, (_, i) => ({
+        index: i + 1, title: `Clean reference ${i + 1}`, year: 2025,
+        authors: ['Cited Author'], errors: [], warnings: [],
+      }))
+      references[11] = { ...references[11], title: 'Copyright-protected language generation',
+        warnings: [{ error_type: 'year', ref_year_correct: 2024 }] }
+      references[13] = { ...references[13], title: 'StruQ',
+        warnings: [{ error_type: 'year', ref_year_correct: 2024 }] }
+      references[22] = {
+        ...references[22], title: 'Securing AI agents with information-flow control',
+        authors: ['Manuel Costa', 'Boris Köpf', 'Mark Russinovich'],
+        errors: [{
+          error_type: 'author',
+          error_details: 'Author 2 mismatch:\n cited: C. Fournet (not found in author list - et al case)\n actual: Manuel Costa, Boris Köpf, Mark Russinovich',
+          ref_authors_correct: 'Manuel Costa, Boris Köpf, Mark Russinovich',
+        }],
+      }
+      references[1].warnings = [{ warning_type: 'venue', warning_details: 'Review this venue manually' }]
+      references[1].authoritative_urls = [{ type: 'doi', url: 'https://doi.org/10.1234/enrichment' }]
+      const fixed = references.filter(hasReferenceCorrection)
+      expect(fixed.map(ref => ref.index)).toEqual([12, 14, 23])
+      const output = exportCorrectionsOnly(references, format)
+      expect(output).toContain('Copyright-protected language generation')
+      expect(output).toContain('StruQ')
+      expect(output).toContain('Securing AI agents with information-flow control')
+      expect(output).toContain('Manuel Costa')
+      expect(output).not.toContain('C. Fournet')
+      expect(output).not.toContain('Clean reference')
+      expect(output).not.toContain('Review this venue manually')
+      if (format === 'bibtex') expect(output.match(/^@/gm)).toHaveLength(3)
+      if (format === 'jsonl') expect(output.split('\n')).toHaveLength(3)
+      if (format === 'csv') expect(output.split('\n')).toHaveLength(4)
+    },
+  )
+
+  it('retains legacy typed fixes when recovered metadata already matches but no before value was stored', () => {
+    const recovered = { ...reference, authors: ['Correct Author'], errors: [{
+      error_type: 'author', ref_authors_correct: ['Correct Author'],
+    }] }
+    expect(hasReferenceCorrection(recovered)).toBe(true)
+    expect(hasReferenceCorrection({
+      ...recovered, original_reference: { ...reference, authors: ['Correct Author'] },
+    })).toBe(false)
+    expect(hasReferenceCorrection({ ...reference, errors: [{
+      error_type: 'year', cited_value: 2020, ref_year_correct: 2020,
+    }] })).toBe(false)
+  })
+
+  it('does not mistake recovered metadata or lookup URLs for verified corrections', () => {
+    const unresolved = {
+      ...reference, authors: ['Recovered Author'], errors: [{ error_type: 'unverified' }],
+      original_reference: { title: reference.title, authors: ['Cited Author'], year: 2020 },
+      authoritative_urls: [{ type: 'doi', url: 'https://doi.org/10.1234/recovered' }],
+    }
+    expect(hasReferenceCorrection(unresolved)).toBe(false)
+  })
+
+  it('prints real warning details in all report formats instead of undefined', () => {
+    const data = { paperTitle: 'Test', stats: {}, references: [{
+      ...reference, errors: [],
+      warnings: [{ warning_type: 'venue', warning_details: 'Previously cited venue differs' }],
+    }] }
+    for (const render of [exportResultsAsMarkdown, exportResultsAsPlainText, exportResultsAsCsv, exportResultsAsJsonl]) {
+      const output = render(data)
+      expect(output).toContain('Previously cited venue differs')
+      expect(output).not.toContain('undefined')
+    }
+  })
+
   it.each(['markdown', 'text', 'bibtex', 'ris', 'jsonl', 'csv'])(
     'exports citations only without findings or unchanged entries in %s', format => {
       const fixed = { ...reference, errors: [{
