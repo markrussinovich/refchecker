@@ -147,6 +147,24 @@ def _is_openai_reasoning_model(model: str) -> bool:
     return any(tag in model for tag in ('gpt-5', 'o3', 'o4'))
 
 
+def _anthropic_accepts_temperature(model: str) -> bool:
+    """Return True if *model* is a Claude model that still honours temperature.
+
+    Claude 4.6 and earlier accept sampling parameters. Opus 4.7 and later
+    reject them, and Sonnet 5.x / Haiku 5.5 reject non-default values, so
+    unparseable (likely newer) model names are treated as not accepting it.
+    Handles both ``claude-sonnet-4-6`` and ``claude-3-5-sonnet-latest`` forms,
+    plus Bedrock (``anthropic.``) and Vertex (``@date``) variants.
+    """
+    if not model:
+        return False
+    m = re.search(r'claude-(?:[a-z]+-)?(\d+)(?:-(\d{1,2}))?(?=[-@\[]|$)', model)
+    if not m:
+        return False
+    version = (int(m.group(1)), int(m.group(2) or 0))
+    return version < (4, 7)
+
+
 
 class LLMProviderMixin:
     """Common functionality for all LLM providers"""
@@ -630,10 +648,14 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
         """Make the actual Anthropic API call and return the response text"""
         try:
             _model = self.model or DEFAULT_EXTRACTION_MODELS['anthropic']
+            kwargs = {}
+            # anthropic SDK 1.x dropped the temperature kwarg, so it goes in
+            # extra_body, and only for models that still accept it.
+            if _anthropic_accepts_temperature(_model):
+                kwargs['extra_body'] = {'temperature': self.temperature}
             response = self.client.messages.create(
                 model=_model,
                 max_tokens=self.max_tokens,
-                temperature=self.temperature,
                 system=[{
                     'type': 'text',
                     'text': self._get_system_prompt(),
@@ -641,7 +663,8 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                 }],
                 messages=[
                     {"role": "user", "content": prompt}
-                ]
+                ],
+                **kwargs
             )
             _record_provider_usage("anthropic", _model, response, "extraction")
             _track_anthropic_usage(response, _model)
