@@ -33,8 +33,12 @@ History:
         the same whether it was verified fresh or replayed from cache.
     5 - USENIX Security references can be verified against official proceedings,
         including when bibliographic APIs return incomplete metadata.
+    6 - DOI citations prefer publication metadata over merged preprint records;
+        explicit ArXiv citations retain their preprint venue and DOI.
+    7 - Cached verdicts cannot replace a newly cited year; preprints and
+        publications are not treated as inconsistent versions in Seen Refs.
 """
 
-VERIFICATION_LOGIC_VERSION = 5
+VERIFICATION_LOGIC_VERSION = 7
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]

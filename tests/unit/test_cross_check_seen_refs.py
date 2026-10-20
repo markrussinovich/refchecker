@@ -83,6 +83,21 @@ class TestAuthorNormalization:
 
 
 class TestCrossCheckWarnings:
+    @pytest.mark.parametrize('cached_is_preprint', [False, True])
+    def test_publication_and_preprint_years_are_not_cache_inconsistencies(self, db, cached_is_preprint):
+        publication = {
+            'title': 'Deep Residual Learning for Image Recognition',
+            'authors': ['Kaiming He', 'Xiangyu Zhang', 'Shaoqing Ren', 'Jian Sun'],
+            'year': 2016, 'venue': 'CVPR', 'doi': '10.1109/cvpr.2016.90',
+            'status': 'verified',
+        }
+        preprint = dict(publication, year=2015, venue='arXiv', doi=None,
+                        arxiv_id='1512.03385')
+        cached, cited = (preprint, publication) if cached_is_preprint else (publication, preprint)
+        _run(db.upsert_verified_reference(cached))
+
+        assert _run(db.cross_check_seen_refs(cited)) == []
+
     def test_same_first_author_does_not_warn(self, db):
         """Regression: JSON quoting made every cached author list look wrong.
 

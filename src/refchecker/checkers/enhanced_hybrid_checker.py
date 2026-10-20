@@ -589,15 +589,15 @@ class EnhancedHybridReferenceChecker:
             if sem is not None:
                 sem.release()
     
-    def _should_try_doi_apis_first(self, reference: Dict[str, Any]) -> bool:
-        """
-        Determine if we should prioritize DOI-based APIs (CrossRef) for this reference
-        """
-        # Check if reference has DOI information
-        has_doi = (reference.get('doi') or 
-                  (reference.get('url') and ('doi.org' in reference['url'] or 'doi:' in reference['url'])) or
-                  (reference.get('raw_text') and ('doi' in reference['raw_text'].lower())))
-        return has_doi
+    @staticmethod
+    def _cited_doi(reference: Dict[str, Any]) -> Optional[str]:
+        for key in ('doi', 'url', 'cited_url'):
+            value = reference.get(key)
+            if isinstance(value, str):
+                doi = normalize_doi(value)
+                if is_valid_doi_format(doi):
+                    return doi
+        return None
     
     def _is_data_complete(self, verified_data: Dict[str, Any], reference: Dict[str, Any]) -> bool:
         """
@@ -637,8 +637,9 @@ class EnhancedHybridReferenceChecker:
         """
         Merge ArXiv verification results with Semantic Scholar data.
         
-        ArXiv is authoritative for title/author/year, but Semantic Scholar
-        provides venue information and additional URLs (DOI, S2 page).
+        Retain ArXiv's version-specific metadata. Semantic Scholar can supply
+        a related index URL, but its publication DOI and venue may describe
+        a different version of the work.
         
         Args:
             arxiv_data: Verified data from ArXiv
@@ -662,49 +663,12 @@ class EnhancedHybridReferenceChecker:
         if 'externalIds' not in merged_data:
             merged_data['externalIds'] = {}
         
-        ss_external_ids = ss_data.get('externalIds', {})
-        
         # Add S2 paper ID
         if ss_data.get('paperId'):
             merged_data['externalIds']['S2PaperId'] = ss_data['paperId']
         
-        # Add DOI if available from Semantic Scholar
-        if ss_external_ids.get('DOI') and not merged_data['externalIds'].get('DOI'):
-            merged_data['externalIds']['DOI'] = ss_external_ids['DOI']
-        
         # Store Semantic Scholar URL
         merged_data['_semantic_scholar_url'] = ss_url
-        
-        # Check for venue mismatch - if paper was published at a venue but citation only says arXiv
-        ss_venue = ss_data.get('venue', '')
-        cited_venue = reference.get('venue', reference.get('journal', '')).strip().lower()
-        
-        # Normalize ArXiv venue names
-        is_cited_as_arxiv = (
-            not cited_venue or 
-            cited_venue in ['arxiv', 'arxiv preprint', 'arxiv.org', 'preprint']
-        )
-        
-        # Check if Semantic Scholar shows a real publication venue
-        if ss_venue and is_cited_as_arxiv:
-            # Ignore generic/empty venues
-            ss_venue_lower = ss_venue.lower().strip()
-            is_real_venue = (
-                ss_venue_lower and 
-                ss_venue_lower not in ['arxiv', 'arxiv.org', 'preprint', ''] and
-                not ss_venue_lower.startswith('arxiv')
-            )
-            
-            if is_real_venue:
-                # This paper was published at a venue but is only cited as arXiv
-                logger.debug(f"Enhanced Hybrid: Paper published at '{ss_venue}' but cited as arXiv")
-                merged_errors.append({
-                    'warning_type': 'venue',
-                    'warning_details': f"Paper was published at venue but cited as arXiv preprint:\n       cited:  arXiv\n       actual: {ss_venue}",
-                    'ref_venue_correct': ss_venue
-                })
-                # Also add the venue to merged data
-                merged_data['venue'] = ss_venue
         
         return merged_data, merged_errors
 
@@ -987,9 +951,8 @@ class EnhancedHybridReferenceChecker:
     def _verify_arxiv_parallel(self, reference, failed_apis, attempted_apis):
         """Run ArXiv citation + Semantic Scholar API in parallel for ArXiv refs.
         
-        Called after local DB was tried and either failed or had discrepancies.
-        ArXiv BibTeX is the authoritative source for authors/title.
-        S2 API provides venue metadata for merging.
+        ArXiv BibTeX is authoritative for the cited preprint's metadata.
+        S2 API supplies a related index link without replacing its version.
         
         Returns result tuple or None if both failed.
         """
@@ -1135,7 +1098,7 @@ class EnhancedHybridReferenceChecker:
         
         # SS failed or incomplete — fire remaining APIs in parallel
         fallback_apis = []
-        if self.crossref:
+        if self.crossref and 'crossref' not in attempted_apis:
             fallback_apis.append(('crossref', self.crossref))
         if self.openalex:
             fallback_apis.append(('openalex', self.openalex))
@@ -1727,6 +1690,31 @@ class EnhancedHybridReferenceChecker:
         db_not_found = False
         incomplete_data = None
         is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
+        preferred_crossref_result = None
+
+        # Aggregated indexes can pair a preprint year with a publication DOI.
+        # Resolve the cited DOI before accepting their local or remote record.
+        doi = self._cited_doi(reference)
+        if doi and not is_arxiv and self.crossref:
+            reference = dict(reference, doi=doi)
+            self._append_attempted_api(attempted_apis, 'crossref')
+            data, errors, url, success, failure_type, failure_detail = self._try_api(
+                'crossref', self.crossref, reference,
+            )
+            if success:
+                preferred_crossref_result = (data, errors, url)
+                matched_doi = (data or {}).get('DOI') or (data or {}).get('doi')
+                if (isinstance(matched_doi, str) and normalize_doi(matched_doi) == doi
+                        and self._is_data_complete(data, reference)):
+                    return data, errors, url
+            elif failure_type not in ('none', 'not_found'):
+                failed_apis.append({
+                    'name': 'crossref',
+                    'instance': self.crossref,
+                    'failure_type': failure_type,
+                    'failure_detail': failure_detail,
+                    'active': True,
+                })
         
         # ── PHASE 1: Parallel API calls ──
         
@@ -1798,7 +1786,7 @@ class EnhancedHybridReferenceChecker:
         
         # Store incomplete results for Phase 3 fallback (thread-safe: returned
         # as local values from _verify_non_arxiv_parallel, not shared state)
-        crossref_result = incomplete_data.get('crossref') if incomplete_data else None
+        crossref_result = (incomplete_data or {}).get('crossref') or preferred_crossref_result
         openalex_result = incomplete_data.get('openalex') if incomplete_data else None
         
         # PHASE 2: If no API succeeded in Phase 1, retry failed APIs.

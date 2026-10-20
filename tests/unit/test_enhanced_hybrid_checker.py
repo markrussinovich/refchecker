@@ -1,6 +1,11 @@
-import requests
-from unittest.mock import patch
+from copy import deepcopy
+from unittest.mock import Mock, patch
 
+import pytest
+import requests
+
+from refchecker.checkers.arxiv_citation import ArXivCitationChecker
+from refchecker.checkers.crossref import CrossRefReferenceChecker
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 
 
@@ -158,6 +163,216 @@ def _build_checker():
     checker.dblp = None
     checker.openreview = None
     return checker
+
+
+RESNET_REFERENCE = {
+    'title': 'Deep Residual Learning for Image Recognition',
+    'authors': ['Kaiming He', 'Xiangyu Zhang', 'Shaoqing Ren', 'Jian Sun'],
+    'year': 2016,
+    'venue': '2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)',
+    'doi': '10.1109/CVPR.2016.90',
+}
+RESNET_CROSSREF = {
+    'DOI': '10.1109/CVPR.2016.90',
+    'title': [RESNET_REFERENCE['title']],
+    'author': [
+        {'given': name.rsplit(' ', 1)[0], 'family': name.rsplit(' ', 1)[1]}
+        for name in RESNET_REFERENCE['authors']
+    ],
+    'container-title': [RESNET_REFERENCE['venue']],
+    'published-print': {'date-parts': [[2016, 6]]},
+    'created': {'date-parts': [[2017, 1]]},
+    'URL': 'https://doi.org/10.1109/CVPR.2016.90',
+    'type': 'proceedings-article',
+}
+
+
+@pytest.fixture
+def resnet_checker(monkeypatch):
+    checker = _build_checker()
+    checker.crossref = CrossRefReferenceChecker()
+    monkeypatch.setattr(
+        checker.crossref, '_get_work_by_doi_uncached',
+        Mock(side_effect=lambda doi: deepcopy(RESNET_CROSSREF)),
+    )
+    checker.semantic_scholar = Mock()
+    checker.semantic_scholar.get_venue_from_paper_data.return_value = RESNET_REFERENCE['venue']
+
+    def merged_record(reference):
+        return (
+            {
+                'title': RESNET_REFERENCE['title'],
+                'authors': [{'name': name} for name in RESNET_REFERENCE['authors']],
+                'year': 2015,
+                'venue': RESNET_REFERENCE['venue'],
+                'externalIds': {'DOI': RESNET_REFERENCE['doi'], 'ArXiv': '1512.03385'},
+            },
+            [{
+                'warning_type': 'year', 'warning_details': 'Year mismatch: 2016 vs 2015',
+                'ref_year_correct': 2015,
+            }] if int(reference['year']) != 2015 else [],
+            'https://www.semanticscholar.org/paper/resnet',
+        )
+
+    checker.semantic_scholar.verify_reference.side_effect = merged_record
+    monkeypatch.setattr(checker, '_cross_verify_secondary', Mock())
+    return checker
+
+
+@pytest.mark.parametrize('source', ['local', 'remote'])
+@pytest.mark.parametrize('doi_field', ['doi', 'url', 'cited_url'])
+def test_resnet_publication_doi_precedes_merged_preprint_record(resnet_checker, source, doi_field):
+    checker = resnet_checker
+    if source == 'local':
+        checker.local_db = checker.semantic_scholar
+    reference = deepcopy(RESNET_REFERENCE)
+    reference.pop('doi')
+    reference[doi_field] = (
+        RESNET_REFERENCE['doi'] if doi_field == 'doi'
+        else RESNET_CROSSREF['URL']
+    )
+
+    data, errors, url = checker.verify_reference(reference)
+
+    assert data['_matched_checker'] == 'crossref'
+    assert data['year'] == 2016
+    assert data['venue'] == RESNET_REFERENCE['venue']
+    assert data['doi'].lower() == RESNET_REFERENCE['doi'].lower()
+    assert errors == []
+    assert url == RESNET_CROSSREF['URL']
+    checker.semantic_scholar.verify_reference.assert_not_called()
+
+
+def test_explicit_resnet_preprint_keeps_preprint_year_and_doi(resnet_checker, monkeypatch):
+    checker = resnet_checker
+    checker.arxiv_citation = ArXivCitationChecker()
+    monkeypatch.setattr(checker.arxiv_citation, 'fetch_bibtex', Mock(return_value=r"""
+        @misc{he2015deep,
+          title={Deep Residual Learning for Image Recognition},
+          author={Kaiming He and Xiangyu Zhang and Shaoqing Ren and Jian Sun},
+          year={2015}, eprint={1512.03385}
+        }
+    """))
+    reference = dict(RESNET_REFERENCE, year=2015, venue='arXiv',
+                     url='https://arxiv.org/abs/1512.03385')
+    reference.pop('doi')
+
+    data, errors, url = checker.verify_reference(reference)
+
+    assert data['year'] == 2015
+    assert data['venue'] == 'arXiv'
+    assert url == reference['url']
+    assert not any(error.get('warning_type') == 'year' for error in errors)
+    assert data['externalIds'].get('DOI') != RESNET_REFERENCE['doi']
+    checker.crossref._get_work_by_doi_uncached.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ('field', 'value', 'issue_type'),
+    [
+        ('title', 'A Completely Different Paper', 'title'),
+        ('authors', ['Invented Author'], 'author'),
+        ('year', 2015, 'year'),
+        ('venue', 'Nature', 'venue'),
+    ],
+)
+def test_doi_priority_preserves_real_metadata_mismatches(resnet_checker, field, value, issue_type):
+    data, errors, _ = resnet_checker.verify_reference(dict(RESNET_REFERENCE, **{field: value}))
+
+    assert data['_matched_checker'] == 'crossref'
+    assert any((error.get('error_type') or error.get('warning_type')) == issue_type
+               for error in errors)
+    assert data['year'] == 2016
+
+
+def test_unavailable_doi_metadata_still_allows_other_checkers(resnet_checker, monkeypatch):
+    checker = resnet_checker
+    monkeypatch.setattr(checker.crossref, 'verify_reference', Mock(side_effect=requests.Timeout('offline')))
+    data, _, _ = checker.verify_reference(deepcopy(RESNET_REFERENCE))
+
+    assert data['_matched_checker'] == 'semantic_scholar'
+    checker.semantic_scholar.verify_reference.assert_called_once()
+
+
+@pytest.mark.parametrize('online_year', [2015, 2012])
+def test_doi_accepts_recorded_online_year_without_using_preprint_metadata(
+    resnet_checker, monkeypatch, online_year,
+):
+    work = dict(deepcopy(RESNET_CROSSREF), **{'published-online': {'date-parts': [[online_year, 12]]}})
+    monkeypatch.setattr(resnet_checker.crossref, '_get_work_by_doi_uncached', Mock(return_value=work))
+
+    data, errors, _ = resnet_checker.verify_reference(dict(RESNET_REFERENCE, year=online_year))
+
+    assert errors == []
+    assert data['_matched_checker'] == 'crossref'
+    assert data['year'] == 2016
+    assert data['venue'] == RESNET_REFERENCE['venue']
+
+
+def test_doi_registration_year_is_not_a_publication_year(resnet_checker):
+    data, errors, _ = resnet_checker.verify_reference(dict(RESNET_REFERENCE, year=2017))
+
+    assert data['year'] == 2016
+    assert any(error.get('ref_year_correct') == 2016 for error in errors)
+
+
+def test_title_search_for_another_doi_cannot_override_the_cited_version(resnet_checker, monkeypatch):
+    checker = resnet_checker
+    other_version = dict(deepcopy(RESNET_CROSSREF), DOI='10.1000/another-version')
+    monkeypatch.setattr(checker.crossref, 'verify_reference', Mock(
+        return_value=(other_version, [], 'https://doi.org/10.1000/another-version'),
+    ))
+
+    data, _, _ = checker.verify_reference(deepcopy(RESNET_REFERENCE))
+
+    assert data['_matched_checker'] == 'semantic_scholar'
+    checker.semantic_scholar.verify_reference.assert_called_once()
+
+
+def test_incomplete_doi_metadata_does_not_preempt_complete_matches(resnet_checker, monkeypatch):
+    checker = resnet_checker
+    incomplete = dict(deepcopy(RESNET_CROSSREF), author=[])
+    monkeypatch.setattr(checker.crossref, '_get_work_by_doi_uncached', Mock(return_value=incomplete))
+
+    data, _, _ = checker.verify_reference(deepcopy(RESNET_REFERENCE))
+
+    assert data['_matched_checker'] == 'semantic_scholar'
+    checker.semantic_scholar.verify_reference.assert_called_once()
+    checker.crossref._get_work_by_doi_uncached.assert_called_once()
+
+
+def test_cached_doi_response_keeps_publication_metadata(resnet_checker, tmp_path):
+    checker = resnet_checker
+    checker.crossref.cache_dir = str(tmp_path)
+    first = checker.verify_reference(deepcopy(RESNET_REFERENCE))
+    checker.crossref._get_work_by_doi_uncached.side_effect = AssertionError('Expected cached DOI metadata')
+
+    second = checker.verify_reference(deepcopy(RESNET_REFERENCE))
+
+    assert second == first
+    assert second[0]['year'] == 2016
+    assert second[1] == []
+    checker.crossref._get_work_by_doi_uncached.assert_called_once()
+
+
+def test_doi_version_selection_matches_cli_bulk_and_webui(resnet_checker):
+    from backend.refchecker_wrapper import ProgressRefChecker
+    from refchecker.core.refchecker import ArxivReferenceChecker
+
+    cli = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    cli.non_arxiv_checker = resnet_checker
+    cli.verify_github_reference = lambda ref: None
+    cli.verify_webpage_reference = lambda ref: None
+    web = ProgressRefChecker.__new__(ProgressRefChecker)
+    web.checker = resnet_checker
+    web.check_id = None
+    cli_errors, cli_url, cli_data = cli.verify_reference_standard(None, deepcopy(RESNET_REFERENCE))
+    bulk_errors, bulk_url, bulk_data = cli.verify_reference(None, deepcopy(RESNET_REFERENCE))
+    web_result = web._verify_reference(deepcopy(RESNET_REFERENCE))
+
+    assert (cli_data, cli_errors or [], cli_url) == (bulk_data, bulk_errors or [], bulk_url) == web_result
+    assert cli_data['year'] == 2016
+    assert not cli_errors
 
 
 def test_paperclip_key_can_be_supplied_per_request(monkeypatch):
