@@ -24,25 +24,25 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
+  <a href="https://github.com/markrussinovich/refchecker/releases/download/desktop-latest/RefChecker-macos-arm64.dmg">
     <img alt="Download for macOS" src="assets/download-macos.svg" height="56">
   </a>
   &nbsp;
-  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
+  <a href="https://github.com/markrussinovich/refchecker/releases/download/desktop-latest/RefChecker-windows-x64.msi">
     <img alt="Download for Windows" src="assets/download-windows.svg" height="56">
   </a>
 </p>
 
 <p align="center">
   <sub>
-    Linux: <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
-    <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
-    <a href="https://github.com/markrussinovich/refchecker/releases/latest">all builds</a>
+    Linux: <a href="https://github.com/markrussinovich/refchecker/releases/download/desktop-latest/RefChecker-linux-x64.AppImage">.AppImage</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/download/desktop-latest/RefChecker-linux-x64.deb">.deb</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/tag/desktop-latest">all builds</a>
   </sub>
 </p>
 
 <p align="center">
-  <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
+  <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built by GitHub Actions on <code>desktop-v*</code> tags; signing depends on configured release keys.</sub>
 </p>
 
 ---

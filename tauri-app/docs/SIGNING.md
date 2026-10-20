@@ -75,9 +75,10 @@ The repo currently ships with a pre-generated public key. If you keep that publi
    - Extracts `0.1.0` from the tag and updates `tauri-app/package.json` `version`. Tauri reads `version` from `package.json` (see `tauri.conf.json` `"version": "../package.json"`), so the bundled app and the embedded updater both use `0.1.0` end-to-end.
    - Builds each platform with `createUpdaterArtifacts: true`, producing `.app.tar.gz` / `.msi.zip` / `.AppImage.tar.gz` plus a `.sig` next to each.
    - Assembles a single `latest.json` referencing those artifacts at their final release-asset URLs, with the platform-keyed signatures.
-   - Creates a draft GitHub Release containing every artifact **plus** `latest.json`.
-3. You review the draft and publish it.
-4. Installed apps poll `https://github.com/ArioMoniri/refchecker/releases/latest/download/latest.json` on startup. GitHub redirects that URL to whatever the current latest release exposes, so the endpoint is fully dynamic — you never have to touch the URL in `tauri.conf.json`.
+   - Rejects the release if any advertised macOS, Windows, or Linux installer is missing or empty.
+   - Publishes a versioned GitHub Release containing every artifact **plus** `latest.json`.
+3. For stable versions, the workflow updates a separate `desktop-latest` release with the stable installer names and updater manifest. This rolling tag points at the desktop build's source commit; the versioned release retains the original assets and provenance. Prereleases do not change the stable channel, and an older build finishing late cannot replace a newer version. Desktop releases do not replace the latest Python release.
+4. Installed apps poll `https://github.com/markrussinovich/refchecker/releases/download/desktop-latest/latest.json` on startup. README downloads use the same desktop-only channel, so subsequent Python releases cannot break the downloads or updater. Older installed apps using `/releases/latest/download/latest.json` need a manual upgrade to switch channels.
 5. If `latest.json`'s `version` is higher than the running app's, the updater downloads the platform-appropriate bundle, verifies the signature against the embedded public key, applies the update, and restarts.
 
 ## After a fork
@@ -131,8 +132,8 @@ npx tauri build --target aarch64-apple-darwin
 
 | How | What happens |
 |---|---|
-| `git tag desktop-v0.2.0 && git push origin desktop-v0.2.0` | Full build + signed updater manifest + draft Release |
-| Actions → Desktop release → Run workflow | Same as above, lets you override the version |
+| `git tag desktop-v0.2.0 && git push origin desktop-v0.2.0` | Full build + versioned Release + updated `desktop-latest` downloads; updater signatures when keys are configured |
+| Actions → Desktop release → Run workflow | Build-only on a branch, with an optional version override; select an existing `desktop-v*` tag to publish |
 | PR touching `tauri-app/**` | Build-only validation (no release published) |
 
 ## Verifying a signed macOS build locally
