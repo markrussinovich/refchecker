@@ -44,6 +44,18 @@ class PDFProcessor:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.cache = {}
+
+    @staticmethod
+    def is_usenix_cover_page(text: str) -> bool:
+        """Identify publisher front matter rather than a paper's title page."""
+        import re
+
+        text = re.sub(r'\s+', ' ', text).lower()
+        return (
+            'usenix' in text
+            and 'this paper is included in the proceedings' in text
+            and 'open access to the proceedings' in text
+        )
         
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """
@@ -400,7 +412,7 @@ class PDFProcessor:
             r'^\d+(?:st|nd|rd|th)\s+usenix\b.*\b(symposium|conference|workshop)\b',
             r'^\d{4}-\d{1,5}\s*\d{2}-\d{1,5}-\d{1,5}$',  # ISBN-like rows from cover pages
             r'^[\d\s-]{10,}$',  # ISBN/catalog rows with extraction-inserted spaces
-            r'^[a-z]+\s+\d{1,2}\s*[–-]\s*\d{1,2},\s*\d{4}$',  # "August 11-13, 2021"
+            r'^[a-z]+\s+\d{1,2}\s*[–-]\s*\d{1,2},\s*\d{4}(?:\s*[•·].*)?$',
             r'^(preprint|arxiv|draft)',
             r'^(ieee|acm|springer|elsevier)',
             r'^https?://',

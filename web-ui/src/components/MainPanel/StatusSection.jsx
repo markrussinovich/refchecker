@@ -1434,7 +1434,9 @@ export default function StatusSection() {
               </button>
             )}
           </div>
-          {isViewingCheck && ['completed', 'cancelled'].includes(displayStatus) && (
+          {isViewingCheck && (
+            isCompleted || isCancelled || (isInProgress && displayTotalRefs > 0)
+          ) && (
             <PaperAuthors key={selectedCheckId} checkId={selectedCheckId} />
           )}
           {/* Hide source info for pasted text since it shows the file path or text content */}

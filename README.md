@@ -135,7 +135,7 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | Category | What it does |
 |----------|-------------|
 | **Input formats** | ArXiv IDs/URLs, PDFs, LaTeX (.tex), BibTeX (.bib/.bbl), plain text |
-| **Verification sources** | Semantic Scholar, OpenAlex, CrossRef, DBLP, ACL Anthology |
+| **Verification sources** | Semantic Scholar, OpenAlex, CrossRef, DBLP, ACL Anthology, official USENIX Security proceedings |
 | **LLM extraction** | OpenAI, ChatGPT plan usage, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
@@ -149,6 +149,12 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **Share & export** | **Self-contained HTML report**, **publish-to-web link** (GitHub Gist), an **animated video** walkthrough, and **RIS** export for Zotero / EndNote / Mendeley |
 | **Web UI** | Real-time progress, history sidebar, batch tracking, split extraction/hallucination LLM settings, export (Markdown/text/BibTeX), dark mode |
 | **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
+
+USENIX Security citations missing from the bibliographic indexes are checked
+against the official conference program and paper-page citation metadata.
+Discovery uses the venue and year, or an explicit USENIX Security presentation
+URL. This fallback is automatic in CLI, bulk, and WebUI checks, caches pages,
+and respects USENIX's 10-second crawl delay.
 
 ---
 

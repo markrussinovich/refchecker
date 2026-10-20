@@ -227,6 +227,55 @@ def test_core_only_installation_extracts_authors_without_pymupdf(tmp_path, monke
     monkeypatch.setitem(sys.modules, "fitz", None)
     assert paper_metadata.extract_pdf_paper_authors(path, TITLE) == [{"name": "Jane Doe"}]
 
+@pytest.mark.parametrize("core_only", [False, True])
+def test_usenix_authors_come_from_title_page_not_cover(tmp_path, monkeypatch, clients, core_only):
+    import sys
+    import fitz
+    from refchecker.services.pdf_processor import PDFProcessor
+
+    path = tmp_path / "usenix.pdf"
+    with fitz.open() as document:
+        cover = document.new_page()
+        for y, text in [
+            (80, "This paper is included in the Proceedings of the"),
+            (100, "34th USENIX Security Symposium."),
+            (120, "August 13-15, 2025"),
+            (140, "Open access to the Proceedings of the"),
+            (160, "34th USENIX Security Symposium is sponsored by USENIX."),
+            (500, TITLE),
+            (530, "Jane Doe, John Smith, Example University"),
+        ]:
+            cover.insert_text((50, y), text, fontsize=12)
+        page = document.new_page()
+        page.insert_text((50, 70), TITLE, fontsize=16)
+        page.insert_text((50, 110), "Jane Doe, John Smith*", fontsize=12)
+        page.insert_text((50, 140), "Example University", fontsize=10)
+        page.insert_text((50, 170), "Abstract: Results.", fontsize=10)
+        document.save(path)
+
+    if core_only:
+        monkeypatch.setitem(sys.modules, "fitz", None)
+    title = PDFProcessor().extract_title_from_pdf(str(path))
+    assert title == TITLE
+    result = paper_metadata.resolve_paper_authors(title, pdf_path=str(path))
+    assert result["source"] == "pdf"
+    assert result["authors"] == [{"name": "Jane Doe"}, {"name": "John Smith"}]
+    clients[0].search_works.assert_not_called()
+
+
+def test_second_page_is_not_used_without_a_publisher_cover(tmp_path):
+    import fitz
+    path = tmp_path / "not-a-cover.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((50, 70), TITLE, fontsize=16)
+        page.insert_text((50, 110), "Abstract: Anonymous paper.", fontsize=10)
+        page = document.new_page()
+        page.insert_text((50, 70), TITLE, fontsize=16)
+        page.insert_text((50, 110), "Jane Doe", fontsize=12)
+        document.save(path)
+    assert paper_metadata.extract_pdf_paper_authors(str(path), TITLE) == []
+
 
 def test_paper_metadata_persists_without_changing_reference_results(tmp_path):
     async def scenario():

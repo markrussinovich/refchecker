@@ -257,7 +257,8 @@ class EnhancedHybridReferenceChecker:
         all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
         for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
                         self.openalex, self.crossref, self.openreview, self.dblp,
-                        self.acl_anthology, self.paperclip, self.datacite):
+                        self.acl_anthology, self.paperclip, self.datacite,
+                        self.official_proceedings):
             if checker is not None:
                 checker.cache_dir = cache_dir
 
@@ -1872,6 +1873,22 @@ class EnhancedHybridReferenceChecker:
                         failed_api['failure_detail'] = retry_failure_detail
                         failed_api['active'] = retry_failure_type not in ('none', 'not_found')
         
+        # Prefer authoritative proceedings to incomplete database metadata.
+        if getattr(self, 'official_proceedings', None):
+            self._append_attempted_api(attempted_apis, 'official_proceedings')
+            proceedings_data, proceedings_errors, proceedings_url, success, failure_type, failure_detail = self._try_api(
+                'official_proceedings', self.official_proceedings, reference,
+            )
+            if success:
+                return proceedings_data, proceedings_errors, proceedings_url
+            if failure_type not in ('none', 'not_found'):
+                failed_apis.append({
+                    'name': 'official_proceedings',
+                    'failure_type': failure_type,
+                    'failure_detail': failure_detail,
+                    'active': True,
+                })
+
         # PHASE 3: If all APIs failed or returned incomplete data, use best available incomplete data as fallback
         incomplete_results = [r for r in [crossref_result, openalex_result] if r is not None]
         if incomplete_results:
@@ -1893,21 +1910,6 @@ class EnhancedHybridReferenceChecker:
             if report_data:
                 logger.debug("Enhanced Hybrid: Institutional report verification succeeded")
                 return report_data, report_errors, report_url
-
-        # PHASE 3.4: Official event programs for lightly indexed workshop
-        # abstracts and posters.
-        if getattr(self, 'official_proceedings', None):
-            self._append_attempted_api(attempted_apis, 'official_proceedings')
-            try:
-                proceedings_data, proceedings_errors, proceedings_url = (
-                    self.official_proceedings.verify_reference(reference)
-                )
-            except Exception as exc:
-                logger.debug(f"Enhanced Hybrid: Official proceedings check failed: {exc}")
-                proceedings_data = None
-            if proceedings_data:
-                logger.debug("Enhanced Hybrid: Official proceedings verification succeeded")
-                return proceedings_data, proceedings_errors, proceedings_url
 
         # PHASE 3.5: DataCite fallback. CrossRef/OpenAlex/Semantic Scholar
         # only inconsistently index DOIs registered through DataCite

@@ -145,9 +145,21 @@ describe('StatusSection hallucination model display', () => {
     expect(screen.getByTestId('paper-authors')).toHaveTextContent('Authors for check 42')
   })
 
-  it('waits for completion before looking up paper authors', () => {
-    render(<StatusSection />)
+  it('waits for source extraction, not verification completion, before looking up authors', () => {
+    const { rerender } = render(<StatusSection />)
     expect(screen.queryByTestId('paper-authors')).not.toBeInTheDocument()
+
+    historyState.selectedCheck = {
+      ...historyState.selectedCheck,
+      total_refs: 55,
+      processed_refs: 6,
+      extraction_method: 'cache',
+      bibliography_source_kind: 'cache',
+    }
+    rerender(<StatusSection />)
+    expect(screen.getByTestId('paper-authors')).toHaveTextContent('Authors for check 42')
+    expect(screen.getByText('Cached bibliography')).toBeInTheDocument()
+    expect(screen.getByText('Processed 6 of 55 references...')).toBeInTheDocument()
   })
 })
 

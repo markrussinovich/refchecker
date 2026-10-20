@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def _title_page_names(text: str) -> list[str]:
     """Accept personal-name lines, not affiliations, headings or prose."""
-    text = re.sub(r"[0-9*†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹]+", "", text).strip()
+    text = re.sub(r"[0-9*∗†‡§¶#⁰¹²³⁴⁵⁶⁷⁸⁹]+", "", text).strip()
     if re.search(
         r"\b(university|institute|institution|college|department|school|laboratory|"
         r"labs?|research|center|centre|corporation|company|organization|"
@@ -52,13 +52,21 @@ def _extract_pdf_authors_with_pypdf(pdf_path: str, title: str) -> list[dict]:
     """Text-layout fallback for core-only installations without PyMuPDF."""
     from pypdf import PdfReader
     from pypdf.errors import PdfReadError
+    from refchecker.services.pdf_processor import PDFProcessor
 
     try:
         with open(pdf_path, "rb") as source:
             reader = PdfReader(source)
             if not reader.pages:
                 return []
-            lines = [line.strip() for line in reader.pages[0].extract_text(extraction_mode="layout").splitlines()
+            page = reader.pages[0]
+            if len(reader.pages) > 1 and PDFProcessor.is_usenix_cover_page(page.extract_text() or ""):
+                # Plain extraction preserves the byline's word spacing; USENIX
+                # title-page kerning expands every space in layout mode.
+                text = reader.pages[1].extract_text() or ""
+            else:
+                text = page.extract_text(extraction_mode="layout") or ""
+            lines = [line.strip() for line in text.splitlines()
                      if line.strip()]
     except PdfReadError as exc:
         logger.warning("Unable to read PDF authors from %s: %s", pdf_path, exc)
@@ -81,14 +89,15 @@ def _extract_pdf_authors_with_pypdf(pdf_path: str, title: str) -> list[dict]:
 
 
 def extract_pdf_paper_authors(pdf_path: str, title: str = "") -> list[dict]:
-    """Read author lines below the actual first-page title, using PDF geometry.
+    """Read author lines below the actual title, using PDF geometry.
 
     Small superscripts are excluded before parsing names. Affiliation and body
     text cannot supply authors, and only rows matching the author typography
     are accepted once the byline has started.
     """
+    from refchecker.services.pdf_processor import PDFProcessor
+
     if not title:
-        from refchecker.services.pdf_processor import PDFProcessor
         title = PDFProcessor().extract_title_from_pdf(pdf_path) or ""
     normalized_title = normalize_paper_title(title)
     if not normalized_title:
@@ -103,6 +112,8 @@ def extract_pdf_paper_authors(pdf_path: str, title: str = "") -> list[dict]:
             if not len(document):
                 return []
             page = document[0]
+            if len(document) > 1 and PDFProcessor.is_usenix_cover_page(page.get_text()):
+                page = document[1]
             lines = []
             for block in page.get_text("dict")["blocks"]:
                 for line in block.get("lines", []):

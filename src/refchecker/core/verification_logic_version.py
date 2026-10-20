@@ -31,8 +31,10 @@ History:
         with the shared scorer and the shared acceptance threshold instead of a
         private token-Jaccard with its own cut-offs, so a reference is judged
         the same whether it was verified fresh or replayed from cache.
+    5 - USENIX Security references can be verified against official proceedings,
+        including when bibliographic APIs return incomplete metadata.
 """
 
-VERIFICATION_LOGIC_VERSION = 4
+VERIFICATION_LOGIC_VERSION = 5
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]
