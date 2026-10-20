@@ -267,17 +267,12 @@ def test_reuses_persistent_page_cache(usenix_checker, tmp_path):
 def test_honors_usenix_crawl_delay(usenix_checker, monkeypatch):
     monkeypatch.setattr(OfficialProceedingsChecker, "_USENIX_REQUEST_INTERVAL", 10)
     monkeypatch.setattr(OfficialProceedingsChecker, "_usenix_last_request", 0)
-    with (
-        patch(
-            "refchecker.checkers.official_proceedings.time.monotonic",
-            side_effect=[100, 100, 100, 110],
-        ),
-        patch("refchecker.checkers.official_proceedings.time.sleep") as sleep,
-    ):
+    with patch("refchecker.checkers.official_proceedings.time") as clock:
+        clock.monotonic.side_effect = [100, 100, 100, 110]
         data, errors, _ = usenix_checker.verify_reference(_usenix_reference())
     assert data is not None
     assert errors == []
-    sleep.assert_called_once_with(10)
+    clock.sleep.assert_called_once_with(10)
 
 
 @pytest.mark.parametrize(
