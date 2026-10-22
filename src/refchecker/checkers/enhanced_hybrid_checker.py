@@ -598,6 +598,21 @@ class EnhancedHybridReferenceChecker:
                 if is_valid_doi_format(doi):
                     return doi
         return None
+
+    def _is_cited_publication_match(
+        self,
+        verified_data: Optional[Dict[str, Any]],
+        reference: Dict[str, Any],
+    ) -> bool:
+        doi = self._cited_doi(reference)
+        if not doi or doi.startswith('10.48550/arxiv.') or not verified_data:
+            return False
+        matched_doi = verified_data.get('DOI') or verified_data.get('doi')
+        return (
+            verified_data.get('_matched_checker') == 'crossref'
+            and isinstance(matched_doi, str)
+            and normalize_doi(matched_doi) == doi
+        )
     
     def _is_data_complete(self, verified_data: Dict[str, Any], reference: Dict[str, Any]) -> bool:
         """
@@ -1520,14 +1535,19 @@ class EnhancedHybridReferenceChecker:
         Called at the end of verify_reference() so CLI, WebUI, and bulk
         all get identical results.
         """
+        # An accessible preprint must not replace the cited publication.
+        publication_match = self._is_cited_publication_match(
+            verified_data, reference,
+        )
+
         # 1. ArXiv re-verify when the DB matched the wrong paper
-        if errors and verified_data is not None:
+        if errors and verified_data is not None and not publication_match:
             re_result = self._try_arxiv_re_verify(errors, verified_data, reference)
             if re_result is not None:
                 errors, url, verified_data = re_result
 
         # 2. Convert ArXiv version-only metadata differences to warnings.
-        if errors and verified_data is not None:
+        if errors and verified_data is not None and not publication_match:
             verified_data, errors, url = self._apply_arxiv_version_warnings(
                 verified_data, errors, url, reference,
             )
@@ -1692,10 +1712,10 @@ class EnhancedHybridReferenceChecker:
         is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
         preferred_crossref_result = None
 
-        # Aggregated indexes can pair a preprint year with a publication DOI.
-        # Resolve the cited DOI before accepting their local or remote record.
+        # A publication DOI selects the cited version even when an arXiv URL
+        # provides an accessible copy. ArXiv DOIs still select the preprint.
         doi = self._cited_doi(reference)
-        if doi and not is_arxiv and self.crossref:
+        if doi and not doi.startswith('10.48550/arxiv.') and self.crossref:
             reference = dict(reference, doi=doi)
             self._append_attempted_api(attempted_apis, 'crossref')
             data, errors, url, success, failure_type, failure_detail = self._try_api(
@@ -1703,9 +1723,11 @@ class EnhancedHybridReferenceChecker:
             )
             if success:
                 preferred_crossref_result = (data, errors, url)
-                matched_doi = (data or {}).get('DOI') or (data or {}).get('doi')
-                if (isinstance(matched_doi, str) and normalize_doi(matched_doi) == doi
-                        and self._is_data_complete(data, reference)):
+                if (
+                    data is not None
+                    and self._is_cited_publication_match(data, reference)
+                    and self._is_data_complete(data, reference)
+                ):
                     return data, errors, url
             elif failure_type not in ('none', 'not_found'):
                 failed_apis.append({

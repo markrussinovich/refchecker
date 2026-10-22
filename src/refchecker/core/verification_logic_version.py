@@ -37,8 +37,10 @@ History:
         explicit ArXiv citations retain their preprint venue and DOI.
     7 - Cached verdicts cannot replace a newly cited year; preprints and
         publications are not treated as inconsistent versions in Seen Refs.
+    8 - Publication DOIs retain their metadata when an arXiv URL supplies
+        an accessible copy, including during ArXiv post-verification checks.
 """
 
-VERIFICATION_LOGIC_VERSION = 7
+VERIFICATION_LOGIC_VERSION = 8
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]

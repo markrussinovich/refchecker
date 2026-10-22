@@ -243,7 +243,10 @@ def test_resnet_publication_doi_precedes_merged_preprint_record(resnet_checker, 
     checker.semantic_scholar.verify_reference.assert_not_called()
 
 
-def test_explicit_resnet_preprint_keeps_preprint_year_and_doi(resnet_checker, monkeypatch):
+@pytest.mark.parametrize('doi', [None, '10.48550/arXiv.1512.03385'])
+def test_explicit_resnet_preprint_keeps_preprint_year_and_doi(
+    resnet_checker, monkeypatch, doi,
+):
     checker = resnet_checker
     checker.arxiv_citation = ArXivCitationChecker()
     monkeypatch.setattr(checker.arxiv_citation, 'fetch_bibtex', Mock(return_value=r"""
@@ -256,6 +259,8 @@ def test_explicit_resnet_preprint_keeps_preprint_year_and_doi(resnet_checker, mo
     reference = dict(RESNET_REFERENCE, year=2015, venue='arXiv',
                      url='https://arxiv.org/abs/1512.03385')
     reference.pop('doi')
+    if doi:
+        reference['doi'] = doi
 
     data, errors, url = checker.verify_reference(reference)
 
@@ -265,6 +270,178 @@ def test_explicit_resnet_preprint_keeps_preprint_year_and_doi(resnet_checker, mo
     assert not any(error.get('warning_type') == 'year' for error in errors)
     assert data['externalIds'].get('DOI') != RESNET_REFERENCE['doi']
     checker.crossref._get_work_by_doi_uncached.assert_not_called()
+
+
+@pytest.fixture(params=[
+    pytest.param({
+        'title': 'Focal Loss for Dense Object Detection',
+        'authors': [
+            'Tsung-Yi Lin', 'Priya Goyal', 'Ross Girshick', 'Kaiming He',
+            'Piotr Dollar',
+        ],
+        'year': 2020,
+        'venue': (
+            'IEEE Transactions on Pattern Analysis and Machine Intelligence'
+        ),
+        'doi': '10.1109/TPAMI.2018.2858826',
+        'arxiv_id': '1708.02002',
+        'preprint_year': 2017,
+    }, id='focal-loss'),
+    pytest.param({
+        'title': 'Densely Connected Convolutional Networks',
+        'authors': [
+            'Gao Huang', 'Zhuang Liu', 'Laurens van der Maaten',
+            'Kilian Q. Weinberger',
+        ],
+        'year': 2017,
+        'venue': (
+            '2017 IEEE Conference on Computer Vision and '
+            'Pattern Recognition (CVPR)'
+        ),
+        'doi': '10.1109/CVPR.2017.243',
+        'arxiv_id': '1608.06993',
+        'preprint_year': 2016,
+    }, id='densenet'),
+])
+def publication_checker(request, resnet_checker, monkeypatch):
+    reference = dict(request.param)
+    arxiv_id = reference.pop('arxiv_id')
+    preprint_year = reference.pop('preprint_year')
+    reference['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+    checker = resnet_checker
+    work = {
+        'DOI': reference['doi'],
+        'title': [reference['title']],
+        'author': [
+            {'given': name.rsplit(' ', 1)[0], 'family': name.rsplit(' ', 1)[1]}
+            for name in reference['authors']
+        ],
+        'container-title': [reference['venue']],
+        'published-print': {'date-parts': [[reference['year'], 2]]},
+        'URL': 'https://doi.org/' + reference['doi'],
+        'type': (
+            'journal-article' if reference['year'] == 2020
+            else 'proceedings-article'
+        ),
+    }
+    monkeypatch.setattr(checker.crossref, '_get_work_by_doi_uncached',
+                        Mock(side_effect=lambda doi: deepcopy(work)))
+    checker.semantic_scholar = None
+    checker.arxiv_citation = ArXivCitationChecker()
+    bibtex = (
+        '@misc{preprint, title={' + reference['title'] + '}, author={'
+        + ' and '.join(reference['authors']) + '}, year={'
+        + str(preprint_year) + '}, eprint={' + arxiv_id + '}}'
+    )
+    monkeypatch.setattr(
+        checker.arxiv_citation, 'fetch_bibtex', Mock(return_value=bibtex),
+    )
+    return checker, reference
+
+
+@pytest.mark.parametrize(('copy_field', 'copy_path'), [
+    ('url', 'abs'), ('url', 'pdf'), ('cited_url', 'abs'),
+])
+def test_publication_doi_metadata_is_independent_of_accessible_copy(
+    publication_checker, copy_field, copy_path,
+):
+    checker, reference = publication_checker
+    doi_result = checker.verify_reference(dict(
+        reference, url='https://doi.org/' + reference['doi'],
+    ))
+    copy_url = reference.pop('url').replace('/abs/', f'/{copy_path}/')
+    reference[copy_field] = copy_url
+
+    data, errors, url = checker.verify_reference(reference)
+
+    assert (data, errors, url) == doi_result
+    assert data['_matched_checker'] == 'crossref'
+    assert data['year'] == reference['year']
+    assert data['venue'] == reference['venue']
+    assert errors == []
+    checker.arxiv_citation.fetch_bibtex.assert_not_called()
+
+
+@pytest.mark.parametrize('failure', [
+    'not_found', 'timeout', 'incomplete', 'other_doi', 'disabled',
+])
+def test_publication_doi_failure_allows_arxiv_copy_fallback(
+    publication_checker, failure, monkeypatch,
+):
+    checker, reference = publication_checker
+    if failure == 'disabled':
+        checker.crossref = None
+    elif failure == 'timeout':
+        monkeypatch.setattr(
+            checker.crossref, 'verify_reference',
+            Mock(side_effect=requests.Timeout('offline')),
+        )
+    else:
+        work = checker.crossref._get_work_by_doi_uncached(reference['doi'])
+        if failure == 'not_found':
+            work = None
+        elif failure == 'incomplete':
+            work['author'] = []
+        else:
+            work['DOI'] = '10.1000/another-version'
+        monkeypatch.setattr(checker.crossref, 'verify_reference', Mock(
+            return_value=(work, [], 'https://doi.org/10.1000/another-version'),
+        ))
+
+    data, _, url = checker.verify_reference(reference)
+
+    assert data['_matched_checker'] == 'arxiv_citation'
+    assert data['venue'] == 'arXiv'
+    assert data['year'] < reference['year']
+    assert url == reference['url']
+    checker.arxiv_citation.fetch_bibtex.assert_called()
+
+
+@pytest.mark.parametrize(('field', 'value', 'issue_type'), [
+    ('title', 'A Completely Different Paper', 'title'),
+    ('authors', ['Invented Author'], 'author'),
+    ('year', 2015, 'year'),
+    ('venue', 'Nature', 'venue'),
+])
+def test_arxiv_postprocessing_cannot_replace_publication_doi_match(
+    publication_checker, monkeypatch, field, value, issue_type,
+):
+    checker, reference = publication_checker
+    preprint = {
+        'title': reference['title'],
+        'authors': [{'name': name} for name in reference['authors']],
+        'year': 2016,
+        'venue': 'arXiv',
+    }
+    version_result = (
+        preprint,
+        [{
+            'warning_type': 'author (v1 vs v2 update)',
+            'warning_details': 'Preprint version update',
+        }],
+        reference['url'],
+    )
+    monkeypatch.setattr(
+        checker.arxiv_citation, 'verify_reference',
+        Mock(return_value=version_result),
+    )
+
+    data, errors, url = checker.verify_reference(dict(
+        reference, **{field: value},
+    ))
+
+    assert data['_matched_checker'] == 'crossref'
+    assert data['doi'].lower() == reference['doi'].lower()
+    assert data['year'] == reference['year']
+    assert data['venue'] == reference['venue']
+    assert url == 'https://doi.org/' + reference['doi']
+    assert any(
+        (issue.get('error_type') or issue.get('warning_type')) == issue_type
+        for issue in errors
+    )
+    assert not any(
+        'update' in issue.get('warning_type', '') for issue in errors
+    )
 
 
 @pytest.mark.parametrize(
@@ -355,23 +532,34 @@ def test_cached_doi_response_keeps_publication_metadata(resnet_checker, tmp_path
     checker.crossref._get_work_by_doi_uncached.assert_called_once()
 
 
-def test_doi_version_selection_matches_cli_bulk_and_webui(resnet_checker):
+@pytest.mark.parametrize('with_arxiv_copy', [False, True])
+def test_doi_version_selection_matches_cli_bulk_and_webui(
+    publication_checker, with_arxiv_copy,
+):
     from backend.refchecker_wrapper import ProgressRefChecker
     from refchecker.core.refchecker import ArxivReferenceChecker
 
+    checker, reference = publication_checker
+    if not with_arxiv_copy:
+        reference.pop('url')
     cli = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
-    cli.non_arxiv_checker = resnet_checker
+    cli.non_arxiv_checker = checker
     cli.verify_github_reference = lambda ref: None
     cli.verify_webpage_reference = lambda ref: None
     web = ProgressRefChecker.__new__(ProgressRefChecker)
-    web.checker = resnet_checker
+    web.checker = checker
     web.check_id = None
-    cli_errors, cli_url, cli_data = cli.verify_reference_standard(None, deepcopy(RESNET_REFERENCE))
-    bulk_errors, bulk_url, bulk_data = cli.verify_reference(None, deepcopy(RESNET_REFERENCE))
-    web_result = web._verify_reference(deepcopy(RESNET_REFERENCE))
+    cli_errors, cli_url, cli_data = cli.verify_reference_standard(
+        None, deepcopy(reference),
+    )
+    bulk_errors, bulk_url, bulk_data = cli.verify_reference(
+        None, deepcopy(reference),
+    )
+    web_result = web._verify_reference(deepcopy(reference))
 
     assert (cli_data, cli_errors or [], cli_url) == (bulk_data, bulk_errors or [], bulk_url) == web_result
-    assert cli_data['year'] == 2016
+    assert cli_data['_matched_checker'] == 'crossref'
+    assert cli_data['year'] == reference['year']
     assert not cli_errors
 
 
