@@ -246,5 +246,110 @@ class TestBibTeXValidationFixes(unittest.TestCase):
                                   f"Entry has year=0: {entry.get('bibtex_key', 'No key')}")
 
 
+class TestNumericBibTeXValues(unittest.TestCase):
+    def test_numeric_fields_preserve_values_and_adjacent_fields(self):
+        from refchecker.utils.bibtex_parser import parse_bibtex_entries
+
+        fields = (
+            'year = 2017, title = {Dense Networks}, volume = 0, number = 12',
+            'title = {Dense Networks}, year =\n 2017 \t, '
+            'volume = 0, number = 12',
+            'title = {Dense Networks}, volume = 0, number = 12, year = 2017',
+            'title = {Dense Networks}, volume = 0, number = 12, '
+            'year = 2017,\n',
+        )
+        for content in fields:
+            with self.subTest(content=content):
+                entry = parse_bibtex_entries('@article{x, ' + content + '}')[0]
+                self.assertEqual(entry['fields'], {
+                    'title': 'Dense Networks',
+                    'year': '2017',
+                    'volume': '0',
+                    'number': '12',
+                })
+
+    def test_numeric_year_is_not_replaced_by_eprint_year(self):
+        from refchecker.utils.bibtex_parser import parse_bibtex_references
+
+        reference = parse_bibtex_references(
+            '@article{x, title={Densely Connected Convolutional Networks}, '
+            'author={Huang, Gao}, eprint={1608.06993}, year=2012}'
+        )[0]
+
+        self.assertEqual(reference['year'], 2012)
+
+    def test_numeric_year_mismatches_match_cli_bulk_and_webui(self):
+        from copy import deepcopy
+        from unittest.mock import Mock, patch
+
+        from backend.refchecker_wrapper import ProgressRefChecker
+        from refchecker.checkers.crossref import CrossRefReferenceChecker
+        from refchecker.checkers.enhanced_hybrid_checker import (
+            EnhancedHybridReferenceChecker,
+        )
+        from refchecker.utils.text_utils import extract_latex_references
+
+        with patch.object(
+            EnhancedHybridReferenceChecker, '_initialize_checker',
+            return_value=None,
+        ):
+            checker = EnhancedHybridReferenceChecker()
+        checker.crossref = CrossRefReferenceChecker()
+        checker.crossref._get_work_by_doi_uncached = Mock(return_value={
+            'DOI': '10.1109/CVPR.2017.243',
+            'title': ['Densely Connected Convolutional Networks'],
+            'author': [{'given': 'Gao', 'family': 'Huang'}],
+            'container-title': ['CVPR'],
+            'published-print': {'date-parts': [[2017, 7]]},
+            'URL': 'https://doi.org/10.1109/CVPR.2017.243',
+            'type': 'proceedings-article',
+        })
+        checker._cross_verify_secondary = Mock()
+        cli = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+        cli.non_arxiv_checker = checker
+        cli.verify_github_reference = lambda ref: None
+        cli.verify_webpage_reference = lambda ref: None
+        web = ProgressRefChecker.__new__(ProgressRefChecker)
+        web.checker = checker
+        web.check_id = None
+
+        for value, year in (
+            ('2012', 2012), ('{2012}', 2012), ('"2012"', 2012), ('2017', 2017),
+        ):
+            with self.subTest(year=value):
+                bibtex = (
+                    '@inproceedings{x, '
+                    'title={Densely Connected Convolutional Networks}, '
+                    'author={Huang, Gao}, booktitle={CVPR}, '
+                    'doi={10.1109/CVPR.2017.243}, year=' + value + '}'
+                )
+                reference = cli._parse_bibtex_references(bibtex)[0]
+                web_reference = extract_latex_references(bibtex)[0]
+                self.assertEqual(reference['year'], year)
+                self.assertEqual(reference, web_reference)
+
+                errors, url, data = cli.verify_reference_standard(
+                    None, deepcopy(reference),
+                )
+                bulk_errors, bulk_url, bulk_data = cli.verify_reference(
+                    None, deepcopy(reference),
+                )
+                web_result = web._verify_reference(deepcopy(web_reference))
+
+                self.assertEqual(
+                    (data, errors or [], url),
+                    (bulk_data, bulk_errors or [], bulk_url),
+                )
+                self.assertEqual((data, errors or [], url), web_result)
+                self.assertEqual(data['year'], 2017)
+                if year == 2012:
+                    self.assertEqual(len(errors), 1)
+                    self.assertEqual(errors[0]['warning_type'], 'year')
+                    self.assertEqual(errors[0]['ref_year_correct'], 2017)
+                    self.assertIn('2012', errors[0]['warning_details'])
+                else:
+                    self.assertFalse(errors)
+
+
 if __name__ == '__main__':
     unittest.main()

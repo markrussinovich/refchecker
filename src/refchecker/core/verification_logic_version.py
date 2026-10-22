@@ -39,8 +39,10 @@ History:
         publications are not treated as inconsistent versions in Seen Refs.
     8 - Publication DOIs retain their metadata when an arXiv URL supplies
         an accessible copy, including during ArXiv post-verification checks.
+    9 - Bare numeric BibTeX years are preserved so incorrect cited years
+        cannot disappear or be replaced by an inferred preprint year.
 """
 
-VERIFICATION_LOGIC_VERSION = 8
+VERIFICATION_LOGIC_VERSION = 9
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]
