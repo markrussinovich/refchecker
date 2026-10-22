@@ -170,6 +170,15 @@ def parse_bibtex_entry_content(entry_type: str, entry_key: str, content: str) ->
             if i < len(content):
                 field_value = content[value_start:i]
                 i += 1  # Skip closing brace
+        else:
+            # Handle bare values: numbers and macros are valid unquoted BibTeX
+            # values, e.g. year = 2017, volume = 12, month = jan. Reading up to
+            # the field separator keeps entries that mix braced and bare values
+            # from silently losing the bare ones.
+            value_start = i
+            while i < len(content) and content[i] not in ',}':
+                i += 1
+            field_value = content[value_start:i].strip()
         
         if field_value:
             field_value = field_value.strip()
@@ -187,11 +196,15 @@ def parse_bibtex_entry_content(entry_type: str, entry_key: str, content: str) ->
     # Fallback to regex if manual parsing failed
     if not fields:
         logger.debug("Manual parsing failed, trying regex approach")
-        field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)")'
+        field_pattern = (
+            r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+            r'|"([^"]*)"'
+            r'|([^,{}\s]+))'
+        )
         
         for match in re.finditer(field_pattern, content, re.DOTALL):
             field_name = match.group(1).lower()
-            field_value = match.group(2) or match.group(3) or ""
+            field_value = match.group(2) or match.group(3) or match.group(4) or ""
             field_value = field_value.strip()
             if field_value.startswith('"') and field_value.endswith('"'):
                 field_value = field_value[1:-1]
