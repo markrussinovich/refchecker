@@ -151,4 +151,38 @@ describe('LLMConfigModal', () => {
     })
     expect(screen.getByText('Live list from your ChatGPT account (3 models).')).toBeTruthy()
   })
+
+  it('saves a LiteLLM config without an API key and validates it first', async () => {
+    mocks.addConfig.mockResolvedValue({ id: 10, provider: 'litellm', model: 'bedrock/us.anthropic.claude-sonnet-4-6-v1:0' })
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'litellm' },
+    })
+
+    expect(screen.getByText(/Leave blank to use the provider's own environment variables/)).toBeTruthy()
+    expect(screen.getByLabelText(/Endpoint URL/i)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(/^Model/), {
+      target: { value: 'bedrock/us.anthropic.claude-sonnet-4-6-v1:0' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add Configuration/i }))
+
+    await waitFor(() => {
+      expect(mocks.validateLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'litellm',
+        model: 'bedrock/us.anthropic.claude-sonnet-4-6-v1:0',
+        api_key: null,
+      }))
+      expect(mocks.addConfig).toHaveBeenCalledWith(
+        expect.not.objectContaining({ api_key: expect.anything() }),
+        expect.anything(),
+      )
+    })
+  })
+
+  it('hides LiteLLM in multiuser mode', () => {
+    mocks.multiuser = true
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+
+    expect(screen.queryByRole('option', { name: 'LiteLLM (Local)' })).toBeNull()
+  })
 })

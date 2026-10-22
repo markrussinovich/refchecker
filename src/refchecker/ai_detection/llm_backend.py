@@ -114,11 +114,15 @@ class LLMJudgeBackend(DetectionBackend):
             self.provider, self._DEFAULT_MODELS["openai"]
         )
         self.client = None
-        if not self.api_key:
+        # LiteLLM can run on the provider's own env credentials.
+        if not self.api_key and self.provider != "litellm":
             logger.debug("LLM-judge backend: no API key (provider=%s)", self.provider)
             return
         try:
-            if self.provider == "anthropic":
+            if self.provider == "litellm":
+                from refchecker.llm.providers import import_litellm
+                self.client = import_litellm()
+            elif self.provider == "anthropic":
                 import anthropic
                 self.client = anthropic.Anthropic(api_key=self.api_key, timeout=120.0)
             elif self.provider == "google":
@@ -165,6 +169,19 @@ class LLMJudgeBackend(DetectionBackend):
             )
             self._track(resp)
             return extract_google_response_text(resp).strip()
+        if self.provider == "litellm":
+            from refchecker.llm.providers import litellm_call_kwargs
+            resp = self.client.completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=1500,
+                temperature=0.0,
+                **litellm_call_kwargs(self.model, self.api_key, self.endpoint),
+            )
+            self._track(resp)
+            return (resp.choices[0].message.content or "").strip()
         # openai / azure / vllm
         from refchecker.llm.providers import _openai_token_kwargs, _is_openai_reasoning_model
         kwargs = dict(
@@ -206,10 +223,15 @@ class LLMJudgeBackend(DetectionBackend):
         # Per-check meter (drives the on-screen token/$ badge + batch usage).
         try:
             if u is not None:
+                cost_usd = None
+                if self.provider == "litellm":
+                    from refchecker.llm.providers import _litellm_response_cost
+                    cost_usd = _litellm_response_cost(response)
                 record_detection_usage(
                     self.check_id, self.model,
                     input_tokens=u.get("input_tokens", 0),
                     output_tokens=u.get("output_tokens", 0),
+                    cost_usd=cost_usd,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("ai_detection per-check usage tracking skipped: %s", exc)

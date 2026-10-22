@@ -4,7 +4,7 @@
 single delimited document block supplied at call time. It clones the provider
 chat-call paths (``_init_openai`` / ``_init_anthropic`` / ``_init_google`` plus
 ``_call_*_chat``) from ``refchecker.llm.hallucination_verifier`` so the same
-configured providers (OpenAI / Azure / vLLM, Anthropic, Google) work here.
+configured providers (OpenAI / Azure / vLLM, Anthropic, Google, LiteLLM) work here.
 
 Honesty constraints (by construction):
   * The system prompt instructs the model to answer ONLY from the delimited
@@ -82,7 +82,7 @@ def _build_document_block(grounding: str) -> str:
 class ArticleAssistant:
     """Grounded chat + summarize over a single article's text.
 
-    Supports OpenAI / Azure / vLLM (OpenAI client), Anthropic, and Google.
+    Supports OpenAI / Azure / vLLM (OpenAI client), Anthropic, Google, and LiteLLM.
     Mirrors ``LLMHallucinationVerifier`` init + chat-call paths but uses plain
     chat completions (no web search) since answers must stay grounded in the
     supplied document only.
@@ -122,7 +122,8 @@ class ArticleAssistant:
         self.model = model or default_models.get(self.provider, default_models.get('openai'))
         self.client = None
 
-        if not self.api_key:
+        # LiteLLM can run on the provider's own env credentials.
+        if not self.api_key and self.provider != 'litellm':
             logger.debug('No API key for ArticleAssistant (provider=%s)', self.provider)
             return
 
@@ -131,6 +132,8 @@ class ArticleAssistant:
                 self._init_anthropic()
             elif self.provider == 'google':
                 self._init_google()
+            elif self.provider == 'litellm':
+                self._init_litellm()
             else:
                 # OpenAI, Azure, vLLM all use the OpenAI client
                 self._init_openai()
@@ -164,6 +167,11 @@ class ArticleAssistant:
         from google import genai
         self.client = genai.Client(api_key=self.api_key)
         logger.debug('ArticleAssistant initialized (provider=google, model=%s)', self.model)
+
+    def _init_litellm(self) -> None:
+        from refchecker.llm.providers import import_litellm
+        self.client = import_litellm()
+        logger.debug('ArticleAssistant initialized (provider=litellm, model=%s)', self.model)
 
     @property
     def available(self) -> bool:
@@ -243,6 +251,17 @@ class ArticleAssistant:
         self._record_usage('google', resp)
         return extract_google_response_text(resp).strip()
 
+    def _call_litellm_chat(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
+        from refchecker.llm.providers import litellm_call_kwargs
+        resp = self.client.completion(
+            messages=[{'role': 'system', 'content': system_prompt}, *messages],
+            max_tokens=900,
+            temperature=0.0,
+            **litellm_call_kwargs(self.model, self.api_key, self.endpoint),
+        )
+        self._record_usage('litellm', resp)
+        return (resp.choices[0].message.content or '').strip()
+
     def _record_usage(self, provider: str, response: Any) -> None:
         """Best-effort token tracking; never breaks the chat call.
 
@@ -287,12 +306,17 @@ class ArticleAssistant:
                     usage = _ut2.extract_gemini_usage(response)
                 else:
                     usage = _ut2.extract_openai_usage(response)
+            cost_usd = None
+            if provider == 'litellm':
+                from refchecker.llm.providers import _litellm_response_cost
+                cost_usd = _litellm_response_cost(response)
             _check_ut.record(
                 check_id=str(self.check_id),
                 model=self.model,
                 input_tokens=usage['input_tokens'],
                 output_tokens=usage['output_tokens'],
                 flow=flow,
+                cost_usd=cost_usd,
             )
         except Exception as exc:
             logger.debug('article-chat per-check usage tracking skipped: %s', exc)
@@ -304,6 +328,8 @@ class ArticleAssistant:
             return self._call_anthropic_chat(system_prompt, messages)
         if self.provider == 'google':
             return self._call_google_chat(system_prompt, messages)
+        if self.provider == 'litellm':
+            return self._call_litellm_chat(system_prompt, messages)
         return self._call_openai_chat(system_prompt, messages)
 
     # ------------------------------------------------------------------

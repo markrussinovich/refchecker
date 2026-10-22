@@ -30,7 +30,7 @@ class ConfigValidator:
     
     def __init__(self):
         self.required_sections = ['llm', 'processing', 'apis']
-        self.llm_providers = ['openai', 'chatgpt', 'anthropic', 'google', 'azure', 'vllm']
+        self.llm_providers = ['openai', 'chatgpt', 'anthropic', 'google', 'azure', 'vllm', 'litellm']
         
     def validate_config(self, config: Dict[str, Any]) -> ValidationResult:
         """
@@ -128,6 +128,11 @@ class ConfigValidator:
                 errors.append("vLLM download_path must be a string")
             if 'auto_download' in config and not isinstance(config['auto_download'], bool):
                 errors.append("vLLM auto_download must be a boolean")
+        elif provider == 'litellm':
+            if 'model' in config and isinstance(config['model'], str) and '/' not in config['model']:
+                warnings.append(
+                    "LiteLLM model should include its provider prefix, e.g. 'anthropic/claude-sonnet-4-6'"
+                )
         
         return ValidationResult(len(errors) == 0, errors, warnings)
     

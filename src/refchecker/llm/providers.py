@@ -32,7 +32,7 @@ def _record_provider_usage(provider: str, model: str, response, kind: str):
     if _usage_tracker is None:
         return
     try:
-        if provider in ("openai", "chatgpt"):
+        if provider in ("openai", "chatgpt", "litellm"):
             u = _usage_tracker.extract_openai_usage(response)
         elif provider == "anthropic":
             u = _usage_tracker.extract_anthropic_usage(response)
@@ -146,6 +146,76 @@ def _is_openai_reasoning_model(model: str) -> bool:
         return False
     return any(tag in model for tag in ('gpt-5', 'o3', 'o4'))
 
+
+
+def _strip_completions_suffix(endpoint: str) -> str:
+    """Drop a trailing ``/chat/completions`` or ``/completions`` from *endpoint*."""
+    for suffix in ('/chat/completions', '/completions'):
+        if endpoint.endswith(suffix):
+            return endpoint[: -len(suffix)]
+    return endpoint
+
+
+def import_litellm():
+    """Import ``litellm`` with its console chatter turned down.
+
+    LiteLLM logs every call at INFO and prints a "Give Feedback" banner on
+    errors; refchecker already reports failures itself. Set ``LITELLM_LOG``
+    to keep LiteLLM's own logging for debugging.
+    """
+    import litellm
+    if not os.getenv("LITELLM_LOG"):
+        litellm.suppress_debug_info = True
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    return litellm
+
+
+def litellm_call_kwargs(model: str, api_key: Optional[str] = None, endpoint: Optional[str] = None) -> dict:
+    """Shared kwargs for every ``litellm.completion`` call.
+
+    Blank credentials are omitted so LiteLLM falls back to the provider's own
+    env vars (``ANTHROPIC_API_KEY``, AWS credentials for ``bedrock/``,
+    ``GOOGLE_APPLICATION_CREDENTIALS`` for ``vertex_ai/`` ...).
+    ``drop_params`` drops sampling params a provider rejects (e.g.
+    ``temperature`` on OpenAI reasoning models) instead of failing the call.
+    """
+    kwargs = {'model': model, 'drop_params': True}
+    if api_key:
+        kwargs['api_key'] = api_key
+    if endpoint:
+        kwargs['api_base'] = _strip_completions_suffix(endpoint)
+    return kwargs
+
+
+def _litellm_response_cost(response) -> Optional[float]:
+    """Cost LiteLLM computed for this call from its model price map, if any."""
+    try:
+        cost = (getattr(response, '_hidden_params', None) or {}).get('response_cost')
+        return float(cost) if cost is not None else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _track_litellm_usage(response, model: str) -> None:
+    """Record a LiteLLM call on the per-check meter.
+
+    LiteLLM normalizes usage to the OpenAI shape for every provider and prices
+    the call itself, so the badge shows the real cost of e.g. a Bedrock or
+    Vertex model instead of the flat estimate used for unknown model ids.
+    """
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=_safe_int(getattr(usage, "prompt_tokens", 0)),
+            output_tokens=_safe_int(getattr(usage, "completion_tokens", 0)),
+            flow=_check_usage_tracker.get_current_flow(),
+            cost_usd=_litellm_response_cost(response),
+        )
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"usage_tracker (litellm) skipped: {e}")
 
 
 class LLMProviderMixin:
@@ -781,6 +851,55 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
         except Exception as e:
             logger.error(f"Azure API call failed: {e}")
             raise
+
+class LiteLLMProvider(LLMProviderMixin, LLMProvider):
+    """LiteLLM SDK provider: one client for 100+ LLM providers.
+
+    Models are LiteLLM ids such as ``anthropic/claude-sonnet-4-6``,
+    ``bedrock/us.anthropic.claude-sonnet-4-6-v1:0``, ``vertex_ai/gemini-2.5-pro``
+    or ``ollama/llama3.1``. ``api_key`` and ``endpoint`` are optional; without
+    them LiteLLM reads the provider's own credentials from the environment.
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self.api_key = config.get("api_key")
+        self.endpoint = config.get("endpoint")
+        self.client = None
+
+        try:
+            self.client = import_litellm()
+        except ImportError:
+            logger.error("LiteLLM library not installed. Install with: pip install 'academic-refchecker[litellm]'")
+
+    def is_available(self) -> bool:
+        return self.client is not None
+
+    def extract_references(self, bibliography_text: str) -> List[str]:
+        return self.extract_references_with_chunking(bibliography_text)
+
+    def _call_llm(self, prompt: str) -> str:
+        """Make the LiteLLM completion call and return the response text"""
+        try:
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['litellm']
+            response = self.client.completion(
+                messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                timeout=120.0,
+                **litellm_call_kwargs(_model, self.api_key, self.endpoint),
+            )
+            _record_provider_usage("litellm", _model, response, "extraction")
+            _track_litellm_usage(response, _model)
+            return response.choices[0].message.content or ""
+
+        except Exception as e:
+            logger.error(f"LiteLLM API call failed: {e}")
+            raise
+
 
 class vLLMProvider(LLMProviderMixin, LLMProvider):
     """vLLM provider using OpenAI-compatible server mode for local Hugging Face models"""

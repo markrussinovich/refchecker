@@ -84,15 +84,16 @@ def get_llm_api_key_interactive(provider: str) -> str:
     then prompting interactively if not found.
     
     Args:
-        provider: LLM provider name (openai, chatgpt, anthropic, google, azure, vllm)
+        provider: LLM provider name (openai, chatgpt, anthropic, google, azure, vllm, litellm)
     
     Returns:
         API key string or None if not available
     """
     from refchecker.config.settings import _PROVIDER_ENV_VARS, resolve_api_key
 
-    # vLLM doesn't need an API key
-    if provider == 'vllm':
+    # vLLM doesn't need an API key; LiteLLM reads the provider's own
+    # credentials (ANTHROPIC_API_KEY, AWS_*, ...) from the environment.
+    if provider in ('vllm', 'litellm'):
         return None
     if provider == 'chatgpt':
         from refchecker.llm.chatgpt_auth import (
@@ -186,7 +187,7 @@ def setup_logging(debug_mode=False, level=None):
     
     # Suppress HTTP client logs (openai uses httpx) unless debug mode
     if not debug_mode:
-        for noisy_logger in ('httpx', 'httpcore', 'openai'):
+        for noisy_logger in ('httpx', 'httpcore', 'openai', 'LiteLLM'):
             logging.getLogger(noisy_logger).setLevel(logging.WARNING)
     
     # Get logger for this module
@@ -7813,8 +7814,8 @@ def main():
                         help="Report format (default: json)")
     
     # LLM configuration arguments
-    parser.add_argument("--llm-provider", type=str, choices=["openai", "chatgpt", "anthropic", "google", "azure", "vllm"],
-                        help="Enable LLM with specified provider (openai, chatgpt, anthropic, google, azure, vllm)")
+    parser.add_argument("--llm-provider", type=str, choices=["openai", "chatgpt", "anthropic", "google", "azure", "vllm", "litellm"],
+                        help="Enable LLM with specified provider (openai, chatgpt, anthropic, google, azure, vllm, litellm)")
     parser.add_argument("--llm-model", type=str,
                         help="LLM model to use (overrides default for the provider)")
     parser.add_argument("--llm-endpoint", type=str,
@@ -7826,7 +7827,7 @@ def main():
     parser.add_argument("--llm-max-chunk-workers", type=int,
                         help="Maximum number of workers for parallel LLM chunk processing (default: 4)")
     parser.add_argument("--hallucination-provider", type=str,
-                        choices=["openai", "chatgpt", "anthropic", "google", "azure"],
+                        choices=["openai", "chatgpt", "anthropic", "google", "azure", "litellm"],
                         help="Separate LLM provider for hallucination checking (defaults to --llm-provider if it supports hallucination)")
     parser.add_argument("--hallucination-model", type=str,
                         help="Model to use for hallucination checking (defaults to provider's default)")
@@ -7922,7 +7923,7 @@ def main():
     if args.llm_provider:
         # Get API key interactively if needed for LLM provider
         api_key = get_llm_api_key_interactive(args.llm_provider)
-        if api_key is None and args.llm_provider != 'vllm':
+        if api_key is None and args.llm_provider not in ('vllm', 'litellm'):
             print(f"Error: API key is required for {args.llm_provider} provider.")
             return 1
         
@@ -7945,7 +7946,7 @@ def main():
         # Handle separate hallucination provider
         if args.hallucination_provider:
             h_api_key = get_llm_api_key_interactive(args.hallucination_provider)
-            if h_api_key is None:
+            if h_api_key is None and args.hallucination_provider != 'litellm':
                 print(f"Error: API key is required for hallucination provider {args.hallucination_provider}.")
                 return 1
             llm_config['hallucination_provider'] = args.hallucination_provider
