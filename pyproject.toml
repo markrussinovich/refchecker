@@ -36,6 +36,7 @@ dependencies = [
     "numpy>=2.4.4",
     "pdfplumber>=0.11.9",
     "pybtex>=0.26.1",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -79,7 +80,6 @@ webui = [
     "pymupdf>=1.27.2.3",
     "Pillow>=12.2.0",  # For thumbnail image enhancement
     "python-multipart>=0.0.27",  # For FastAPI form data handling
-    "python-jose[cryptography]>=3.5.0",  # For JWT token creation and validation (multi-user auth)
     "itsdangerous>=2.2.0",  # For signed cookies / CSRF protection
 ]
 

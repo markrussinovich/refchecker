@@ -18,12 +18,12 @@ from backend.thumbnail import (
     _token_anchored_span_on_page,
 )
 
-# A sentence laid into the PDF with a HARD line break + hyphenation ("bench-\nmark")
-# so `page.search_for(<joined needle>)` returns no contiguous hit, exercising the
-# token-anchored path. The needle below is the clean extracted form (no break).
+# Split a word without a hyphen so direct search cannot reconstruct it.
+# Hyphenated line breaks are normalized by some PyMuPDF versions and would
+# bypass the token-anchored fallback this fixture is intended to exercise.
 PDF_BODY = (
     "The proposed transformer architecture achieves state-of-the-art results "
-    "on the bench-\nmark across every evaluated configuration and random seed."
+    "on the bench\nmark across every evaluated configuration and random seed."
 )
 NEEDLE = (
     "The proposed transformer architecture achieves state-of-the-art results "
@@ -115,7 +115,7 @@ def test_end_anchor_stops_at_real_sentence_when_tail_word_repeats(tmp_path):
     text by anchoring on the LAST occurrence of that word.
 
     The needle ends "...trained on the data here." (tail = ["the","data","here"]).
-    The page lays "the data here" on the real end line (after a "success-\nmark"
+    The page lays "the data here" on the real end line (after a "success\nfully"
     soft break so the contiguous needle fails → anchored path), and "the data
     again" reappears on a much later, unrelated line ("Later we rely on the data
     again ... below."). The OLD code anchored the end to the LAST "the", walking
@@ -124,7 +124,7 @@ def test_end_anchor_stops_at_real_sentence_when_tail_word_repeats(tmp_path):
     """
     pdf = tmp_path / "paper.pdf"
     body = (
-        "Our method was carefully evaluated and the final model was success-\nfully "
+        "Our method was carefully evaluated and the final model was success\nfully "
         "trained on the data here. Additional filler text occupies an entirely "
         "separate middle line that is unrelated to this particular citation entirely. "
         "Later we rely on the data again within a clearly different trailing line below."

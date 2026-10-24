@@ -10,7 +10,7 @@ The Web UI provides a real-time interface for checking references in single pape
 
 - If an extraction LLM provider is configured, RefChecker uses it for higher-quality extraction from PDFs and unusual bibliography formats.
 - If no extraction LLM is configured, PDF extraction can fall back to GROBID.
-- Hallucination checks use a separate hallucination LLM selection when one is configured. The hallucination provider must be web-search capable: OpenAI, Anthropic, Google, or Azure.
+- Hallucination checks use a separate hallucination LLM selection when one is configured. The hallucination provider must be web-search capable: OpenAI, ChatGPT, Anthropic, Google, or Azure.
 - Local vLLM can be selected for extraction, but it is not offered for hallucination checks because local models cannot perform live web search.
 
 GROBID details:
@@ -83,8 +83,77 @@ npm run dev
 - Optional local/offline databases via `semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`, and `acl_anthology.db`
 - Theme support and hosted multi-user mode
 - Separate extraction and hallucination LLM selectors with per-config API keys
+- Checked-paper author cards below the paper title, including when opening a
+  paper from a batch or history. Authors are resolved from an indexed work by
+  DOI/arXiv identifier or an unambiguous normalized title match and persisted
+  with the check. Hover over a name for the same cards used for cited
+  authors: affiliations, publication/citation counts, h-index, i10-index, and
+  profile links when available. Google Scholar links are name searches, not
+  verified Google Scholar profiles; metrics come from Semantic Scholar or
+  OpenAlex, not Google Scholar. Unknown/unindexed papers show an explicit
+  unavailable state instead of guessed authors. This display-only enrichment
+  does not change bulk, CLI, or WebUI reference verdicts.
+  Cards stay open only while the pointer is over the name or the card; they
+  cannot be pinned. Clicking a linked author name opens its profile page.
+  The link's hover hint disappears while the author card is visible.
+  For arXiv inputs, arXiv metadata supplies the author list if Semantic Scholar
+  is unavailable or has not indexed the paper yet; author profiles are
+  resolved using each author's name and the paper title.
+
+The owned-check endpoint `GET /api/check/{check_id}/authors` returns the paper's
+resolved author metadata and preloaded profiles. Profiles are fetched when the
+paper's author list loads, with at most three simultaneous author lookups,
+through the same profile APIs used for cited authors. The full card data is
+persisted with the check and reused for six hours, including after a backend
+restart; older cached author lists are upgraded automatically. Missing profiles
+are cached too, so hover does not repeatedly query an unavailable author.
 
 ## Input Modes
+
+Reference cards include **Original reference (as extracted)** for new checks,
+so expanded/verified author lists and formatted corrections do not obscure
+the citation being checked. Older saved checks without this snapshot still
+show the incorrect field on each error's **cited:** line; their full original
+citation requires opening the source paper or running the check again.
+**View bibliography entry in paper** opens the checked document and highlights
+the extracted entry, falling back to its title when source formatting differs.
+It also works for older checks without an original-citation snapshot.
+Citation **Context**, followed by **View bibliography entry in paper**, appears
+in a separate **In this paper** section with a divider above **Verification**.
+Missing context shows a **Context warning** in that section. This is a
+presentation notice, not a verification verdict: missing extracted context
+does not prove the reference was unused and does not change verdict counts.
+Use **Citation integrity** to check for uncited entries; it abstains when
+citation parsing has insufficient coverage or the scheme is unclear.
+Cross-check warnings are consolidated into one explanation while retaining
+all distinct previous metadata values, including different venue strings.
+Venue hover cards close after leaving the venue/card surface; their native
+hover hints are hidden while either a profile or unavailable-data card is open.
+OpenReview human-verification pages are not accepted as paper metadata,
+including previously cached challenge headings. When metadata lookup is
+blocked, direct-PDF checks use the downloaded PDF's title instead.
+
+### ChatGPT Account Sign-In
+
+Multi-user authentication can offer **Continue with ChatGPT** alongside Google,
+GitHub, and Microsoft. Configure it in **Settings → Accounts → Enable accounts
+& Teams**, or set `CHATGPT_CLIENT_ID`, optional `CHATGPT_CLIENT_SECRET` (if
+issued), and optional `CHATGPT_REDIRECT_URI` in the server environment. Register
+the callback `<SITE_URL>/api/auth/callback/chatgpt` with OpenAI and use HTTPS
+with `HTTPS_ONLY=true` in production.
+
+An identity-only client registered/approved by OpenAI for your deployment is
+required. OpenAI currently describes website sign-in as a selected-partner
+trial; adding this provider does not register or approve the deployment.
+See [OpenAI's sign-in quickstart](https://developers.openai.com/siwc/quickstart).
+Without a configured client ID, the login option is not advertised.
+
+This flow requests only `openid profile email`, verifies the signed ID token
+(issuer, audience, expiry, nonce, subject), binds the callback to the initiating
+browser, and creates the normal RefChecker session. A verified email is
+required for account linking. OpenAI tokens are not persisted. This login
+does **not** connect a ChatGPT subscription or authorize AI requests; the
+separate ChatGPT connection in LLM settings continues to handle plan usage.
 
 ### Single Paper
 
@@ -121,7 +190,7 @@ When a local database is present, the Web UI uses it first and falls back to the
 
 ### Environment Variables
 
-LLM providers are optional for extraction but required for deep hallucination checks. The UI stores an extraction selection and a hallucination selection separately in the browser. Extraction may use OpenAI, Anthropic, Google, Azure, or vLLM. Hallucination checks only use OpenAI, Anthropic, Google, or Azure.
+LLM providers are optional for extraction but required for deep hallucination checks. The UI stores an extraction selection and a hallucination selection separately in the browser. Extraction may use OpenAI, ChatGPT, Anthropic, Google, Azure, or vLLM. Hallucination checks only use OpenAI, ChatGPT, Anthropic, Google, or Azure. In a local single-user installation, choose **ChatGPT account** and then **Continue with ChatGPT** to use an eligible ChatGPT plan without supplying an API key.
 
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
@@ -275,6 +344,6 @@ web-ui/
 
 ### Hallucination checks are missing
 
-- configure a hallucination-capable provider in Settings: OpenAI, Anthropic, Google, or Azure
+- configure a hallucination-capable provider in Settings: OpenAI, ChatGPT, Anthropic, Google, or Azure
 - make sure the selected hallucination configuration has an API key in the current mode
 - extraction can succeed through GROBID or vLLM without enabling deep hallucination verification

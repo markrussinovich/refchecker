@@ -293,6 +293,17 @@ class TestVerifyReference:
     def checker(self):
         """Create a checker instance."""
         return ArXivCitationChecker()
+
+    @patch('refchecker.checkers.arxiv_citation.arxiv_cached_get')
+    def test_get_version_years_parses_submission_history(self, mock_get, checker):
+        mock_get.return_value = """
+        <strong><a href="/abs/2412.15115v1">[v1]</a></strong>
+        Thu, 19 Dec 2024 17:56:09 UTC<br/>
+        <strong>[v2]</strong>
+        Fri, 3 Jan 2025 02:18:21 UTC<br/>
+        """
+
+        assert checker._get_version_years('2412.15115') == {2024, 2025}
     
     @patch.object(ArXivCitationChecker, 'fetch_bibtex')
     def test_verify_reference_success(self, mock_fetch, checker):
@@ -362,6 +373,46 @@ class TestVerifyReference:
         # but the reference matches a historical version)
         assert verified_data is not None
         assert len(errors) == 0
+
+    @pytest.mark.parametrize(
+        ('arxiv_id', 'cited_year', 'version_years'),
+        [
+            ('2412.15115', 2025, {2024, 2025}),
+            ('1610.02424', 2018, {2016, 2018}),
+        ],
+    )
+    @patch.object(ArXivCitationChecker, '_get_version_years')
+    @patch.object(ArXivCitationChecker, 'fetch_bibtex')
+    def test_accepts_year_from_any_arxiv_version(
+        self,
+        mock_fetch,
+        mock_version_years,
+        checker,
+        arxiv_id,
+        cited_year,
+        version_years,
+    ):
+        """A citation year matching a real arXiv revision is not a mismatch."""
+        mock_fetch.return_value = f"""@misc{{test,
+      title={{Test Paper}},
+      author={{John Doe}},
+      year={{{min(version_years)}}},
+      eprint={{{arxiv_id}}}
+}}"""
+        mock_version_years.return_value = version_years
+        reference = {
+            'title': 'Test Paper',
+            'authors': ['John Doe'],
+            'year': cited_year,
+            'url': f'https://arxiv.org/abs/{arxiv_id}',
+        }
+
+        verified_data, errors, url = checker.verify_reference(reference)
+
+        assert verified_data is not None
+        assert errors == []
+        assert url == f'https://arxiv.org/abs/{arxiv_id}'
+        mock_version_years.assert_called_once_with(arxiv_id)
     
     def test_verify_reference_no_arxiv_id(self, checker):
         """Test verification with no ArXiv ID returns empty."""

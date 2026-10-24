@@ -20,6 +20,8 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
@@ -76,6 +78,46 @@ class TestCachedResultIsCurrent:
 
 
 class TestCacheReplay:
+    @pytest.mark.parametrize('cached_year,cited_year', [(2016, 2015), (2015, 2016)])
+    def test_same_doi_with_different_year_must_be_reverified(self, tmp_path, cached_year, cited_year):
+        async def run():
+            db = Database(str(tmp_path / 'resnet.db'))
+            await db.init_db()
+            reference = {
+                'title': 'Deep Residual Learning for Image Recognition',
+                'authors': 'Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun',
+                'year': cached_year,
+                'venue': 'CVPR',
+                'doi': '10.1109/cvpr.2016.90',
+                'status': 'verified',
+            }
+            await db.upsert_verified_reference(reference)
+            changed = dict(reference, year=cited_year)
+
+            assert await db.lookup_verified_reference(changed) is None
+            assert await db.find_verified_by_fuzzy(changed) is None
+            assert await db.count_verified_references() == 1
+
+        _run(run())
+
+    def test_cache_hit_cannot_overwrite_the_cited_year(self, tmp_path):
+        async def run():
+            db = Database(str(tmp_path / 'overwritten-year.db'))
+            await db.init_db()
+            cited = {
+                'title': 'Deep Residual Learning for Image Recognition',
+                'authors': 'Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun',
+                'year': 2015, 'doi': '10.1109/cvpr.2016.90',
+            }
+            await db.upsert_verified_reference(dict(
+                cited, year=2016, original_reference=dict(cited), status='verified',
+            ))
+
+            assert await db.lookup_verified_reference(cited) is None
+            assert await db.find_verified_by_fuzzy(cited) is None
+
+        _run(run())
+
     def test_stale_entry_is_not_replayed_but_is_still_listed(self):
         tmp = tempfile.mktemp(suffix='.db')
 

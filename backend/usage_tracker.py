@@ -182,8 +182,12 @@ def extract_openai_usage(response) -> Dict[str, int]:
     # prompt_tokens here matches what the provider's dashboard shows
     # under "total tokens".
     return {
-        "input_tokens": int(getattr(u, "prompt_tokens", 0) or 0),
-        "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
+        "input_tokens": int(
+            getattr(u, "prompt_tokens", getattr(u, "input_tokens", 0)) or 0
+        ),
+        "output_tokens": int(
+            getattr(u, "completion_tokens", getattr(u, "output_tokens", 0)) or 0
+        ),
     }
 
 

@@ -28,6 +28,21 @@ beforeEach(() => {
   getCorrectedReferenceList.mockReset()
 })
 
+it('keeps hook order stable as saved-check references load and clear', () => {
+  const { rerender } = render(<GapFinder checkId={CHECK_ID} references={[]} />)
+  expect(screen.queryByRole('button')).toBeNull()
+
+  rerender(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+  expect(screen.getByRole('button', { name: /did you miss these/i })).toBeInTheDocument()
+
+  rerender(<GapFinder checkId={CHECK_ID} references={[]} />)
+  expect(screen.queryByRole('button')).toBeNull()
+
+  rerender(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)
+  expect(screen.getByRole('button', { name: /did you miss these/i })).toBeInTheDocument()
+  expect(getCheckGaps).not.toHaveBeenCalled()
+})
+
 describe('GapFinder — R33 styling + R52 fixed-header collapse', () => {
   it('the pre-run trigger is a shared outline pill with the sizer reserving the analyzing label', () => {
     render(<GapFinder checkId={CHECK_ID} references={refsWithDoi} />)

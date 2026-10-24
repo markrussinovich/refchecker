@@ -234,7 +234,7 @@ def build_check_parser(subparsers=None):
     # --- LLM extraction / verification config ------------------------------
     parser.add_argument(
         "--llm-provider", default="anthropic",
-        choices=["anthropic", "openai", "google", "azure", "vllm"],
+        choices=["anthropic", "openai", "chatgpt", "google", "azure", "vllm"],
         help="LLM provider for reference extraction (default: anthropic; mirrors the web default)",
     )
     parser.add_argument("--llm-model", default=None,
@@ -265,7 +265,7 @@ def build_check_parser(subparsers=None):
                         help="Run the LLM hallucination check on each reference "
                              "(needs a hallucination-capable provider/model/key)")
     parser.add_argument("--hallucination-provider", default=None,
-                        choices=["openai", "anthropic", "google", "azure"],
+                        choices=["openai", "chatgpt", "anthropic", "google", "azure"],
                         help="Provider for the hallucination check (defaults to --llm-provider when capable)")
     parser.add_argument("--hallucination-model", default=None,
                         help="Model for the hallucination check (defaults to the provider's default)")
@@ -508,10 +508,31 @@ def _build_checker(args):
     # default path). An empty list keeps the byte-for-byte default behaviour.
     selected_detectors = getattr(args, "_selected_detectors", None) or []
 
+    extraction_api_key = args.llm_api_key
+    hallucination_api_key = args.hallucination_api_key
+    if not args.no_llm and args.llm_provider == "chatgpt" and not extraction_api_key:
+        from refchecker.llm.chatgpt_auth import get_access_token, login_interactive
+        try:
+            extraction_api_key = get_access_token("local")
+        except Exception:
+            login_interactive("local")
+            extraction_api_key = get_access_token("local")
+    if (
+        args.check_hallucinations
+        and (args.hallucination_provider or args.llm_provider) == "chatgpt"
+        and not hallucination_api_key
+    ):
+        from refchecker.llm.chatgpt_auth import get_access_token, login_interactive
+        try:
+            hallucination_api_key = get_access_token("local")
+        except Exception:
+            login_interactive("local")
+            hallucination_api_key = get_access_token("local")
+
     return ProgressRefChecker(
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
-        api_key=args.llm_api_key,
+        api_key=extraction_api_key,
         endpoint=args.llm_endpoint,
         use_llm=(not args.no_llm),
         progress_callback=progress_callback,
@@ -526,7 +547,7 @@ def _build_checker(args):
             args.hallucination_provider if args.check_hallucinations else None
         ),
         hallucination_model=(args.hallucination_model if args.check_hallucinations else None),
-        hallucination_api_key=(args.hallucination_api_key if args.check_hallucinations else None),
+        hallucination_api_key=(hallucination_api_key if args.check_hallucinations else None),
         hallucination_endpoint=(args.hallucination_endpoint if args.check_hallucinations else None),
         ai_detection_enabled=ai_enabled,
         ai_detection_backend=(args.ai_detection or "local"),

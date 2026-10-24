@@ -1564,6 +1564,7 @@ class ProgressRefChecker:
 
         result = {
             "index": index,
+            "original_reference": dict(reference),
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
             "authors": display_authors if display_authors else reference.get('authors', []),
             "year": reference.get('year') or None,
@@ -1606,6 +1607,7 @@ class ProgressRefChecker:
         """Format an error result when verification fails."""
         return {
             "index": index,
+            "original_reference": dict(reference),
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown',
             "authors": reference.get('authors', []),
             "year": reference.get('year'),
@@ -3436,6 +3438,7 @@ class ProgressRefChecker:
                 if cached and isinstance(cached.get("result"), dict) and cached["result"]:
                     cached_result = dict(cached["result"])
                     cached_result["index"] = index
+                    cached_result["original_reference"] = dict(reference)
                     cached_result["from_cache"] = True
                     return cached_result
             except Exception as _e:
@@ -3448,7 +3451,7 @@ class ProgressRefChecker:
             # Run verification in a thread with timeout
             try:
                 verified_data, errors, url = await asyncio.wait_for(
-                    loop.run_in_executor(None, self._verify_reference, reference),
+                    loop.run_in_executor(None, self._verify_reference, dict(reference)),
                     timeout=90.0  # 90 second timeout per reference
                 )
             except asyncio.TimeoutError:
@@ -3541,7 +3544,7 @@ class ProgressRefChecker:
         """Synchronous version of reference checking for thread pool"""
         try:
             # Run verification with timeout (handled by caller)
-            verified_data, errors, url = self._verify_reference(reference)
+            verified_data, errors, url = self._verify_reference(dict(reference))
             return self._format_verification_result(reference, index, verified_data, errors, url)
         except UnicodeEncodeError as e:
             # Handle Windows encoding issues with special characters (e.g., Greek letters in titles)
@@ -3800,6 +3803,7 @@ class ProgressRefChecker:
                 if cached and isinstance(cached.get("result"), dict) and cached["result"]:
                     cached_result = dict(cached["result"])
                     cached_result["index"] = idx + 1
+                    cached_result["original_reference"] = dict(reference)
                     cached_result["from_cache"] = True
                     # ── Fuzzy cache hit: validate cited fields against
                     # the cached ground truth (v0.7.49) ─────────────────
@@ -3942,28 +3946,32 @@ class ProgressRefChecker:
                     "authors": "authors",
                     "venue": "venue",
                 }
-                for entry in xcheck[:3]:
-                    field_summaries = []
+                field_summaries = []
+                diffs = []
+                for entry in xcheck:
                     for d in entry.get("diffs") or []:
+                        if d in diffs:
+                            continue
+                        diffs.append(d)
                         field = d.get("field")
                         label = _FIELD_LABELS.get(field, field)
                         field_summaries.append(
                             f"{label} — here: {d.get('cited')} / previously: {d.get('cached')}"
                         )
-                    warnings_list.append({
-                        "warning_type": "cache_inconsistency",
-                        "warning_details": (
-                            "You cited this same title differently in an earlier "
-                            "check. Confirm which version is correct. "
-                            + "; ".join(field_summaries)
-                        ),
-                        "cached_title": entry.get("cached_title"),
-                        "cached_identity": entry.get("cached_identity"),
-                        "diffs": entry.get("diffs"),
-                    })
+                warnings_list.append({
+                    "warning_type": "cache_inconsistency",
+                    "warning_details": (
+                        "You cited this same title differently in an earlier "
+                        "check. Confirm which version is correct. "
+                        + "; ".join(field_summaries)
+                    ),
+                    "cached_matches": xcheck,
+                    "diffs": diffs,
+                })
         except Exception as _xc_err:
             logger.debug("cross_check_seen_refs skipped: %s", _xc_err)
 
+        result["original_reference"] = dict(reference)
         return result
 
     async def _check_references_parallel(

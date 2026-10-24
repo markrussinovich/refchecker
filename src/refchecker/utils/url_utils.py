@@ -231,6 +231,23 @@ def construct_doi_url(doi: str) -> str:
     return f"https://doi.org/{normalized_doi}"
 
 
+def normalize_arxiv_id(value: str) -> Optional[str]:
+    """Return a canonical arXiv ID when *value* is exactly an identifier."""
+    if not value or not isinstance(value, str):
+        return None
+
+    candidate = value.strip()
+    if candidate.lower().startswith("arxiv:"):
+        candidate = candidate[6:].strip()
+
+    match = re.fullmatch(
+        r"(?P<id>\d{4}\.\d{4,5}|[a-z][a-z0-9.-]*/\d{7})(?:v[1-9]\d*)?",
+        candidate,
+        re.IGNORECASE,
+    )
+    return match.group("id") if match else None
+
+
 def extract_arxiv_id_from_url(url: str) -> Optional[str]:
     """
     Extract ArXiv ID from an ArXiv URL or text containing ArXiv reference.

@@ -134,6 +134,124 @@ def test_corrections_toggle_changes_output():
     assert "~~Hallucinated~~" in with_
 
 
+def test_issue_only_corrections_preserve_unchanged_metadata():
+    ref = {
+        "title": "Reliable Systems", "authors": ["A. Author"], "year": 2020,
+        "venue": "Systems Conference", "corrected_reference": None,
+        "errors": [{"error_type": "year", "ref_year_correct": 2024}],
+    }
+    corrected = export._corrected_str(ref)
+    assert "2024" in corrected
+    assert "Reliable Systems" in corrected and "A. Author" in corrected
+    assert "Systems Conference" in corrected
+    assert "2024" in export.serialize_reference_as_style(ref, "plaintext")
+
+
+def test_partial_stored_corrections_and_original_snapshot():
+    ref = {
+        "title": "Paper", "authors": ["Recovered Author"], "year": 2020,
+        "corrected_reference": {"year": 2025, "title": None, "authors": []},
+        "original_reference": {"title": "Paper", "authors": ["Wrong Author"], "year": 2020},
+    }
+    assert "Wrong Author" in export._cited_str(ref)
+    assert "Wrong Author" in export._corrected_str(ref)
+    assert "Recovered Author" not in export._corrected_str(ref)
+    assert "(2025)" in export._corrected_str(ref)
+
+
+def test_typed_author_corrections_win_over_individual_mismatch():
+    ref = {
+        "title": "Paper", "authors": ["Wrong Author"],
+        "errors": [{
+            "error_type": "author",
+            "error_details": "Author 2 mismatch:\n cited: Wrong\n actual: Second Author",
+            "ref_authors_correct": ["First Author", "Second Author"],
+        }],
+    }
+    assert export._correction_fields(ref)["authors"] == ["First Author", "Second Author"]
+
+
+@pytest.mark.parametrize("style", export.CITATION_STYLES)
+@pytest.mark.parametrize("bucket", ["errors", "warnings"])
+def test_corrected_styles_preserve_original_fields_not_recovered_metadata(style, bucket):
+    ref = {
+        "title": "Recovered Title", "authors": ["Recovered Author"], "year": 2025,
+        "venue": "Recovered Venue",
+        "original_reference": {
+            "title": "Cited Title", "authors": ["Cited Author"], "year": 2020,
+            "venue": "Cited Venue",
+        },
+        bucket: [{"error_type": "year", "ref_year_correct": 2024}],
+    }
+    citation = export.serialize_reference_as_style(ref, style)
+    assert "2024" in citation and "Cited Title" in citation and "Cited Venue" in citation
+    assert "Recovered" not in citation and "2025" not in citation
+    assert export._style_ref_data(ref)["authors"] == ["Cited Author"]
+    assert export._corrected_str(ref) == "Cited Author. (2024). Cited Title. Cited Venue"
+
+
+@pytest.mark.parametrize("authors", [
+    "Correct Author and Second Author",
+    ["Correct Author", "Second Author"],
+    [{"name": "Correct Author"}, {"name": "Second Author"}],
+])
+def test_legacy_recovered_authors_still_render_explicit_author_fixes(authors):
+    ref = {
+        "title": "Legacy Paper", "authors": ["Correct Author", "Second Author"],
+        "year": 2025,
+        "errors": [{
+            "error_type": "author", "ref_authors_correct": authors,
+            "error_details": "Author 2 mismatch:\n cited: Wrong\n actual: Second Author",
+        }],
+    }
+    for style in export.CITATION_STYLES:
+        output = export.serialize_reference_as_style(ref, style)
+        assert output and "Legacy Paper" in output and "2025" in output
+        assert "[object Object]" not in output
+    assert export._style_ref_data(ref)["authors"] == ["Correct Author", "Second Author"]
+    assert export._corrected_str(ref) == "Correct Author, Second Author. (2025). Legacy Paper"
+
+
+@pytest.mark.parametrize("kind,key,old_url,new_value,new_url", [
+    ("arxiv_id", "ref_arxiv_id_correct", "https://arxiv.org/abs/2401.00001",
+     "2501.00001", "https://arxiv.org/abs/2501.00001"),
+    ("doi", "ref_doi_correct", "https://doi.org/10.1234/original",
+     "https://doi.org/10.1234/correct", "https://doi.org/10.1234/correct"),
+])
+def test_corrected_identifiers_replace_their_old_links(kind, key, old_url, new_value, new_url):
+    ref = {
+        "title": "Citation", "cited_url": old_url,
+        "errors": [{"error_type": kind, key: new_value}],
+    }
+    assert export._style_ref_data(ref)["url"] == new_url
+    assert new_url.removeprefix("https://doi.org/") in export._corrected_str(ref)
+    assert old_url not in export._corrected_str(ref)
+    assert old_url in export._cited_str(ref)
+    unrelated = {**ref, "cited_url": "https://example.com/paper"}
+    assert export._style_ref_data(unrelated)["url"] == unrelated["cited_url"]
+
+
+def test_parsed_year_correction_and_unresolved_errors():
+    ref = {
+        "title": "Paper", "year": 2020,
+        "warnings": [{"warning_type": "year", "warning_details": "Year mismatch:\n cited: 2020\n actual: 2024"}],
+    }
+    assert "(2024)" in export._corrected_str(ref)
+    assert export._corrected_str({
+        "title": "Unresolved", "errors": [{"error_type": "unverified", "error_details": "No record found"}],
+    }) is None
+
+
+def test_all_typed_fields_apply_but_partial_author_text_does_not():
+    ref = {"title": "Wrong", "year": 2020, "errors": [{
+        "error_type": "title", "ref_title_correct": "Correct", "ref_year_correct": 2025,
+    }]}
+    assert export._correction_fields(ref) == {"title": "Correct", "year": 2025}
+    assert export._correction_fields({"errors": [{
+        "error_type": "author", "error_details": "Author 2 mismatch:\n cited: Wrong\n actual: Second Author",
+    }]}) == {}
+
+
 # --------------------------------------------------------------------------- #
 # Downweighting minor year warnings
 # --------------------------------------------------------------------------- #

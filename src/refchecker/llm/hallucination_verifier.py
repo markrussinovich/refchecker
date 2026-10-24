@@ -4,8 +4,8 @@ The LLM receives the full reference metadata plus all validation errors
 detected by the checkers, and determines whether the reference is likely
 fabricated (LIKELY), genuine (UNLIKELY), or unclear (UNCERTAIN).
 
-Supports any configured LLM provider (OpenAI, Anthropic, Google, Azure,
-vLLM).  When using OpenAI without a custom endpoint, the verifier uses
+Supports any configured LLM provider (OpenAI, ChatGPT, Anthropic, Google,
+Azure, vLLM).  When using OpenAI without a custom endpoint, the verifier uses
 the Responses API with the ``web_search_preview`` tool so the LLM can
 search the web during its assessment.  For other providers the verifier
 falls back to plain chat completions.
@@ -380,7 +380,7 @@ def _build_validation_summary_static(error_entry: dict) -> str:
 class LLMHallucinationVerifier:
     """LLM-based hallucination verifier.
 
-    Supports OpenAI, Anthropic, Google, Azure, and vLLM providers.
+    Supports OpenAI, ChatGPT, Anthropic, Google, Azure, and vLLM providers.
     When using OpenAI (without a custom endpoint), the Responses API with
     ``web_search_preview`` is used so the LLM can verify references against
     the live web.  All other providers use a standard chat completion.
@@ -399,7 +399,15 @@ class LLMHallucinationVerifier:
         # Resolve provider — fall back to 'openai' if not specified
         self.provider = (provider or 'openai').lower()
         self.api_key = api_key or resolve_api_key(self.provider)
-        self.endpoint = endpoint or resolve_endpoint(self.provider)
+        if not self.api_key and self.provider == 'chatgpt':
+            try:
+                from refchecker.llm.chatgpt_auth import get_access_token
+                self.api_key = get_access_token('local')
+            except Exception as exc:
+                logger.debug('ChatGPT account is not connected: %s', exc)
+        self.endpoint = None if self.provider == 'chatgpt' else (
+            endpoint or resolve_endpoint(self.provider)
+        )
         self.model = model or self._DEFAULT_MODELS.get(self.provider, DEFAULT_HALLUCINATION_MODELS['openai'])
         self.client = None
         self._use_responses_api = False
@@ -442,8 +450,9 @@ class LLMHallucinationVerifier:
             # reason — the OpenAI client accepts a scalar seconds value too.
             kwargs['timeout'] = 60.0
         self.client = openai.OpenAI(**kwargs)
-        # Use Responses API (with web_search_preview) only for vanilla OpenAI
-        if not self.endpoint and self.provider == 'openai':
+        # Use Responses API (with web_search_preview) for vanilla OpenAI and
+        # for the mandatory SIWC Responses API path.
+        if not self.endpoint and self.provider in ('openai', 'chatgpt'):
             self._use_responses_api = True
         logger.debug(
             'Hallucination verifier initialized (provider=%s, model=%s, web_search=%s)',
@@ -490,6 +499,21 @@ class LLMHallucinationVerifier:
 
     def _call_openai_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
         """OpenAI Responses API with web_search_preview tool."""
+        if self.provider == 'chatgpt':
+            from refchecker.llm.chatgpt_auth import get_access_token, stream_responses_call
+
+            self.api_key = get_access_token('local')
+            self.client.api_key = self.api_key
+            text, response, web_urls = stream_responses_call(
+                self.client,
+                model=self.model,
+                instructions=system_prompt,
+                input_text=user_prompt,
+                tools=[{'type': 'web_search_preview'}],
+            )
+            _record_hallucination_usage('chatgpt', self.model, response)
+            return text, web_urls
+
         # R04: the web-search Responses call can be slow — give it a longer
         # per-call budget (90s) than the client default, but still bounded so
         # it cannot hang indefinitely.
@@ -767,6 +791,11 @@ class LLMHallucinationVerifier:
                     raise
                 logger.debug('Google web search failed, falling back to chat: %s', exc)
                 return self._call_google_chat(system_prompt, user_prompt)
+
+        # ChatGPT plan usage supports only the streaming Responses API and
+        # cannot fall back to Chat Completions.
+        if self.provider == 'chatgpt':
+            return self._call_openai_with_web_search(system_prompt, user_prompt)
 
         # OpenAI, Azure, vLLM
         if self._use_responses_api:

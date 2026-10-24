@@ -192,6 +192,24 @@ class ArticleAssistant:
         self._record_usage('openai', resp)
         return (resp.choices[0].message.content or '').strip()
 
+    def _call_chatgpt_responses(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
+        from refchecker.llm.chatgpt_auth import get_access_token, stream_responses_call
+
+        self.api_key = get_access_token('local')
+        self.client.api_key = self.api_key
+        history = '\n\n'.join(
+            f"{message['role'].upper()}: {message['content']}"
+            for message in messages
+        )
+        text, response, _ = stream_responses_call(
+            self.client,
+            model=self.model,
+            instructions=system_prompt,
+            input_text=history,
+        )
+        self._record_usage('chatgpt', response)
+        return text
+
     def _call_anthropic_chat(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
         resp = self.client.messages.create(
             model=self.model,
@@ -280,6 +298,8 @@ class ArticleAssistant:
             logger.debug('article-chat per-check usage tracking skipped: %s', exc)
 
     def _call(self, system_prompt: str, messages: List[Dict[str, str]]) -> str:
+        if self.provider == 'chatgpt':
+            return self._call_chatgpt_responses(system_prompt, messages)
         if self.provider == 'anthropic':
             return self._call_anthropic_chat(system_prompt, messages)
         if self.provider == 'google':

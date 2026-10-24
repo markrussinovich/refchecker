@@ -258,6 +258,24 @@ def test_multiuser_rejects_vllm_config_creation_and_validation(auth_db):
     assert exc.value.status_code == 403
 
 
+def test_multiuser_rejects_chatgpt_plan_login(auth_db):
+    api_main, db = auth_db
+    user = _run(_create_user(api_main, db, "chatgpt-user"))
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.chatgpt_status(user))
+
+    assert exc.value.status_code == 403
+    assert "single-user local" in exc.value.detail
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.list_llm_models(
+            api_main._ListModelsRequest(provider="chatgpt"),
+            user,
+        ))
+    assert exc.value.status_code == 403
+
+
 def test_private_artifact_routes_disable_shared_caching(auth_db, tmp_path):
     api_main, db = auth_db
     owner = _run(_create_user(api_main, db, "owner-cache"))

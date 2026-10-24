@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   configs: [],
   hasKey: vi.fn(),
   getKey: vi.fn(),
+  getChatGPTStatus: vi.fn(),
+  listLLMModels: vi.fn(),
 }))
 
 vi.mock('../../stores/useConfigStore', () => ({
@@ -33,7 +35,10 @@ vi.mock('../../stores/useKeyStore', () => {
 
 vi.mock('../../utils/api', () => ({
   validateLLMConfig: mocks.validateLLMConfig,
-  listLLMModels: vi.fn(),
+  listLLMModels: mocks.listLLMModels,
+  getChatGPTStatus: mocks.getChatGPTStatus,
+  startChatGPTAuth: vi.fn(),
+  disconnectChatGPT: vi.fn(),
 }))
 
 vi.mock('../../utils/logger', () => ({
@@ -50,6 +55,10 @@ describe('LLMConfigModal', () => {
     mocks.hasKey.mockReturnValue(false)
     mocks.getKey.mockReturnValue(null)
     mocks.validateLLMConfig.mockResolvedValue({ data: { valid: true } })
+    mocks.getChatGPTStatus.mockResolvedValue({ data: { connected: false } })
+    mocks.listLLMModels.mockResolvedValue({
+      data: { source: 'live', models: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'] },
+    })
     mocks.addConfig.mockResolvedValue({ id: 9, provider: 'anthropic', model: 'claude-sonnet-4-6' })
   })
 
@@ -67,6 +76,7 @@ describe('LLMConfigModal', () => {
 
     expect(screen.getByText('Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.')).toBeTruthy()
     expect(screen.queryByText('Stored encrypted in the local RefChecker database and never shown again.')).toBeNull()
+    expect(screen.queryByRole('option', { name: 'ChatGPT account' })).toBeNull()
   })
 
   it('creates hallucination configs without selecting them for extraction', async () => {
@@ -107,5 +117,38 @@ describe('LLMConfigModal', () => {
         api_key: undefined,
       }))
     })
+  })
+
+  it('offers ChatGPT account login without asking for an API key', async () => {
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'chatgpt' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Continue with ChatGPT' })).toBeTruthy()
+    })
+    expect(screen.queryByLabelText(/API Key/i)).toBeNull()
+    expect(screen.getByText(/No API key is shared/)).toBeTruthy()
+  })
+
+  it('renders the complete live ChatGPT model catalog as a select', async () => {
+    mocks.getChatGPTStatus.mockResolvedValue({
+      data: { connected: true, email: 'person@example.com' },
+    })
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'chatgpt' },
+    })
+    await waitFor(() => expect(screen.getByText('ChatGPT connected')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'gpt-6.1-sol' })).toBeTruthy()
+      expect(screen.getByRole('option', { name: 'gpt-6-astra' })).toBeTruthy()
+      expect(screen.getByRole('option', { name: 'gpt-6-luna' })).toBeTruthy()
+    })
+    expect(screen.getByText('Live list from your ChatGPT account (3 models).')).toBeTruthy()
   })
 })

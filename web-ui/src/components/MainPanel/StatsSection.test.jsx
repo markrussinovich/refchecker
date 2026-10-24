@@ -1,8 +1,86 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import StatsSection from './StatsSection'
 import HealthBadge from './HealthBadge'
 import { useCheckStore } from '../../stores/useCheckStore'
+import { downloadAsFile } from '../../utils/formatters'
+
+vi.mock('../../utils/formatters', async () => ({
+  ...await vi.importActual('../../utils/formatters'),
+  downloadAsFile: vi.fn(),
+}))
+
+describe('StatsSection correction export controls', () => {
+  it('downloads the author fix as well as both year fixes from a legacy check', () => {
+    render(<StatsSection stats={{ total_refs: 35 }} isComplete paperTitle="Legacy paper"
+      references={[
+        { title: 'First year fix', year: 2025, warnings: [{ error_type: 'year', ref_year_correct: 2024 }] },
+        { title: 'Second year fix', year: 2025, warnings: [{ warning_type: 'year', actual_value: 2024 }] },
+        { title: 'Author fix', authors: ['Correct Author'], errors: [{
+          error_type: 'author', ref_authors_correct: 'Correct Author',
+          error_details: 'Author 2 mismatch:\n cited: Wrong Author\n actual: Correct Author',
+        }] },
+        { title: 'Unresolved venue', warnings: [{ warning_type: 'venue', warning_details: 'Review manually' }] },
+      ]} />)
+    fireEvent.click(screen.getByTitle('Export results'))
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'corrections-only' } })
+    fireEvent.click(screen.getByText(/BibTeX/))
+    const output = vi.mocked(downloadAsFile).mock.lastCall[0]
+    expect(output.match(/^@/gm)).toHaveLength(3)
+    expect(output).toContain('Author fix')
+    expect(output).toContain('Correct Author')
+    expect(output).not.toContain('Unresolved venue')
+  })
+
+  it.each([/Markdown \(/, /Plain Text \(/, /CSV \(/, /JSONL \(/])(
+    'exports corrected citations rather than an error report through %s', label => {
+      render(<StatsSection stats={{ total_refs: 2 }} isComplete paperTitle="Test"
+        references={[
+          { title: 'Fixed paper', year: 2020, status: 'error',
+            errors: [{ error_type: 'year', ref_year_correct: 2024, error_details: 'Wrong year finding' }] },
+          { title: 'Clean enriched paper', doi: '10.1234/added',
+            original_reference: { title: 'Clean enriched paper' }, errors: [], warnings: [] },
+        ]} />)
+      fireEvent.click(screen.getByTitle('Export results'))
+      fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'corrections-only' } })
+      fireEvent.click(screen.getByText(label))
+      const [content, filename] = vi.mocked(downloadAsFile).mock.lastCall
+      expect(content).toContain('Fixed paper')
+      expect(content).toContain('2024')
+      expect(content).not.toContain('Clean enriched paper')
+      expect(content).not.toContain('Wrong year finding')
+      expect(content).not.toContain('RefChecker Report')
+      expect(filename).toContain('-corrections-only.')
+    },
+  )
+  it('shows an explicit empty state rather than downloading an empty corrections file', () => {
+    vi.mocked(downloadAsFile).mockClear()
+    render(<StatsSection stats={{ total_refs: 1 }} isComplete
+      references={[{ title: 'Clean paper', status: 'verified', errors: [], warnings: [] }]} />)
+    fireEvent.click(screen.getByTitle('Export results'))
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'corrections-only' } })
+    fireEvent.click(screen.getByText(/BibTeX/))
+    expect(screen.getByRole('status')).toHaveTextContent('No verified corrections')
+    expect(downloadAsFile).not.toHaveBeenCalled()
+  })
+
+  it('exports only references with verified fixes in corrections-only mode', () => {
+    const references = [
+      { title: 'Incorrect year paper', authors: ['A. Author'], year: 2020, status: 'error',
+        errors: [{ error_type: 'year', actual_value: '2024' }], warnings: [] },
+      { title: 'Clean paper', status: 'verified', errors: [], warnings: [] },
+    ]
+    render(<StatsSection stats={{ total_refs: 2 }} isComplete references={references} paperTitle="Test" />)
+    fireEvent.click(screen.getByTitle('Export results'))
+    const selects = screen.getAllByRole('combobox')
+    fireEvent.change(selects[0], { target: { value: 'corrections-only' } })
+    fireEvent.click(screen.getByText(/BibTeX/))
+    const content = vi.mocked(downloadAsFile).mock.lastCall[0]
+    expect(content).toContain('Incorrect year paper')
+    expect(content).toContain('2024')
+    expect(content).not.toContain('Clean paper')
+  })
+})
 
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

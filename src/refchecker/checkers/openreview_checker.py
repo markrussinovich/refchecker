@@ -502,10 +502,21 @@ class OpenReviewReferenceChecker:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         hit = cached_api_response(getattr(self, 'cache_dir', None), 'openreview', 'get_metadata', paper_id)
         if hit is not None:
-            return hit
+            if not self._is_browser_verification_title(hit.get('title')):
+                return hit
+            logger.warning("Ignoring cached OpenReview browser-verification metadata for %s", paper_id)
         result = self._get_paper_metadata_uncached(paper_id)
         cache_api_response(getattr(self, 'cache_dir', None), 'openreview', 'get_metadata', paper_id, result)
         return result
+
+    @staticmethod
+    def _is_browser_verification_title(title: Optional[str]) -> bool:
+        normalized = re.sub(r"\s+", " ", str(title or "")).strip().lower().rstrip(".!")
+        return normalized in {
+            "verifying your browser", "checking your browser",
+            "verify you are human", "verify that you are human",
+            "just a moment", "please verify you are a human",
+        }
 
     def _get_paper_metadata_uncached(self, paper_id: str) -> Optional[Dict[str, Any]]:
         # Try API endpoints (v2 first, then v1)
@@ -600,7 +611,7 @@ class OpenReviewReferenceChecker:
         
         return metadata
     
-    def _parse_web_page(self, html: str, url: str) -> Dict[str, Any]:
+    def _parse_web_page(self, html: str, url: str) -> Optional[Dict[str, Any]]:
         """
         Parse OpenReview web page to extract metadata
         
@@ -612,6 +623,13 @@ class OpenReviewReferenceChecker:
             Parsed metadata dictionary
         """
         soup = BeautifulSoup(html, 'html.parser')
+        headings = [soup.find('title'), soup.find('h1'), soup.find('h2')]
+        if any(
+            heading and self._is_browser_verification_title(heading.get_text(" ", strip=True))
+            for heading in headings
+        ):
+            logger.warning("OpenReview browser verification prevented metadata lookup for %s", url)
+            return None
         
         # Extract paper ID from URL
         paper_id = self.extract_paper_id(url)

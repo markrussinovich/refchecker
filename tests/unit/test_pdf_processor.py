@@ -52,6 +52,25 @@ Jane Doe, Some University
             "Fool's Gold: Defensive Deception Against Coordinated Cyber-Physical Attacks",
         )
 
+    def test_usenix_cover_date_and_location_are_not_the_title(self):
+        first_page_text = """
+This paper is included in the Proceedings of the
+34th USENIX Security Symposium.
+August 13–15, 2025 • Seattle, WA, USA
+978-1-9391 33-52-6
+Open access to the Proceedings of the
+34th USENIX Security Symposium is sponsored by USENIX.
+Easy As Child’s Play: An Empirical Study on
+Age Verification of Adult-Oriented Android Apps
+Yifan Yao, Shawn McCollum, Zhibo Sun, and Yue Zhang, Drexel University
+https://www.usenix.org/conference/usenixsecurity25/presentation/yao-yifan
+"""
+        self.assertEqual(
+            self.processor._extract_title_from_text(first_page_text),
+            "Easy As Child’s Play: An Empirical Study on "
+            "Age Verification of Adult-Oriented Android Apps",
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

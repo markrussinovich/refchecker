@@ -30,9 +30,16 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from refchecker.utils.doi_utils import extract_doi_from_url
-from refchecker.utils.text_utils import normalize_author_name, normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
-from refchecker.utils.error_utils import format_year_mismatch, format_doi_mismatch
+from refchecker.utils.doi_utils import compare_dois, extract_doi_from_url
+from refchecker.utils.text_utils import (
+    normalize_author_name, normalize_text, clean_title_basic, find_best_match,
+    is_name_match, compare_authors, clean_title_for_search,
+    compare_titles_with_latex_cleaning, are_venues_substantially_different,
+)
+from refchecker.utils.error_utils import (
+    format_year_mismatch, format_doi_mismatch, format_title_mismatch,
+    create_venue_warning,
+)
 from refchecker.config.settings import get_config
 
 # Set up logging
@@ -464,6 +471,66 @@ class CrossRefReferenceChecker:
         
         logger.debug("No URL found in CrossRef work data")
         return None
+
+    def _primary_page_confirms_cited_author(
+        self,
+        reference: Dict[str, Any],
+        work_data: Dict[str, Any],
+    ) -> bool:
+        """Confirm a posted-content author from its canonical cited page."""
+        if work_data.get('type') != 'posted-content':
+            return False
+
+        cited_url = str(reference.get('url') or reference.get('cited_url') or '').strip()
+        cited_authors = reference.get('authors') or []
+        if not cited_url or not isinstance(cited_authors, list) or len(cited_authors) != 1:
+            return False
+
+        canonical_urls = {
+            str(link.get('URL', '')).strip().rstrip('/').lower()
+            for link in work_data.get('link', [])
+            if isinstance(link, dict) and link.get('URL')
+        }
+        if cited_url.rstrip('/').lower() not in canonical_urls:
+            return False
+
+        author = cited_authors[0]
+        if isinstance(author, dict):
+            author = author.get('name', '')
+        author = str(author).strip()
+        if not author:
+            return False
+
+        if ',' in author:
+            surname = author.split(',', 1)[0]
+        else:
+            normalized = normalize_author_name(author)
+            surname = normalized.split()[-1] if normalized else ''
+        surname = re.sub(r'[^a-z0-9]+', '', surname.lower())
+        if len(surname) < 4:
+            return False
+
+        try:
+            response = requests.get(cited_url, headers=self.headers, timeout=10)
+        except requests.RequestException:
+            return False
+        if response.status_code != 200:
+            return False
+
+        page_html = response.text or response.content.decode('utf-8', errors='ignore')
+        mailto_values = re.findall(r'href=["\']mailto:([^"\']+)', page_html, re.IGNORECASE)
+        if any(surname in re.sub(r'[^a-z0-9]+', '', value.lower()) for value in mailto_values):
+            return True
+
+        meta_authors = re.findall(
+            r'<meta[^>]+name=["\']author["\'][^>]+content=["\']([^"\']+)',
+            page_html,
+            re.IGNORECASE,
+        )
+        return any(
+            surname in re.sub(r'[^a-z0-9]+', '', value.lower())
+            for value in meta_authors
+        )
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -582,24 +649,45 @@ class CrossRefReferenceChecker:
         if not work_data:
             logger.debug("Could not find matching work in CrossRef")
             return None, [], None
+
+        work_data = _normalize_crossref_work(work_data)
+        work_title = work_data.get('title', '')
+        if title and work_title and compare_titles_with_latex_cleaning(title, work_title) < SIMILARITY_THRESHOLD:
+            errors.append({
+                'error_type': 'title',
+                'error_details': format_title_mismatch(title, work_title),
+                'ref_title_correct': work_title,
+            })
+        correct_author_names = [
+            author.get('name') or ' '.join(
+                part for part in (author.get('given'), author.get('family')) if part
+            )
+            for author in (work_data.get('author') or [])
+        ]
+        correct_author_names = [name for name in correct_author_names if name]
+        work_venue = work_data.get('container-title', '')
+        cited_venue = reference.get('venue') or reference.get('journal') or reference.get('booktitle') or ''
+        if isinstance(cited_venue, str) and work_venue and (
+            not cited_venue or are_venues_substantially_different(
+                cited_venue, work_venue, paper_title=title,
+            )
+        ):
+            errors.append(create_venue_warning(cited_venue, work_venue))
         
         # Verify authors
         if authors:
-            crossref_authors = work_data.get('author', [])
+            crossref_authors = work_data.get('author') or []
             authors_match, author_error = self.compare_authors(authors, crossref_authors)
             
             if not authors_match:
-                # Extract correct author names for error reporting
-                correct_author_names = []
-                for author in crossref_authors:
-                    if 'name' in author:
-                        correct_author_names.append(author['name'])
-                    elif 'given' in author and 'family' in author:
-                        full_name = f"{author['given']} {author['family']}"
-                        correct_author_names.append(full_name)
-                    elif 'family' in author:
-                        correct_author_names.append(author['family'])
-                
+                if self._primary_page_confirms_cited_author(reference, work_data):
+                    logger.debug(
+                        "CrossRef author metadata conflicts with the canonical posted-content page; "
+                        "using primary-page author evidence"
+                    )
+                    authors_match = True
+
+            if not authors_match:
                 errors.append({
                     'error_type': 'author',
                     'error_details': author_error,
@@ -615,8 +703,18 @@ class CrossRefReferenceChecker:
                 year_gap = abs(int(year) - int(work_year))
             except (TypeError, ValueError):
                 year_gap = None
-            # Suppress trivial 1-year gaps (online-ahead-of-print, epub vs print)
-            if year_gap is None or year_gap > 1:
+            publication_years = {
+                self.extract_year_from_published(work_data.get(key))
+                for key in ('published-print', 'published-online', 'published', 'issued')
+            } - {None}
+            exact_doi_match = bool(doi and work_data.get('DOI') and compare_dois(doi, work_data['DOI']))
+            # For an exact DOI, accept actual online/print years, not an
+            # unrelated preprint year or the DOI registration date.
+            if exact_doi_match and publication_years and year_gap is not None:
+                year_mismatch = int(year) not in publication_years
+            else:
+                year_mismatch = year_gap is None or year_gap > 1
+            if year_mismatch:
                 errors.append({
                     'warning_type': 'year',
                     'warning_details': format_year_mismatch(year, work_year),
@@ -627,7 +725,7 @@ class CrossRefReferenceChecker:
         work_doi = work_data.get('DOI')
         if doi and work_doi:
             # Compare DOIs using the proper comparison function
-            from refchecker.utils.doi_utils import compare_dois, validate_doi_resolves
+            from refchecker.utils.doi_utils import validate_doi_resolves
             if not compare_dois(doi, work_doi):
                 # If cited DOI resolves, it's likely a valid alternate DOI (e.g., arXiv vs conference)
                 # Treat as warning instead of error
@@ -646,7 +744,14 @@ class CrossRefReferenceChecker:
         
         # Extract URL from work data
         work_url = self.extract_url_from_work(work_data)
-        
+
+        work_data.update({
+            'year': work_year,
+            'venue': work_venue,
+            'authors': [{'name': name} for name in correct_author_names],
+            'doi': work_doi,
+            'url': work_url,
+        })
         return work_data, errors, work_url
 
 if __name__ == "__main__":

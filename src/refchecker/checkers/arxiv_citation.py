@@ -534,6 +534,20 @@ class ArXivCitationChecker:
             return max(int(v) for v in versions)
         return None
 
+    def _get_version_years(self, arxiv_id: str) -> set[int]:
+        """Return every submission year listed in an arXiv paper's history."""
+        url = f"{self.abs_url}/{arxiv_id}"
+        text = arxiv_cached_get(url, timeout=self.timeout)
+        if text is None:
+            return set()
+
+        years = re.findall(
+            r'\[v\d+\](?:(?!\[v\d+\]).){0,200}?\b((?:19|20)\d{2})\b',
+            text,
+            flags=re.DOTALL,
+        )
+        return {int(year) for year in years}
+
     def _calculate_match_score(
             self, cited_title: str, cited_authors: List[str],
             authoritative_title: str, authoritative_authors: List[Dict]) -> float:
@@ -772,7 +786,16 @@ class ArXivCitationChecker:
                      'cited_doi': reference.get('doi') or reference.get('DOI')}
         )
         if year_warning:
-            errors.append(year_warning)
+            try:
+                cited_year_int = int(cited_year)
+            except (TypeError, ValueError):
+                cited_year_int = None
+
+            version_years = self._get_version_years(arxiv_id) if cited_year_int else set()
+            if cited_year_int not in version_years:
+                errors.append(year_warning)
+            elif version_years:
+                latest_data['_arxiv_version_years'] = sorted(version_years)
 
         paper_url = f"https://arxiv.org/abs/{arxiv_id}"
         

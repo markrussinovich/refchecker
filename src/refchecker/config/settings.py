@@ -53,6 +53,7 @@ def resolve_endpoint(provider: str, override: Optional[str] = None) -> Optional[
 
 DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
+    'chatgpt':   'gpt-6.1-sol',
     'anthropic': 'claude-sonnet-4-6',
     'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
@@ -61,6 +62,7 @@ DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
 
 DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
+    'chatgpt':   'gpt-6.1-sol',
     'anthropic': 'claude-sonnet-4-6',
     'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
@@ -76,7 +78,7 @@ DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
 # Providers that can perform hallucination checking (i.e. have web-search
 # capability so the LLM can verify references against the live web).
 # vLLM is excluded because local models cannot perform web searches.
-HALLUCINATION_CAPABLE_PROVIDERS = frozenset({'openai', 'anthropic', 'google', 'azure'})
+HALLUCINATION_CAPABLE_PROVIDERS = frozenset({'openai', 'chatgpt', 'anthropic', 'google', 'azure'})
 
 
 # Default configuration
@@ -145,6 +147,11 @@ DEFAULT_CONFIG = {
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
+        },
+        "chatgpt": {
+            "model": DEFAULT_EXTRACTION_MODELS['chatgpt'],
+            "max_tokens": 4000,
+            "timeout": 90,
         },
         "anthropic": {
             "model": DEFAULT_EXTRACTION_MODELS['anthropic'],

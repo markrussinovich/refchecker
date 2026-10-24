@@ -112,3 +112,48 @@ def test_academic_url_with_academic_venue_still_requires_paper_verification(monk
     assert verified_data is None
     assert errors == [{"error_type": "unverified", "error_details": "paper not verified but URL references paper"}]
     assert url == "https://arxiv.org/abs/2402.07314"
+
+
+def test_official_dynamic_portal_can_verify_from_domain_identity(monkeypatch):
+    checker = WebPageChecker(request_delay=0)
+    url = "https://open-research-europe.ec.europa.eu"
+    html = "<html><head><script src='/app.js'></script></head><body><div id='root'></div></body></html>"
+    monkeypatch.setattr(
+        checker,
+        "_respectful_request",
+        lambda requested_url: DummyResponse(html, url=f"{url}/"),
+    )
+
+    verified_data, errors, verified_url = checker.verify_raw_url_for_unverified_reference({
+        "title": "Open Research Europe: Full article corpus",
+        "authors": ["European Commission"],
+        "year": 2025,
+        "url": url,
+    })
+
+    assert verified_data is not None
+    assert verified_data["_matched_database"] == "Official Web Portal"
+    assert errors == []
+    assert verified_url == url
+
+
+def test_official_dynamic_portal_requires_matching_organization(monkeypatch):
+    checker = WebPageChecker(request_delay=0)
+    url = "https://open-research-europe.ec.europa.eu"
+    html = "<html><head><script src='/app.js'></script></head><body><div id='root'></div></body></html>"
+    monkeypatch.setattr(
+        checker,
+        "_respectful_request",
+        lambda requested_url: DummyResponse(html, url=f"{url}/"),
+    )
+
+    verified_data, errors, verified_url = checker.verify_raw_url_for_unverified_reference({
+        "title": "Open Research Europe: Full article corpus",
+        "authors": ["Unrelated Publisher"],
+        "year": 2025,
+        "url": url,
+    })
+
+    assert verified_data is None
+    assert errors
+    assert verified_url == url

@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/useAuthStore'
  * Renders sign-in buttons only for providers returned by the server.
  */
 export default function LoginPage() {
-  const { providers, loginWithGoogle, loginWithGithub, loginWithMicrosoft, error } = useAuthStore()
+  const { providers, loginWithGoogle, loginWithGithub, loginWithMicrosoft, loginWithChatGPT, error } = useAuthStore()
   const [isRedirecting, setIsRedirecting] = useState(false)
   const [redirectTarget, setRedirectTarget] = useState(null)
 
@@ -26,6 +26,12 @@ export default function LoginPage() {
     setIsRedirecting(true)
     setRedirectTarget('microsoft')
     loginWithMicrosoft()
+  }
+
+  const handleChatGPT = () => {
+    setIsRedirecting(true)
+    setRedirectTarget('chatgpt')
+    loginWithChatGPT()
   }
 
   return (
@@ -151,6 +157,15 @@ export default function LoginPage() {
                   disabled={isRedirecting}
                   label="Continue with Microsoft"
                   icon={<MicrosoftIcon />}
+                />
+              )}
+              {providers.includes('chatgpt') && (
+                <SignInButton
+                  onClick={handleChatGPT}
+                  loading={isRedirecting && redirectTarget === 'chatgpt'}
+                  disabled={isRedirecting}
+                  label="Continue with ChatGPT"
+                  icon={null}
                 />
               )}
             </>

@@ -30,7 +30,7 @@ class ConfigValidator:
     
     def __init__(self):
         self.required_sections = ['llm', 'processing', 'apis']
-        self.llm_providers = ['openai', 'anthropic', 'google', 'azure', 'vllm']
+        self.llm_providers = ['openai', 'chatgpt', 'anthropic', 'google', 'azure', 'vllm']
         
     def validate_config(self, config: Dict[str, Any]) -> ValidationResult:
         """

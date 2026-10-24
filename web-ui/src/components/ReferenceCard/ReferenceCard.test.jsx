@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReferenceCard from './ReferenceCard'
+import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useDocViewerStore } from '../../stores/useDocViewerStore'
 
 vi.mock('../../utils/formatters', async () => {
   const actual = await vi.importActual('../../utils/formatters')
@@ -30,6 +32,122 @@ vi.mock('../../utils/tauriBridge', async () => {
 })
 
 describe('ReferenceCard', () => {
+  it('warns when no context was located without claiming the reference is unused', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Missing context', status: 'verified', errors: [], warnings: [],
+      }} index={0} />)
+      const section = screen.getByRole('region', { name: 'In this paper' })
+      expect(within(section).getByText('Context warning:')).toBeInTheDocument()
+      expect(section).toHaveTextContent('This may be an uncited reference or a text-extraction limitation.')
+    } finally {
+      act(() => useHistoryStore.setState({ selectedCheckId: previousId }))
+    }
+  })
+
+  it('groups context and bibliography in a separated section above verification', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Layout test', status: 'error', matched_database: 'ArXiv',
+        errors: [{ error_type: 'author', error_details: 'Author mismatch' }],
+        warnings: [], citation_context: 'This paper cites the reference.',
+      }} index={0} />)
+      const error = screen.getByText(/Author mismatch/)
+      const context = screen.getByRole('button', { name: /Context/ })
+      const bibliography = screen.getByRole('button', { name: 'View bibliography entry in paper' })
+      const section = screen.getByRole('region', { name: 'In this paper' })
+      expect(within(section).queryByText('Context warning:')).toBeNull()
+      expect(section).toContainElement(context)
+      expect(section).toContainElement(bibliography)
+      expect(section.querySelector('.border-t')).toBeTruthy()
+      expect(context.compareDocumentPosition(bibliography) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(bibliography.compareDocumentPosition(screen.getByText('Verification')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(bibliography.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      fireEvent.click(context)
+      const excerpt = screen.getByText('This paper cites the reference.')
+      expect(excerpt.compareDocumentPosition(bibliography) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    } finally {
+      act(() => useHistoryStore.setState({ selectedCheckId: previousId }))
+    }
+  })
+
+  it('opens the paper bibliography for legacy checks that lack an original snapshot', () => {
+    const previousId = useHistoryStore.getState().selectedCheckId
+    useHistoryStore.setState({ selectedCheckId: 42 })
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Securing AI agents', status: 'error', errors: [], warnings: [],
+      }} index={22} />)
+      fireEvent.click(screen.getByRole('button', { name: 'View bibliography entry in paper' }))
+      expect(useDocViewerStore.getState().citation).toMatchObject({
+        kind: 'ref-entry', text: 'Securing AI agents', refTitle: 'Securing AI agents', refId: '22',
+      })
+    } finally {
+      act(() => {
+        useHistoryStore.setState({ selectedCheckId: previousId })
+        useDocViewerStore.getState().clearCitation()
+      })
+    }
+  })
+
+  it('does not reopen the unavailable venue tooltip after leaving its hover surface', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ReferenceCard reference={{
+        title: 'Venue hover test', venue: 'arXiv preprint arXiv:2505.23643',
+        status: 'verified', errors: [], warnings: [],
+      }} index={0} />)
+      const venue = screen.getByText('arXiv preprint arXiv:2505.23643').parentElement
+      fireEvent.mouseEnter(venue)
+      await act(async () => { vi.advanceTimersByTime(280) })
+      const tooltip = screen.getByRole('tooltip')
+      expect(venue).not.toHaveAttribute('title')
+      fireEvent.mouseEnter(tooltip, { relatedTarget: venue })
+      act(() => { vi.advanceTimersByTime(50) })
+      fireEvent.mouseLeave(tooltip, { relatedTarget: document.body })
+      act(() => { vi.advanceTimersByTime(151) })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      expect(venue).toHaveAttribute('title')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the extracted citation separately from recovered author metadata', () => {
+    render(<ReferenceCard reference={{
+      title: 'Securing AI agents', authors: ['Manuel Costa', 'Boris Kopf'],
+      status: 'error', errors: [], warnings: [],
+      original_reference: {
+        title: 'Securing AI agents', authors: ['M. Costa', 'C. Fournet'],
+        raw_text: 'M. Costa and C. Fournet. Securing AI agents. 2025.',
+      },
+    }} index={0} />)
+    const toggle = screen.getByText('Original reference (as extracted)')
+    fireEvent.click(toggle)
+    expect(toggle.closest('details')).toHaveAttribute('open')
+    expect(screen.getByText('M. Costa and C. Fournet. Securing AI agents. 2025.')).toBeInTheDocument()
+  })
+
+  it('combines saved cross-check warnings while keeping both earlier venue strings', () => {
+    const intro = 'You cited this same title differently in an earlier check. Confirm which version is correct.'
+    render(<ReferenceCard reference={{
+      title: 'A checked paper', status: 'warning', errors: [],
+      warnings: ['CAMLIS', 'CAMLIS 2024, pages 48-62'].map(venue => ({
+        warning_type: 'cache_inconsistency',
+        warning_details: `${intro} venue — here: arXiv / previously: ${venue}`,
+      })),
+    }} index={0} />)
+    expect(screen.getAllByText('Warning:')).toHaveLength(1)
+    expect(screen.getByText(text => text.includes(intro) && text.includes('previously: CAMLIS;')
+      && text.includes('previously: CAMLIS 2024, pages 48-62'))).toBeInTheDocument()
+  })
+
   it('does not show a spinner for final unverified refs after completion', () => {
     const reference = {
       status: 'unverified',
@@ -279,7 +397,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     expect(screen.getByRole('button', { name: /show less/i })).toBeTruthy()
   })
 
-  it('R11: clicking the name pins the popover; ×, Escape, and outside-click close it; shows >3 papers', async () => {
+  it('hover cards close with ×, Escape, or outside-click and show all recent papers', async () => {
     vi.useRealTimers()
     mockFetchAuthorProfile.mockResolvedValue({
       data: {
@@ -297,7 +415,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     })
     const reference = {
       status: 'verified',
-      title: 'Pinnable author paper',
+      title: 'Hover author paper',
       authors: ['Jane Smith'],
       year: 2021,
       enrichment: { authors: [{ name: 'Jane Smith', s2_author_id: '99', orcid: '0000-0002-1825-0097' }] },
@@ -305,30 +423,27 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     }
     render(<ReferenceCard reference={reference} index={0} />)
 
-    // Click the name → pins open (a dialog role appears, off-hover).
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     expect(dialog).toBeTruthy()
 
-    // Pinned panel shows the FULL recent-papers list (>3), not the 3-cap.
+    // All recent papers remain available without pinning.
     await waitFor(() => expect(within(dialog).getByText('Paper Four')).toBeTruthy())
     expect(within(dialog).getByText('Paper Five')).toBeTruthy()
 
     // Escape closes it.
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
-    // Re-pin, then close via the × control.
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog2 = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog2 = await screen.findByRole('tooltip')
     fireEvent.click(within(dialog2).getByRole('button', { name: /close author card/i }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
-    // Re-pin, then close via outside-click (mousedown on the body).
-    fireEvent.click(screen.getByText('Jane Smith'))
-    await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    await screen.findByRole('tooltip')
     fireEvent.mouseDown(document.body)
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
   })
 
   it('resolves an ID-less author automatically on open — no click required', async () => {
@@ -456,8 +571,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
 
     await waitFor(() => expect(within(dialog).getByText('0000-0003-1111-2222')).toBeTruthy())
     const orcidLink = within(dialog).getAllByRole('link')
@@ -482,8 +597,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getByText('0000-0001-2345-6789')).toBeTruthy())
     expect(mockFindAuthorProfile).not.toHaveBeenCalled()
   })
@@ -503,8 +618,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
 
     // The visible ORCID NUMBER renders (R53)...
     await waitFor(() => expect(within(dialog).getByText('0000-0001-2345-6789')).toBeTruthy())
@@ -525,10 +640,10 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(mockFetchAuthorProfile).toHaveBeenCalled())
-    // No orcid.org link anywhere in the pinned panel.
+    // No orcid.org link anywhere in the hover card.
     const orcidLink = within(dialog).queryAllByRole('link').find(a => (a.getAttribute('href') || '').includes('orcid.org'))
     expect(orcidLink).toBeUndefined()
   })
@@ -554,8 +669,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Ada Index'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Ada Index'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getAllByText('300').length).toBeGreaterThan(0))
     expect(within(dialog).getAllByText('137').length).toBeGreaterThan(0)
     // Both surfaces render it: the inline header line AND the metric chip row.
@@ -579,8 +694,8 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
       errors: [], warnings: [], suggestions: [],
     }
     render(<ReferenceCard reference={reference} index={0} />)
-    fireEvent.click(screen.getByText('Bob Noindex'))
-    const dialog = await screen.findByRole('dialog')
+    fireEvent.mouseEnter(screen.getByText('Bob Noindex'))
+    const dialog = await screen.findByRole('tooltip')
     await waitFor(() => expect(within(dialog).getAllByText('9').length).toBeGreaterThan(0))
     expect(within(dialog).queryAllByText(/i10/i).length).toBe(0)
   })
@@ -732,7 +847,7 @@ describe('ReferenceCard — author card sizing', () => {
     expect(tooltip.style.height).toBe(before.h)
   })
 
-  it('holds each recent paper to one line in the hover card, in full when pinned', async () => {
+  it('holds each recent paper to one line with the full title in its tooltip', async () => {
     vi.useRealTimers()
     const longTitle = 'A Very Long Paper Title That Would Otherwise Wrap Across Several Lines And Overflow The Card'
     mockFetchAuthorProfile.mockResolvedValue({
@@ -762,10 +877,7 @@ describe('ReferenceCard — author card sizing', () => {
     // The year is never sacrificed to the truncation.
     expect(within(tooltip).getByText(/2021/)).toBeTruthy()
 
-    // Pinning is a deliberate request for the whole record: no clipping there.
-    fireEvent.click(within(tooltip).getByRole('button', { name: /pin author card open/i }))
-    const panel = await screen.findByRole('dialog')
-    expect(within(panel).getByText(new RegExp(longTitle)).className).not.toMatch(/\btruncate\b/)
+    expect(within(tooltip).queryByRole('button', { name: /pin author card open/i })).toBeNull()
   })
 
   it('gives two different authors the same width', async () => {

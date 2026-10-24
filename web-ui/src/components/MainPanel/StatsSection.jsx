@@ -10,6 +10,10 @@ import {
   exportResultsAsRIS,
   exportDiffAsMarkdown,
   exportDiffAsCsv,
+  exportCorrectionsOnly,
+  applyReferenceCorrections,
+  asCitedReference,
+  hasReferenceCorrection,
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
   filterIssuesForStyle,
@@ -97,6 +101,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // 'corrected' = apply every verifier suggestion before exporting
   // 'diff' = side-by-side original-vs-corrected listing
   const [exportMode, setExportMode] = useState('original')
+  const [exportMessage, setExportMessage] = useState('')
   // Hovered filter chip id. Tracked in state (not imperative DOM writes) so a
   // chip never keeps a stale hover fill when the selection changes under the
   // cursor.
@@ -255,7 +260,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // Export handlers
   const handleExport = (format) => {
     setShowExportMenu(false)
-    const sortedRefs = sortReferencesForExport(references, sortMode)
+    setExportMessage('')
+    const sortedRefs = sortReferencesForExport(
+      exportMode === 'original' ? references.map(asCitedReference) : references, sortMode,
+    )
 
     // 'diff' mode short-circuits format: there are only two file shapes
     // (markdown and csv) that make sense for a side-by-side report.
@@ -270,17 +278,25 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
 
     // 'corrected' mode rewrites each ref with the verifier's accepted
     // suggestion before formatting in the chosen style.
-    const correctedRefs = exportMode === 'corrected'
-      ? sortedRefs.map(r => {
-          const c = r.corrected_reference
-          if (!c || typeof c !== 'object') return r
-          const next = { ...r }
-          for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
-            if (c[k] != null && c[k] !== '') next[k] = c[k]
-          }
-          return next
-        })
-      : sortedRefs
+    const correctedRefs = exportMode === 'corrected' || exportMode === 'corrections-only'
+      ? (exportMode === 'corrections-only' ? sortedRefs.filter(hasReferenceCorrection) : sortedRefs)
+          .map(applyReferenceCorrections)
+      : sortedRefs.map(asCitedReference)
+    if (exportMode === 'corrections-only' && correctedRefs.length === 0) {
+      setExportMessage('No verified corrections are available to export.')
+      return
+    }
+    if (exportMode === 'corrections-only') {
+      const fileTypes = {
+        markdown: ['md', 'text/markdown'], text: ['txt', 'text/plain'],
+        bibtex: ['bib', 'application/x-bibtex'], ris: ['ris', 'application/x-research-info-systems'],
+        jsonl: ['jsonl', 'application/x-ndjson'], csv: ['csv', 'text/csv'],
+      }
+      const [extension, mime] = fileTypes[format]
+      downloadAsFile(exportCorrectionsOnly(sortedRefs, format),
+        `${baseFilename}-corrections-only.${extension}`, mime)
+      return
+    }
     const data = { paperTitle, paperSource, stats, references: correctedRefs }
 
     switch (format) {
@@ -313,6 +329,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         borderColor: 'var(--color-border)',
       }}
     >
+      {exportMessage && <p role="status" className="text-sm mb-2">{exportMessage}</p>}
       {/* Header row. The right-hand controls are anchored: the left group takes
           the slack and wraps within itself, and the right group never shrinks
           or wraps to its own line. Without this, activating a filter widened
@@ -425,6 +442,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                     >
                       <option value="original">Original bibliography (as cited)</option>
                       <option value="corrected">Corrected bibliography (verifier-fixed)</option>
+                      <option value="corrections-only">Corrections only (verifier-fixed entries)</option>
                       <option value="diff">Side-by-side diff (cited vs corrected)</option>
                     </select>
                   </div>

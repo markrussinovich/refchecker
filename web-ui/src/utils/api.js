@@ -49,6 +49,8 @@ export const setAuthToken = (_token) => {}
 // 8 s for auth bootstrap.
 export const health = () => api.get('/health', { timeout: 5000 })
 
+export const getPaperAuthors = (checkId) => api.get(`/check/${checkId}/authors`)
+
 // -----------------------------------------------------------------------
 // Auth endpoints
 // -----------------------------------------------------------------------
@@ -87,6 +89,9 @@ export const updateLLMConfig = (id, config) => api.put(`/llm-configs/${id}`, con
 export const deleteLLMConfig = (id) => api.delete(`/llm-configs/${id}`)
 export const setDefaultLLMConfig = (id) => api.post(`/llm-configs/${id}/set-default`)
 export const validateLLMConfig = (config) => api.post('/llm-configs/validate', config)
+export const getChatGPTStatus = () => api.get('/chatgpt/status')
+export const startChatGPTAuth = () => api.post('/chatgpt/auth/start')
+export const disconnectChatGPT = () => api.delete('/chatgpt/auth')
 
 // Semantic Scholar API Key management
 export const validateSemanticScholarKey = (apiKey) => api.post('/settings/semantic-scholar/validate', { api_key: apiKey })
@@ -463,6 +468,9 @@ export default {
   deleteLLMConfig,
   setDefaultLLMConfig,
   validateLLMConfig,
+  getChatGPTStatus,
+  startChatGPTAuth,
+  disconnectChatGPT,
   validateSemanticScholarKey,
   getSemanticScholarKeyStatus,
   setSemanticScholarKey,
@@ -485,4 +493,3 @@ export default {
   clearCache,
   clearDatabase,
 }
-

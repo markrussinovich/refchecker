@@ -7,6 +7,7 @@ const PROVIDERS = [
   { key: 'google', label: 'Google', idField: 'google_client_id', secretField: 'google_client_secret' },
   { key: 'github', label: 'GitHub', idField: 'github_client_id', secretField: 'github_client_secret' },
   { key: 'microsoft', label: 'Microsoft', idField: 'ms_client_id', secretField: 'ms_client_secret' },
+  { key: 'chatgpt', label: 'ChatGPT', idField: 'chatgpt_client_id', secretField: 'chatgpt_client_secret', optionalSecret: true },
 ]
 
 /**
@@ -37,12 +38,12 @@ export default function EnableAccountsForm({ accent, repoUrl }) {
 
   const setField = (k, v) => setFields((f) => ({ ...f, [k]: v }))
   const configured = cfg?.providers || {}
-  const providerReady = (p) => configured[p.key] || (fields[p.idField]?.trim() && fields[p.secretField]?.trim())
+  const providerReady = (p) => configured[p.key] || (fields[p.idField]?.trim() && (p.optionalSecret || fields[p.secretField]?.trim()))
   const anyProvider = PROVIDERS.some(providerReady)
 
   const apply = async () => {
     setError('')
-    if (multiuser && !anyProvider) { setError('Enter at least one provider’s Client ID and Secret.'); return }
+    if (multiuser && !anyProvider) { setError('Configure at least one provider. ChatGPT requires a registered Client ID; other providers also require a Secret.'); return }
     setBusy(true)
     try {
       await setAuthConfig({ multiuser, ...fields })
@@ -88,9 +89,19 @@ export default function EnableAccountsForm({ accent, repoUrl }) {
               placeholder={configured[p.key] ? 'Client ID (set — blank keeps it)' : `${p.label} Client ID`}
               value={fields[p.idField] || ''} onChange={(e) => setField(p.idField, e.target.value)} />
             <input type="password" className="text-sm rounded px-2 py-1.5 min-w-0" style={fld}
-              placeholder={configured[p.key] ? 'Secret (set — blank keeps it)' : `${p.label} Client Secret`}
+              placeholder={p.optionalSecret ? 'Client Secret (if issued)' : configured[p.key] ? 'Secret (set — blank keeps it)' : `${p.label} Client Secret`}
               value={fields[p.secretField] || ''} onChange={(e) => setField(p.secretField, e.target.value)} />
           </div>
+          {p.key === 'chatgpt' && (
+            <div className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              Register an identity-only OpenAI client for this deployment; hosted sign-in requires OpenAI approval.
+              This is separate from connecting a ChatGPT plan in LLM settings.
+              <input className="mt-2 w-full rounded px-2 py-1.5" style={fld}
+                placeholder="Registered callback URL (optional)"
+                value={fields.chatgpt_redirect_uri || ''}
+                onChange={(e) => setField('chatgpt_redirect_uri', e.target.value)} />
+            </div>
+          )}
         </div>
       ))}
 

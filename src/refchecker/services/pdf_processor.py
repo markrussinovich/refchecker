@@ -44,6 +44,18 @@ class PDFProcessor:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.cache = {}
+
+    @staticmethod
+    def is_usenix_cover_page(text: str) -> bool:
+        """Identify publisher front matter rather than a paper's title page."""
+        import re
+
+        text = re.sub(r'\s+', ' ', text).lower()
+        return (
+            'usenix' in text
+            and 'this paper is included in the proceedings' in text
+            and 'open access to the proceedings' in text
+        )
         
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """
@@ -148,6 +160,12 @@ class PDFProcessor:
             url = ""
             doi = ""
             arxiv_id = ""
+
+        if file_path.lower().endswith('.pdf') and not authors:
+            from refchecker.utils.paper_metadata import extract_pdf_paper_authors
+            authors = [author["name"] for author in extract_pdf_paper_authors(
+                file_path, metadata.get('title', '') if metadata else "",
+            )]
         
         return Paper(
             title=title,
@@ -362,9 +380,26 @@ class PDFProcessor:
         
         # Split into lines and clean
         lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Review PDFs may extract the entire line-number gutter before the title.
+        lines = [line for line in lines if not re.fullmatch(r'\d{1,4}', line)]
         
         if not lines:
             return None
+
+        anonymous_index = next(
+            (i for i, line in enumerate(lines[:15]) if line.lower() == 'anonymous authors'),
+            None,
+        )
+        if anonymous_index is not None:
+            title_lines = [
+                line for line in lines[:anonymous_index]
+                if not re.match(r'^(?:under review|published|accepted)\s+(?:as|at|in)\b', line, re.IGNORECASE)
+            ]
+            if title_lines and all(line.isupper() for line in title_lines):
+                title = re.sub(r'(?<=[A-Z])-\s+(?=[A-Z])', '', ' '.join(title_lines))
+                title = re.sub(r'\s+', ' ', title).strip()
+                if 15 <= len(title) <= 350:
+                    return title
         
         # Skip common header elements (conference names, page numbers, etc.)
         header_patterns = [
@@ -377,7 +412,7 @@ class PDFProcessor:
             r'^\d+(?:st|nd|rd|th)\s+usenix\b.*\b(symposium|conference|workshop)\b',
             r'^\d{4}-\d{1,5}\s*\d{2}-\d{1,5}-\d{1,5}$',  # ISBN-like rows from cover pages
             r'^[\d\s-]{10,}$',  # ISBN/catalog rows with extraction-inserted spaces
-            r'^[a-z]+\s+\d{1,2}\s*[–-]\s*\d{1,2},\s*\d{4}$',  # "August 11-13, 2021"
+            r'^[a-z]+\s+\d{1,2}\s*[–-]\s*\d{1,2},\s*\d{4}(?:\s*[•·].*)?$',
             r'^(preprint|arxiv|draft)',
             r'^(ieee|acm|springer|elsevier)',
             r'^https?://',

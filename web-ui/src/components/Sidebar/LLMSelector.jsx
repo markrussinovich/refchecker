@@ -33,7 +33,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   // in another part of the UI (e.g. saving a key in LLMConfigModal).
   const browserKeys = useKeyStore(state => state.keys)
   const hasKeyInBrowser = (id) => Boolean(browserKeys[id])
-  const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
+  const hallucinationCapableProviders = ['openai', 'chatgpt', 'anthropic', 'google', 'azure']
   const isHallucinationMode = mode === 'hallucination'
   const isChatMode = mode === 'chat'
   const isSummaryMode = mode === 'summarize'
@@ -56,6 +56,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const configHasKey = (config) => {
     if (!config) return false
     if (config.provider === 'vllm') return true
+    if (config.provider === 'chatgpt') return Boolean(config.oauth_connected || config.has_key)
     if (config.key_source === 'environment' || config.env_key_available) return true
     if (hasKeyInBrowser(`llm:${config.id}`)) return true
     if (hasKeyInBrowser(config.provider)) return true

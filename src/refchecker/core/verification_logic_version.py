@@ -31,8 +31,18 @@ History:
         with the shared scorer and the shared acceptance threshold instead of a
         private token-Jaccard with its own cut-offs, so a reference is judged
         the same whether it was verified fresh or replayed from cache.
+    5 - USENIX Security references can be verified against official proceedings,
+        including when bibliographic APIs return incomplete metadata.
+    6 - DOI citations prefer publication metadata over merged preprint records;
+        explicit ArXiv citations retain their preprint venue and DOI.
+    7 - Cached verdicts cannot replace a newly cited year; preprints and
+        publications are not treated as inconsistent versions in Seen Refs.
+    8 - Publication DOIs retain their metadata when an arXiv URL supplies
+        an accessible copy, including during ArXiv post-verification checks.
+    9 - Bare numeric BibTeX years are preserved so incorrect cited years
+        cannot disappear or be replaced by an inferred preprint year.
 """
 
-VERIFICATION_LOGIC_VERSION = 4
+VERIFICATION_LOGIC_VERSION = 9
 
 __all__ = ["VERIFICATION_LOGIC_VERSION"]

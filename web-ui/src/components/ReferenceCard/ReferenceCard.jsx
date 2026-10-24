@@ -30,6 +30,8 @@ import {
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 import AdditionalInfoBar from './AdditionalInfoBar'
 import ArticleAssistant from '../MainPanel/ArticleAssistant'
+import { consolidateCacheWarnings } from '../../utils/referenceWarnings'
+import { googleScholarProfileUrl } from '../../utils/authorLinks'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -274,6 +276,17 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
+  const originalReference = reference.original_reference
+  const originalText = originalReference && (
+    originalReference.raw_text || originalReference.raw ||
+    [
+      normalizeAuthors(originalReference.authors).join(', '),
+      originalReference.title,
+      displayReferenceValue(originalReference.venue),
+      displayReferenceValue(originalReference.year),
+      originalReference.cited_url || originalReference.url,
+    ].filter(Boolean).join('. ')
+  )
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
 
   // R04 FE safety net: if a ref sits in the hallucination "checking" state
@@ -331,6 +344,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // "View in document": ask the preview overlay to locate + highlight this
   // citation context on the native PDF page (same machinery as AI highlights).
   const requestCitation = useDocViewerStore(s => s.requestCitation)
+  const viewBibliographyEntry = () => {
+    const title = originalReference?.title || reference.title || ''
+    const text = originalText || title
+    if (!text) return
+    requestCitation({
+      text, label: 'Original bibliography entry', kind: 'ref-entry',
+      refId: String(reference.id ?? numberToShow), refTitle: title,
+    })
+  }
   const viewContextInDoc = (ctx, i) => {
     // Locate the WHOLE referenced sentence (with its surrounding before/after
     // when present) and colour the highlight by this reference's check status,
@@ -625,7 +647,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // is a known abbreviation of the database venue, the venue warning
   // is a false positive. Suppression runs at render time, so flipping
   // the style dropdown re-evaluates instantly.
-  const displayWarnings = baseDisplayWarnings.filter(w => {
+  const displayWarnings = consolidateCacheWarnings(baseDisplayWarnings).filter(w => {
     // Drop content-free warnings. A warning with no details, no cited/actual
     // values, and no usable type renders as a meaningless "Unknown mismatch"
     // on an otherwise cleanly-verified reference — that's the confusing badge
@@ -771,6 +793,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             )
           })()}
 
+          {originalText && (
+            <details className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <summary className="cursor-pointer">Original reference (as extracted)</summary>
+              <div className="mt-1 whitespace-pre-wrap break-words">{originalText}</div>
+            </details>
+          )}
           {/* When a non-default citation style is picked, render the
               reference once in that style and hide the duplicated
               structured rows below. With Plain text (ACM) selected
@@ -902,13 +930,213 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {(reference.citation_contexts?.length > 0 || reference.citation_context ||
+            (selectedCheckId > 0 && (originalText || reference.title))) && (
+            <section aria-label="In this paper">
+              <div className="my-3 flex items-center gap-3">
+                <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                  In this paper
+                </span>
+                <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
+              </div>
+
+              {!(reference.citation_contexts?.length > 0 || reference.citation_context) && (
+                <div className="mb-2 text-sm" style={{ color: 'var(--color-warning)' }}>
+                  <span className="font-bold">Context warning:</span>{' '}
+                  No citation context was located. This may be an uncited reference or a text-extraction limitation.
+                </div>
+              )}
+
+              {/* Citation context — the actual passage(s) in the paper body
+                  where this reference is cited. v0.7.67: collapsed by
+                  default behind a `▶ Context (N×)` toggle, then renders one
+                  SEPARATE box per occurrence (up to 3) with the citation
+                  marker highlighted so the user can spot misattributions at
+                  a glance. Falls back to the legacy single-string
+                  `citation_context` field when the backend hasn't populated
+                  the new array yet. */}
+              {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
+                <div className="flex mb-1" style={{ minWidth: 0 }}>
+                  <span
+                    className="flex-shrink-0"
+                    style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+                  >
+                    {/* Toggle row — header label + arrow indicator. Whole
+                        row is the click target so users can hit either the
+                        arrow OR the label. Mimics the native <details>
+                        affordance without relying on browser styling. */}
+                    <button
+                      type="button"
+                      onClick={() => setContextOpen((v) => !v)}
+                      aria-expanded={contextOpen}
+                      title={contextOpen ? 'Hide citation contexts' : 'Show citation contexts'}
+                      className="hover:opacity-70 transition-opacity"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        cursor: 'pointer',
+                        color: 'var(--color-text-secondary)',
+                        font: 'inherit',
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                    >
+                      <span style={{ display: 'inline-block', width: '0.9em' }}>
+                        {contextOpen ? '▼' : '▶'}
+                      </span>
+                      {' '}
+                      {reference.citation_count > 1
+                        ? `Context (${reference.citation_count}×)`
+                        : 'Context'}
+                    </button>
+                  </span>
+                  <div
+                    style={{
+                      flex: '1 1 auto',
+                      minWidth: 0,
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    {contextOpen && (
+                      reference.citation_contexts?.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
+                            // Split sentence at marker for inline bold
+                            // without dangerouslySetInnerHTML.
+                            const marker = ctx.marker || ''
+                            const sent = ctx.sentence || ''
+                            const markerRange = findCitationMarkerRange(sent, marker)
+                            const markerAt = markerRange ? markerRange.start : -1
+                            const markerEnd = markerRange ? markerRange.end : -1
+                            const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
+                            const head = markerRange ? sent.slice(0, markerAt) : sent
+                            const tail = markerRange ? sent.slice(markerEnd) : ''
+                            return (
+                              <div
+                                key={i}
+                                style={{
+                                  color: 'var(--color-text-primary)',
+                                  background: 'var(--color-bg-secondary)',
+                                  border: '1px solid var(--color-border, #d4d4d8)',
+                                  borderLeft: '3px solid var(--color-accent, #3b82f6)',
+                                  borderRadius: 6,
+                                  padding: '8px 10px',
+                                  boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
+                                }}
+                                title="Sentence around the citation marker in the source paper"
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    marginBottom: 5,
+                                    color: 'var(--color-text-muted)',
+                                    fontSize: '0.72rem',
+                                    fontStyle: 'normal',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  <span>Excerpt {i + 1}</span>
+                                  {marker && (
+                                    <span
+                                      style={{
+                                        color: 'var(--color-accent, #3b82f6)',
+                                        background: 'var(--color-bg-tertiary)',
+                                        border: '1px solid var(--color-border, #d4d4d8)',
+                                        borderRadius: 999,
+                                        padding: '0 6px',
+                                        textTransform: 'none',
+                                        letterSpacing: 0,
+                                      }}
+                                    >
+                                      {marker}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
+                                    title="Open this passage in the document and highlight it"
+                                    className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                                    style={{
+                                      marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+                                      background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
+                                      borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
+                                      color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
+                                    }}
+                                  >
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                                    View in document
+                                  </button>
+                                </div>
+                                <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
+                                  {ctx.before && (
+                                    <span style={{ color: 'var(--color-text-muted)' }}>
+                                      {ctx.before}{' '}
+                                    </span>
+                                  )}
+                                  <span>
+                                    {head}
+                                  </span>
+                                  {markerRange && (
+                                    <span
+                                      style={{
+                                        fontStyle: 'normal',
+                                        fontWeight: 700,
+                                        color: 'var(--color-accent, #3b82f6)',
+                                      }}
+                                    >
+                                      {markerText}
+                                    </span>
+                                  )}
+                                  <span>{tail}</span>
+                                  {ctx.after && (
+                                    <span style={{ color: 'var(--color-text-muted)' }}>
+                                      {' '}{ctx.after}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <span
+                          style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
+                          title="Sentence around the citation marker in the source paper"
+                        >
+                          {reference.citation_context}
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedCheckId > 0 && (originalText || reference.title) && (
+                <div>
+                  <button
+                    onClick={viewBibliographyEntry}
+                    className="mt-2 text-xs cursor-pointer underline"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    View bibliography entry in paper
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Divider before verification results */}
           {(displayUrls.length > 0 ||
             displayErrors.length > 0 ||
             displayWarnings.length > 0 ||
             reference.status === 'unverified') && (
             <div className="my-3 flex items-center gap-3">
-              <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-primary)' }}>
                 Verification
               </span>
               <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
@@ -926,175 +1154,6 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               <span style={{ color: 'var(--color-text)' }}>
                 {matchedDatabase}
               </span>
-            </div>
-          )}
-
-          {/* Citation context — the actual passage(s) in the paper body
-              where this reference is cited. v0.7.67: collapsed by
-              default behind a `▶ Context (N×)` toggle, then renders one
-              SEPARATE box per occurrence (up to 3) with the citation
-              marker highlighted so the user can spot misattributions at
-              a glance. Falls back to the legacy single-string
-              `citation_context` field when the backend hasn't populated
-              the new array yet. */}
-          {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
-            <div className="flex mb-1" style={{ minWidth: 0 }}>
-              <span
-                className="flex-shrink-0"
-                style={{ color: 'var(--color-text-secondary)', width: '120px' }}
-              >
-                {/* Toggle row — header label + arrow indicator. Whole
-                    row is the click target so users can hit either the
-                    arrow OR the label. Mimics the native <details>
-                    affordance without relying on browser styling. */}
-                <button
-                  type="button"
-                  onClick={() => setContextOpen((v) => !v)}
-                  aria-expanded={contextOpen}
-                  title={contextOpen ? 'Hide citation contexts' : 'Show citation contexts'}
-                  className="hover:opacity-70 transition-opacity"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    cursor: 'pointer',
-                    color: 'var(--color-text-secondary)',
-                    font: 'inherit',
-                    textAlign: 'left',
-                    width: '100%',
-                  }}
-                >
-                  <span style={{ display: 'inline-block', width: '0.9em' }}>
-                    {contextOpen ? '▼' : '▶'}
-                  </span>
-                  {' '}
-                  {reference.citation_count > 1
-                    ? `Context (${reference.citation_count}×)`
-                    : 'Context'}
-                </button>
-              </span>
-              <div
-                style={{
-                  flex: '1 1 auto',
-                  minWidth: 0,
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {contextOpen && (
-                  reference.citation_contexts?.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
-                        // Split sentence at marker for inline bold
-                        // without dangerouslySetInnerHTML.
-                        const marker = ctx.marker || ''
-                        const sent = ctx.sentence || ''
-                        const markerRange = findCitationMarkerRange(sent, marker)
-                        const markerAt = markerRange ? markerRange.start : -1
-                        const markerEnd = markerRange ? markerRange.end : -1
-                        const markerText = markerRange ? sent.slice(markerAt, markerEnd) : marker
-                        const head = markerRange ? sent.slice(0, markerAt) : sent
-                        const tail = markerRange ? sent.slice(markerEnd) : ''
-                        return (
-                          <div
-                            key={i}
-                            style={{
-                              color: 'var(--color-text-primary)',
-                              background: 'var(--color-bg-secondary)',
-                              border: '1px solid var(--color-border, #d4d4d8)',
-                              borderLeft: '3px solid var(--color-accent, #3b82f6)',
-                              borderRadius: 6,
-                              padding: '8px 10px',
-                              boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
-                            }}
-                            title="Sentence around the citation marker in the source paper"
-                          >
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                marginBottom: 5,
-                                color: 'var(--color-text-muted)',
-                                fontSize: '0.72rem',
-                                fontStyle: 'normal',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em',
-                              }}
-                            >
-                              <span>Excerpt {i + 1}</span>
-                              {marker && (
-                                <span
-                                  style={{
-                                    color: 'var(--color-accent, #3b82f6)',
-                                    background: 'var(--color-bg-tertiary)',
-                                    border: '1px solid var(--color-border, #d4d4d8)',
-                                    borderRadius: 999,
-                                    padding: '0 6px',
-                                    textTransform: 'none',
-                                    letterSpacing: 0,
-                                  }}
-                                >
-                                  {marker}
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); viewContextInDoc(ctx, i) }}
-                                title="Open this passage in the document and highlight it"
-                                className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                                style={{
-                                  marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  background: 'none', border: '1px solid var(--color-border, #d4d4d8)',
-                                  borderRadius: 999, padding: '1px 8px', cursor: 'pointer',
-                                  color: 'var(--color-accent, #3b82f6)', textTransform: 'none', letterSpacing: 0,
-                                }}
-                              >
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h7v7" /><path d="M10 14L21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
-                                View in document
-                              </button>
-                            </div>
-                            <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
-                              {ctx.before && (
-                                <span style={{ color: 'var(--color-text-muted)' }}>
-                                  {ctx.before}{' '}
-                                </span>
-                              )}
-                              <span>
-                                {head}
-                              </span>
-                              {markerRange && (
-                                <span
-                                  style={{
-                                    fontStyle: 'normal',
-                                    fontWeight: 700,
-                                    color: 'var(--color-accent, #3b82f6)',
-                                  }}
-                                >
-                                  {markerText}
-                                </span>
-                              )}
-                              <span>{tail}</span>
-                              {ctx.after && (
-                                <span style={{ color: 'var(--color-text-muted)' }}>
-                                  {' '}{ctx.after}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <span
-                      style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
-                      title="Sentence around the citation marker in the source paper"
-                    >
-                      {reference.citation_context}
-                    </span>
-                  )
-                )}
-              </div>
             </div>
           )}
 
@@ -1365,6 +1424,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               </div>
             </div>
           ))}
+
+
         </div>
       </div>
     </div>
@@ -1383,6 +1444,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.status === next.status &&
     prev.title === next.title &&
     prev.authors === next.authors &&
+    prev.original_reference === next.original_reference &&
     prev.year === next.year &&
     prev.venue === next.venue &&
     prev.hallucination_check_pending === next.hallucination_check_pending &&
@@ -1410,7 +1472,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 // layout engine (e.g. jsdom in unit tests, where scrollHeight is always 0).
 const AUTHORS_FALLBACK_CAP = 10
 
-function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
+export function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   const citedList = normalizeAuthors(authors)
   // Hooks MUST run before any early return (rules-of-hooks). If a reference's
   // authors momentarily go empty (e.g. during Re-verify / Suggest / Remove),
@@ -1528,6 +1590,8 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
   })()
 
   const lookupEnrichment = (display) => {
+    const exact = (enrichedAuthors || []).find(a => a?.name?.trim() === display.trim())
+    if (exact) return exact
     const lower = norm(display)
     if (!lower) return null
     if (enrichmentByKey.has(lower)) return enrichmentByKey.get(lower)
@@ -1574,10 +1638,10 @@ function AuthorsLine({ authors, enrichedAuthors, paperTitle, paperYear }) {
       } : undefined}>
       {list.map((name, i) => {
         const e = lookupEnrichment(name)
-        const profileHref = e?.orcid
-          ? `https://orcid.org/${e.orcid}`
-          : e?.openalex_id
-            ? `https://openalex.org/${e.openalex_id}`
+        const profileHref = e?.openalex_id
+          ? `https://openalex.org/${e.openalex_id}`
+          : e?.orcid
+            ? `https://orcid.org/${e.orcid}`
             : e?.s2_author_id
               ? `https://www.semanticscholar.org/author/${e.s2_author_id}`
               : null
@@ -1753,15 +1817,11 @@ const HOVER_CARD_W = 360
 // Typical loaded height, used only to decide which way to open. It doesn't
 // constrain the card — it just beats guessing at a minimum.
 const HOVER_CARD_TYPICAL_H = 260
-const PINNED_CARD_W = 460
 
 function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, paperYear }) {
   const [open, setOpen] = useState(false)
-  // R11: pinned keeps the popover open off-hover until explicitly dismissed
-  // (×, outside-click, or Escape) and switches it to the larger, fully-scrollable
-  // panel that shows the COMPLETE recent-papers list (no slice(0,3) cap).
-  const [pinned, setPinned] = useState(false)
-  const [profile, setProfile] = useState(() => _authorProfileCache.get(e?.s2_author_id || (e?.openalex_id ? `oa:${e.openalex_id}` : '')) || null)
+  const [profile, setProfile] = useState(() => e?.profile
+    || _authorProfileCache.get(`${e?.s2_author_id || ''}|${e?.openalex_id || ''}`) || null)
   // R10 (A3): an author with NO id (no s2_author_id / openalex_id) can't load a
   // profile. The "Find profile" action resolves one on demand from the bare
   // name + the citing paper's title/year — and only when the backend confirms
@@ -1845,31 +1905,21 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
     prefetchTimer.current = setTimeout(() => { loadProfile() }, 100)
     enterTimer.current = setTimeout(() => { setOpen(true); loadProfile() }, 250)
   }
-  // Moving the pointer off BOTH the author name and the popover always
-  // dismisses it — including when it was clicked open ("pinned"). The card is
-  // still fully interactive while the pointer is on it (the popover's own
-  // onMouseEnter cancels this pending close), but it must never be left
-  // stranded on screen after the pointer has moved away.
+  // Allow crossing the gap from the author link to the interactive hover card.
   const scheduleClose = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
     if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
     // 180ms is enough to cross the small gap between the name and the popover.
-    leaveTimer.current = setTimeout(() => { setPinned(false); setOpen(false) }, 180)
+    leaveTimer.current = setTimeout(() => { setOpen(false) }, 180)
   }
   const onLeave = scheduleClose
-  // R11: pin the popover open (stays open off-hover). Clears any pending
-  // hover-leave close, opens immediately, and loads the rich profile.
-  const pin = () => {
-    if (!e) return
+  const closeCard = () => {
     if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
     if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null }
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
-    setOpen(true)
-    setPinned(true)
-    loadProfile()
+    setOpen(false)
   }
-  const closePinned = () => { setPinned(false); setOpen(false) }
 
   // Safety net: a `mouseleave` can be missed entirely (pointer moved very fast,
   // the anchor re-rendered/scrolled out from under the cursor, the window lost
@@ -1895,23 +1945,22 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Dismiss on outside-click (mousedown) or Escape while pinned — mirrors
-  // the export-menu outside-click pattern elsewhere in this file.
+  // Dismiss the hover card on outside-click or Escape too.
   useEffect(() => {
-    if (!pinned) return undefined
+    if (!open) return undefined
     const onDown = (ev) => {
       const inAnchor = wrapperRef.current && wrapperRef.current.contains(ev.target)
       const inPop = popoverRef.current && popoverRef.current.contains(ev.target)
-      if (!inAnchor && !inPop) closePinned()
+      if (!inAnchor && !inPop) closeCard()
     }
-    const onKey = (ev) => { if (ev.key === 'Escape') closePinned() }
+    const onKey = (ev) => { if (ev.key === 'Escape') closeCard() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [pinned])
+  }, [open])
 
   useEffect(() => () => {
     if (enterTimer.current) clearTimeout(enterTimer.current)
@@ -1949,8 +1998,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       const avail = openUp ? spaceAbove : spaceBelow
       const maxH = Math.max(MIN_H, Math.min(cap70, avail))
       // Clamp left so a popover anchored near the right edge doesn't run off
-      // the viewport (the panel is at its widest when pinned).
-      const left = Math.max(MARGIN, Math.min(rect.left, vw - PINNED_CARD_W - MARGIN))
+      // the viewport.
+      const left = Math.max(MARGIN, Math.min(rect.left, vw - HOVER_CARD_W - MARGIN))
       setPlacement({
         dir: openUp ? 'up' : 'down',
         maxHeight: `${maxH}px`,
@@ -1998,6 +2047,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   // (including misses) are cached per name+title, so re-hovering is free.
   useEffect(() => {
     if (!open || !e || !paperTitle) return
+    if (e.profile_lookup_complete) return
     if (resolvedOrcid) return
     if (!idLess && !profile) return
     runFindProfile()
@@ -2009,6 +2059,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
   const resolvedOpenalexId = e?.openalex_id || (foundProfile?.available ? foundProfile.openalex_id : null) || null
   const openalexUrl = resolvedOpenalexId ? `https://openalex.org/${resolvedOpenalexId}` : null
   const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
+  const scholarProfileUrl = googleScholarProfileUrl(e, effectiveProfile, profile, foundProfile)
+  const preferredHref = openalexUrl || href
 
   return (
     <span
@@ -2017,23 +2069,13 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
       onMouseLeave={onLeave}
       style={{ position: 'relative', display: 'inline-block' }}
     >
-      {href ? (
+      {preferredHref ? (
         <a
-          href={href}
+          href={preferredHref}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={(ev) => {
-            // R11: a plain left-click on an enriched name pins the popover open
-            // instead of navigating; modifier-clicks (open-in-new-tab etc.)
-            // still follow the profile link.
-            if (e && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
-              ev.preventDefault()
-              pin()
-              return
-            }
-            onClickHref(ev)
-          }}
-          title={!e ? tooltipFallback : 'Click to pin this author card open'}
+          onClick={openalexUrl ? handleExternalClick(openalexUrl) : onClickHref}
+          title={open ? undefined : (!e ? tooltipFallback : 'Hover for author details; click to open profile')}
           style={{
             color: 'var(--color-text-secondary)',
             textDecorationColor: 'var(--color-link, #3b82f6)',
@@ -2047,9 +2089,8 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
         </a>
       ) : (
         <span
-          title={tooltipFallback || undefined}
-          onClick={e ? pin : undefined}
-          style={e ? { cursor: 'pointer' } : undefined}
+          title={open ? undefined : (tooltipFallback || undefined)}
+          style={e ? { cursor: 'help' } : undefined}
         >
           {name}
         </span>
@@ -2074,20 +2115,17 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{label}</span>
           </span>
         )
-        const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
+        const scholarUrl = scholarProfileUrl || `https://scholar.google.com/scholar?q=${encodeURIComponent(dispName)}`
         const profileLinks = [
           orcidUrl && { label: 'ORCID', url: orcidUrl, icon: 'orcid' },
           openalexUrl && { label: 'OpenAlex', url: openalexUrl, icon: 'openalex' },
           s2Url && { label: 'Semantic Scholar', url: s2Url, icon: 'semanticscholar' },
-          // Google Scholar has no author API — this is an honest name SEARCH
-          // (not a claimed profile), always available.
           { label: 'Google Scholar', url: scholarUrl, icon: 'googlescholar' },
         ].filter(Boolean)
         return createPortal((
         <div
           ref={popoverRef}
-          role={pinned ? 'dialog' : 'tooltip'}
-          aria-label={pinned ? `${dispName} — author details` : undefined}
+          role="tooltip"
           className="rounded-xl text-xs"
           style={{
             // Rendered via a portal into document.body with viewport-fixed
@@ -2103,12 +2141,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             // author, and so nothing re-flows sideways as data lands. Height
             // follows the content: reserving room for the tallest possible
             // layout left a dead gap under every card without a recent-work
-            // list. R11: the pinned panel is wider.
-            width: pinned ? PINNED_CARD_W : HOVER_CARD_W,
+            // list.
+            width: HOVER_CARD_W,
             // Caps to the ACTUAL space available (min(70vh, space−margin))
             // so the body is never clipped below the viewport; the inner body
             // scrolls whatever doesn't fit.
-            maxHeight: pinned ? '80vh' : placement.maxHeight,
+            maxHeight: placement.maxHeight,
             // Column layout so the footer can sit at the bottom edge rather
             // than floating mid-card above the reserved space.
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -2125,8 +2163,7 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
               and so a fixed-height card with sparse content leaves its blank
               space at the bottom rather than between sections. */}
           <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain' }}>
-          {/* Header: avatar + name + affiliation. Pin (⤢) / close (×) controls
-              sit top-right so the popover can be promoted to a persistent panel. */}
+          {/* Header: avatar + name + affiliation. */}
           <div className="flex items-start gap-2.5 px-3 pt-3 pb-2.5">
             <span className="flex-shrink-0 inline-flex items-center justify-center rounded-full"
               style={{ width: 36, height: 36, background: avatarBg, color: '#fff', fontWeight: 700, fontSize: 13 }}>
@@ -2135,21 +2172,12 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
                 <div style={{ fontWeight: 600, lineHeight: 1.25, flex: 1, minWidth: 0 }}>{dispName}</div>
-                {pinned ? (
-                  <button type="button" onClick={closePinned} aria-label="Close author card"
+                  <button type="button" onClick={closeCard} aria-label="Close author card"
                     title="Close"
                     className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors rounded"
                     style={{ flexShrink: 0, lineHeight: 1, fontSize: 16, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
                     ×
                   </button>
-                ) : (
-                  <button type="button" onClick={pin} aria-label="Pin author card open"
-                    title="Pin open"
-                    className="hover:bg-black/10 dark:hover:bg-white/10 transition-colors rounded"
-                    style={{ flexShrink: 0, lineHeight: 1, fontSize: 13, padding: '0 2px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}>
-                    ⤢
-                  </button>
-                )}
               </div>
               {affs.length > 0 && (
                 <div className="truncate" style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 1 }}>
@@ -2247,30 +2275,18 @@ function AuthorChip({ name, e, href, onClickHref, tooltipFallback, paperTitle, p
             </div>
           )}
 
-          {/* Recent papers. R11: the hover popover shows the top 3; the pinned
-              panel shows the COMPLETE list (the outer container scrolls). */}
+          {/* The complete recent-work list stays accessible in the scrollable card. */}
           {ep?.available && Array.isArray(ep.papers) && ep.papers.length > 0 && (
             <div className="px-3 pb-2.5">
               <div style={{ color: 'var(--color-text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                Recent work{pinned && ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
+                Recent work{ep.papers.length > 1 ? ` (${ep.papers.length})` : ''}
               </div>
               <div className="space-y-1.5">
-                {(pinned ? ep.papers : ep.papers.slice(0, 3)).map((p, i) => (
-                  // One line per paper in the hover card, so three long titles
-                  // can't wrap into eleven lines and dominate the card; the
-                  // full title is on the tooltip and the pinned panel wraps
-                  // it in full. The year never truncates — it is doing as much
-                  // work as the title in placing the paper.
-                  pinned ? (
-                    <div key={i} className="leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                      {p.title}{p.year ? <span style={{ color: 'var(--color-text-muted)' }}> · {p.year}</span> : null}
-                    </div>
-                  ) : (
+                {ep.papers.map((p, i) => (
                     <div key={i} className="leading-snug flex items-baseline" title={p.title} style={{ color: 'var(--color-text-secondary)' }}>
                       <span className="truncate min-w-0">{p.title}</span>
                       {p.year ? <span className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>&nbsp;· {p.year}</span> : null}
                     </div>
-                  )
                 ))}
               </div>
             </div>
@@ -2356,11 +2372,22 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
   }
   const vpOnEnter = () => {
     if (vpLeave.current) { clearTimeout(vpLeave.current); vpLeave.current = null }
-    vpEnter.current = setTimeout(() => { setVpOpen(true); loadVenue() }, 280)
+    if (vpEnter.current) clearTimeout(vpEnter.current)
+    if (!vpOpen) {
+      vpEnter.current = setTimeout(() => {
+        vpEnter.current = null
+        setVpOpen(true)
+        loadVenue()
+      }, 280)
+    }
   }
   const vpOnLeave = () => {
     if (vpEnter.current) { clearTimeout(vpEnter.current); vpEnter.current = null }
-    vpLeave.current = setTimeout(() => setVpOpen(false), 150)
+    if (vpLeave.current) clearTimeout(vpLeave.current)
+    vpLeave.current = setTimeout(() => {
+      vpLeave.current = null
+      setVpOpen(false)
+    }, 150)
   }
   useEffect(() => () => {
     if (vpEnter.current) clearTimeout(vpEnter.current)
@@ -2416,7 +2443,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
   // (OpenAlex /sources + DOAJ guidelines) is NOT being shown — otherwise two
   // banners stack on hover. Mirrors the per-author hover, which suppresses the
   // native title once its rich profile card is available.
-  const richPopoverShown = vpOpen && vp && vp.available
+  const richPopoverShown = vpOpen && vp
   const nativeTitle = richPopoverShown ? undefined : title
   const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
   const handle = (ev) => {
@@ -2453,7 +2480,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         </span>
       )}
       {vpOpen && vp && vp.available && (
-        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave} className="rounded-xl text-xs"
+        <div role="tooltip" className="rounded-xl text-xs"
           style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, minWidth: 260, maxWidth: 360, maxHeight: '60vh', overflowY: 'auto', background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', boxShadow: '0 12px 40px rgba(0,0,0,0.28)', padding: '10px 12px', whiteSpace: 'normal' }}>
           <div style={{ fontWeight: 700, marginBottom: 3 }}>{vp.display_name}</div>
           {vp.publisher && <div style={{ color: 'var(--color-text-muted)' }}>Publisher: {vp.publisher}</div>}
@@ -2485,7 +2512,7 @@ function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
         </div>
       )}
       {vpOpen && vp && vp.available === false && (
-        <div role="tooltip" onMouseEnter={vpOnEnter} onMouseLeave={vpOnLeave}
+        <div role="tooltip"
           style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 60, maxWidth: 280, background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', boxShadow: '0 8px 24px rgba(0,0,0,0.22)', padding: '8px 10px', borderRadius: 10, fontSize: 11 }}>
           No additional journal metadata found for this venue.
         </div>

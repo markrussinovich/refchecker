@@ -15,7 +15,8 @@ Design rules:
     four formats can never drift apart.
   * Honesty: minor Semantic-Scholar year-mismatch warnings are downweighted
     (grouped as "minor notes"), real errors / hallucinations are elevated. No
-    fabricated data — corrections come only from the stored `corrected_reference`.
+    fabricated data — corrections come only from verified issue fields or
+    the stored `corrected_reference`.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from __future__ import annotations
 import html
 import io
 import json
+import re
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 # Status / band colours are the RefChecker app's REAL design tokens
@@ -233,15 +235,61 @@ def _citation_line(authors: Any, year: Any, title: Any, venue: Any,
     return s or None
 
 
+def _correction_fields(ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve verifier-supplied fixes, including results without a stored citation."""
+    fields = {
+        "title": "ref_title_correct", "authors": "ref_authors_correct",
+        "year": "ref_year_correct", "venue": "ref_venue_correct",
+        "doi": "ref_doi_correct", "url": "ref_url_correct",
+        "arxiv_id": "ref_arxiv_id_correct",
+    }
+    corrections: Dict[str, Any] = {}
+    for issue in [*(ref.get("errors") or []), *(ref.get("warnings") or [])]:
+        if not isinstance(issue, dict):
+            continue
+        for field, key in fields.items():
+            if issue.get(key) not in (None, "", []):
+                corrections[field] = issue[key]
+        kind = str(issue.get("error_type") or issue.get("warning_type") or "").lower()
+        field = "authors" if kind == "author" else kind
+        if field not in fields or issue.get(fields[field]) not in (None, "", []):
+            continue
+        actual = issue.get("actual_value")
+        details = issue.get("error_details") or issue.get("warning_details") or ""
+        if actual in (None, "") and isinstance(details, str):
+            match = re.search(r"\bcited:.*?\bactual:\s*(.+)", details, re.I | re.S)
+            # An individual author mismatch is not a replacement author list.
+            if match and not (field == "authors" and re.match(r"Author\s+\d+", details, re.I)):
+                actual = match.group(1).strip()
+        if actual not in (None, "", []):
+            corrections[field] = actual
+    stored = ref.get("corrected_reference")
+    if isinstance(stored, dict):
+        corrections.update({k: v for k, v in stored.items() if v not in (None, "", [])})
+        if stored.get("journal"):
+            corrections["venue"] = stored["journal"]
+        if stored.get("verified_url") and not stored.get("url"):
+            corrections["url"] = stored["verified_url"]
+    if isinstance(corrections.get("authors"), str):
+        corrections["authors"] = [
+            name.strip() for name in re.split(r",\s*(?:and\s+)?|;\s*|\s+and\s+", corrections["authors"])
+            if name.strip()
+        ]
+    if corrections.get("doi"):
+        corrections["doi"] = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", str(corrections["doi"]), flags=re.I)
+    return corrections
+
+
 def _corrected_str(ref: Dict[str, Any]) -> Optional[str]:
-    """Render the stored corrected_reference (verified truth) as a citation line."""
-    cr = ref.get("corrected_reference")
-    if not isinstance(cr, dict):
+    """Apply only verified fixes, preserving every unchanged citation field."""
+    fixes = _correction_fields(ref)
+    if not fixes:
         return None
+    cr = _style_ref_data(ref)
     return _citation_line(
         cr.get("authors"), cr.get("year"), cr.get("title"),
-        cr.get("journal") or cr.get("venue"), cr.get("doi"),
-        cr.get("url") or cr.get("verified_url"),
+        cr.get("venue") or cr.get("journal"), cr.get("doi"),
+        cr.get("url") or cr.get("cited_url"),
     )
 
 
@@ -253,6 +301,7 @@ def _cited_str(ref: Dict[str, Any]) -> Optional[str]:
     very change we are documenting)."""
     if not isinstance(ref, dict):
         return None
+    ref = ref.get("original_reference") or ref
     return _citation_line(
         ref.get("authors"), ref.get("year"), ref.get("title"),
         ref.get("venue") or ref.get("journal"), ref.get("doi"),
@@ -375,8 +424,8 @@ def _style_ref_data(ref: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve the values to render for *ref*, preferring the verified
     ``corrected_reference`` (no fabrication — only fields the verifier actually
     confirmed) and falling back to the cited values otherwise."""
-    cr = ref.get("corrected_reference") if isinstance(ref, dict) else None
-    cr = cr if isinstance(cr, dict) else {}
+    cr = _correction_fields(ref)
+    ref = ref.get("original_reference") or ref
     title = cr.get("title") or ref.get("title") or ""
     authors = cr.get("authors") or ref.get("authors") or []
     year = cr.get("year") or ref.get("year") or ""
@@ -384,6 +433,14 @@ def _style_ref_data(ref: Dict[str, Any]) -> Dict[str, Any]:
     doi = cr.get("doi") or ref.get("verified_doi") or ref.get("doi") or ""
     url = (cr.get("url") or cr.get("verified_url") or ref.get("verified_url")
            or ref.get("cited_url") or ref.get("url") or "")
+    if not (cr.get("url") or cr.get("verified_url")):
+        if cr.get("arxiv_id") and (
+            not url or re.match(r"^https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/", str(url), re.I)
+        ):
+            arxiv_id = re.sub(r"^arxiv:", "", str(cr["arxiv_id"]), flags=re.I).strip()
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+        elif cr.get("doi") and re.match(r"^https?://(?:dx\.)?doi\.org/", str(url), re.I):
+            url = f"https://doi.org/{doi}"
     if not url and doi:
         url = f"https://doi.org/{doi}"
     return {

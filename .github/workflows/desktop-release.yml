@@ -2,7 +2,8 @@ name: Desktop release
 
 # Builds the Tauri desktop app for macOS (arm64 + x86_64), Windows, and Linux.
 # On a `desktop-v*` tag push it also generates a Tauri updater `latest.json`
-# manifest and attaches everything to a draft GitHub Release.
+# manifest, publishes a versioned release, and updates the desktop-only
+# download channel independently of Python releases.
 #
 # Signing:
 #   - macOS code-sign / notarize when APPLE_* secrets are present.
@@ -229,6 +230,19 @@ jobs:
       # Tauri build (writes signed updater artifacts when
       # TAURI_SIGNING_PRIVATE_KEY is set; falls back to unsigned otherwise)
       # ---------------------------------------------------------------
+      - name: Discard cached installers
+        env:
+          TARGET: ${{ matrix.platform.rust_target }}
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import shutil
+
+          bundle = Path("tauri-app/src-tauri/target") / os.environ["TARGET"] / "release" / "bundle"
+          if bundle.is_dir():
+              shutil.rmtree(bundle)
+
       - name: Build Tauri bundle
         working-directory: tauri-app
         env:
@@ -323,13 +337,16 @@ jobs:
         with:
           name: refchecker-desktop-${{ matrix.platform.name }}
           path: dist-${{ matrix.platform.name }}/**
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Publish release
     needs: build
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-downloads
+      cancel-in-progress: false
     steps:
       - name: Checkout (for scripts)
         uses: actions/checkout@v4
@@ -411,34 +428,7 @@ jobs:
           cat latest.json
 
       - name: Stage release files
-        shell: bash
-        run: |
-          mkdir -p release-files
-          # Copy everything from artifacts into a flat dir
-          find artifacts -type f -exec cp {} release-files/ \;
-          # Add stable per-platform aliases so README download buttons can
-          # point at /releases/latest/download/<stable-name> and keep working
-          # across version bumps. Glob over what was actually produced.
-          cd release-files
-          for f in RefChecker_*_aarch64.dmg; do
-            [ -f "$f" ] && cp "$f" "RefChecker-macos-arm64.dmg"
-          done
-          for f in RefChecker_*_x64_en-US.msi; do
-            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64.msi"
-          done
-          for f in RefChecker_*_x64-setup.exe; do
-            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64-setup.exe"
-          done
-          for f in RefChecker_*_amd64.AppImage; do
-            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.AppImage"
-          done
-          for f in RefChecker_*_amd64.deb; do
-            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.deb"
-          done
-          cd ..
-          # Then add the manifest
-          cp latest.json release-files/
-          ls -la release-files
+        run: python tauri-app/scripts/prepare-release.py artifacts latest.json release-files
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -446,5 +436,35 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: RefChecker Desktop ${{ steps.version.outputs.version }}
           generate_release_notes: true
-          draft: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          make_latest: false
+          fail_on_unmatched_files: true
           files: release-files/*
+
+      - name: Update desktop download channel
+        if: ${{ !contains(steps.version.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="desktop-v${VERSION}"
+          NOTES="Desktop installers for ${TAG}. Versioned release and source: https://github.com/${GH_REPO}/releases/tag/${TAG}"
+          if CURRENT="$(gh release view desktop-latest --json name --jq .name)"; then
+            CURRENT="${CURRENT#RefChecker Desktop }"
+            if [ "$(printf '%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)" != "$VERSION" ]; then
+              echo "Desktop ${CURRENT} is newer than ${VERSION}; leaving the download channel unchanged."
+              exit 0
+            fi
+            gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/desktop-latest" \
+              -f sha="$(git rev-parse HEAD)" -F force=true
+          else
+            gh release create desktop-latest --target "$(git rev-parse HEAD)" \
+              --title "RefChecker Desktop ${VERSION}" --notes "$NOTES" --draft --latest=false
+          fi
+          gh release upload desktop-latest release-files/RefChecker-* release-files/latest.json --clobber
+          gh release edit desktop-latest --title "RefChecker Desktop ${VERSION}" \
+            --notes "$NOTES" --draft=false --prerelease=false --latest=false

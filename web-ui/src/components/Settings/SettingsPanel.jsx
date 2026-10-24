@@ -51,6 +51,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const loginWithGoogle = useAuthStore(state => state.loginWithGoogle)
   const loginWithGithub = useAuthStore(state => state.loginWithGithub)
   const loginWithMicrosoft = useAuthStore(state => state.loginWithMicrosoft)
+  const loginWithChatGPT = useAuthStore(state => state.loginWithChatGPT)
   const authLogout = useAuthStore(state => state.logout)
 
   // AI-generated-text detection (opt-in, client preference + local model mgmt)
@@ -1150,6 +1151,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     google: { label: 'Continue with Google', login: loginWithGoogle },
     github: { label: 'Continue with GitHub', login: loginWithGithub },
     microsoft: { label: 'Continue with Microsoft', login: loginWithMicrosoft },
+    chatgpt: { label: 'Continue with ChatGPT', login: loginWithChatGPT },
   }
 
   const renderAccountsSection = () => {
@@ -1241,7 +1243,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         >
           <strong style={{ color: 'var(--color-text-primary)' }}>You're in single-user mode.</strong>{' '}
           This desktop build runs locally with no account — all your checks stay on this machine.
-          Sign-in (Google / GitHub / Microsoft) and Teams are <strong>opt-in</strong> and require enabling
+          Sign-in (Google / GitHub / Microsoft / ChatGPT) and Teams are <strong>opt-in</strong> and require enabling
           multi-user mode on the server, so they're hidden by default.
         </div>
 

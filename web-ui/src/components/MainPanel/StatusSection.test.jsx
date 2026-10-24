@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import StatusSection, { buildCitationViewerSpans } from './StatusSection'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import StatusSection, { buildCitationViewerSpans, ThumbnailOverlay } from './StatusSection'
 
 const historyState = vi.hoisted(() => ({
   selectedCheckId: 42,
@@ -24,6 +24,55 @@ const historyState = vi.hoisted(() => ({
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
+
+vi.mock('./PaperAuthors', () => ({
+  default: ({ checkId }) => <div data-testid="paper-authors">Authors for check {checkId}</div>,
+}))
+
+vi.mock('./DocumentViewer', () => ({
+  default: ({ checkId, notice, spans, onClose }) => (
+    <div role="dialog" aria-label="Document fallback">
+      <span>{notice}</span><span>Check {checkId}, {spans.length} highlights</span>
+      <button onClick={onClose}>Close document</button>
+    </div>
+  ),
+}))
+
+describe('thumbnail page failures', () => {
+  beforeEach(() => {
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('switches failed raster pages to the document viewer and preserves highlights and close', () => {
+    const close = vi.fn()
+    render(<ThumbnailOverlay checkId={42} initialPageCount={2} onClose={close}
+      aiDetection={{ band: 'high', spans: [{ quote: 'A flagged passage' }] }} />)
+    const page = screen.getByAltText('Page 1 of 2')
+    expect(page.parentElement.style.width).toBe('90vw')
+    expect(page.parentElement.style.maxHeight).toBe('')
+    fireEvent.error(page)
+    expect(screen.queryByAltText('Page 2 of 2')).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Document fallback' })).toBeInTheDocument()
+    expect(screen.getByText(/Check 42, 1 highlights/)).toBeInTheDocument()
+    expect(screen.getByText(/Page images could not be loaded/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Close document'))
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('tries the thumbnail only once before falling back when both preview images fail', () => {
+    render(<ThumbnailOverlay checkId={42} initialPageCount={1} onClose={vi.fn()}
+      previewUrl="/preview.png" thumbnailUrl="/thumbnail.png" />)
+    const image = screen.getByAltText('Paper preview')
+    fireEvent.error(image)
+    expect(image).toHaveAttribute('src', '/thumbnail.png')
+    fireEvent.error(image)
+    expect(screen.getByRole('dialog', { name: 'Document fallback' })).toBeInTheDocument()
+  })
+})
 
 vi.mock('../../stores/useCheckStore', () => {
   const state = {
@@ -93,6 +142,24 @@ describe('StatusSection hallucination model display', () => {
 
     const retriedImage = screen.getByAltText('Paper thumbnail')
     expect(retriedImage.getAttribute('src')).toBe('/api/thumbnail/42?phase=completed')
+    expect(screen.getByTestId('paper-authors')).toHaveTextContent('Authors for check 42')
+  })
+
+  it('waits for source extraction, not verification completion, before looking up authors', () => {
+    const { rerender } = render(<StatusSection />)
+    expect(screen.queryByTestId('paper-authors')).not.toBeInTheDocument()
+
+    historyState.selectedCheck = {
+      ...historyState.selectedCheck,
+      total_refs: 55,
+      processed_refs: 6,
+      extraction_method: 'cache',
+      bibliography_source_kind: 'cache',
+    }
+    rerender(<StatusSection />)
+    expect(screen.getByTestId('paper-authors')).toHaveTextContent('Authors for check 42')
+    expect(screen.getByText('Cached bibliography')).toBeInTheDocument()
+    expect(screen.getByText('Processed 6 of 55 references...')).toBeInTheDocument()
   })
 })
 
@@ -101,6 +168,23 @@ describe('StatusSection hallucination model display', () => {
 // as a second locatable span and wires the citation span's `refEntryIndex` so
 // the native viewer scrolls + flashes that entry in-document on click.
 describe('buildCitationViewerSpans in-PDF reference jump (R28)', () => {
+  it('opens an original bibliography entry with a title fallback, not an inline citation', () => {
+    const spans = buildCitationViewerSpans({
+      text: 'M. Costa and C. Fournet. Securing AI agents. 2025.',
+      refTitle: 'Securing AI agents', kind: 'ref-entry', refId: '23',
+    })
+    expect(spans).toHaveLength(2)
+    expect(spans[0].quote).toContain('C. Fournet')
+    expect(spans[1].quote).toBe('Securing AI agents')
+    expect(spans.every(span => span.kind === 'ref-entry' && span.refEntryIndex === undefined)).toBe(true)
+  })
+
+  it('does not duplicate a title-only bibliography target from a legacy check', () => {
+    expect(buildCitationViewerSpans({
+      text: 'Securing AI agents', refTitle: 'Securing AI agents', kind: 'ref-entry',
+    })).toHaveLength(1)
+  })
+
   it('appends the reference-list entry span and wires refEntryIndex', () => {
     const spans = buildCitationViewerSpans({
       text: 'The method outperforms the baseline by a wide margin [4].',
