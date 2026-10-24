@@ -186,6 +186,33 @@ describe('InputSection bulk mode', () => {
     expect(mocks.selectCheck).toHaveBeenCalledWith(42)
     expect(mocks.startCheck).toHaveBeenCalledWith('session-1', 42, '2401.12345', 'url', null)
   })
+
+  it('isolates LiteLLM configuration keys from the legacy provider-wide key', async () => {
+    mocks.getSelectedExtractionConfig.mockReturnValue({
+      id: 7, provider: 'litellm', model: 'anthropic/claude-sonnet-4-6',
+    })
+    mocks.getSelectedHallucinationConfig.mockReturnValue({
+      id: 8, provider: 'litellm', model: 'openai/gpt-4.1',
+    })
+    mocks.getKey.mockImplementation(key => {
+      if (key === 'litellm') return 'unrelated-key'
+      if (key === 'llm:8') return 'config-specific-key'
+      return null
+    })
+    render(<InputSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'Bulk' }))
+    fireEvent.change(screen.getByPlaceholderText(/Enter one URL or ArXiv ID per line/i), {
+      target: { value: '2401.12345' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Check 1 Paper' }))
+
+    await waitFor(() => {
+      expect(mocks.startBatchCheck).toHaveBeenCalledWith(expect.objectContaining({
+        api_key: null,
+        hallucination_api_key: 'config-specific-key',
+      }))
+    })
+  })
 })
 
 describe('InputSection mode tabs — hover state', () => {

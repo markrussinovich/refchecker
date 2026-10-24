@@ -65,6 +65,9 @@ optional = [
     "scikit-learn>=1.8.0",
     "joblib>=1.5.3",
 ]
+litellm = [
+    "litellm>=1.97.0,<1.106.0",
+]
 vllm = [
     "vllm>=0.20.0",
     "huggingface_hub>=1.12.0",

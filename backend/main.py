@@ -782,9 +782,13 @@ async def _database_refresh_loop() -> None:
 
 
 def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
-    """Reject web-only providers that are unsafe in multi-user deployments."""
+    """Reject web-only providers that are unsafe in multi-user deployments.
+
+    LiteLLM falls back to whatever provider credentials the server process
+    has in its environment, so it stays local-only like vLLM.
+    """
     normalized = (provider_name or "").strip().lower()
-    if is_multiuser_mode() and normalized in {"vllm", "chatgpt"}:
+    if is_multiuser_mode() and normalized in {"vllm", "chatgpt", "litellm"}:
         raise HTTPException(
             status_code=403,
             detail=f"{provider_name} is only supported in single-user local deployments",
@@ -838,7 +842,7 @@ def _env_llm_config_for_provider(provider_name: str) -> Optional[Dict[str, Any]]
     from refchecker.config.settings import DEFAULT_EXTRACTION_MODELS, resolve_api_key, resolve_endpoint
 
     provider = _normalize_llm_provider_name(provider_name)
-    if provider == "vllm" or provider not in DEFAULT_EXTRACTION_MODELS:
+    if provider in ("vllm", "litellm") or provider not in DEFAULT_EXTRACTION_MODELS:
         return None
     if not resolve_api_key(provider):
         return None
@@ -1002,7 +1006,7 @@ async def _reuse_provider_key_for_new_config(
     user_id: Optional[int],
 ) -> Optional[str]:
     """Return an existing same-provider key for single-user config creation."""
-    if is_multiuser_mode():
+    if is_multiuser_mode() or provider.strip().lower() == "litellm":
         return None
 
     configs = await db.get_llm_configs(user_id=user_id)
@@ -6025,6 +6029,7 @@ async def validate_llm_config(
         "chatgpt": ("openai", "pip install openai"),
         "google": ("google.genai", "pip install google-genai"),
         "gemini": ("google.genai", "pip install google-genai"),
+        "litellm": ("litellm", "pip install 'academic-refchecker[litellm]'"),
     }
     
     # Check if required package is installed for this provider
@@ -10054,6 +10059,12 @@ _STATIC_MODEL_FALLBACK = {
     "vllm": [
         "meta-llama/Llama-3.3-70B-Instruct", "meta-llama/Llama-3.1-8B-Instruct",
         "mistralai/Mistral-7B-Instruct-v0.3", "Qwen/Qwen2.5-7B-Instruct",
+    ],
+    # LiteLLM ids are "<provider>/<model>"; any id LiteLLM supports can be typed in.
+    "litellm": [
+        "anthropic/claude-sonnet-4-6", "openai/gpt-4.1", "gemini/gemini-2.5-flash",
+        "bedrock/us.anthropic.claude-sonnet-4-6-v1:0", "vertex_ai/gemini-2.5-pro",
+        "azure/gpt-4.1", "mistral/mistral-large-latest", "ollama/llama3.1",
     ],
 }
 

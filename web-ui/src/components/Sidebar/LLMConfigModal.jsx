@@ -21,7 +21,12 @@ const PROVIDERS = [
   { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite-preview', requiresKey: true, hallucinationCapable: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
   { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true, hallucinationCapable: false },
+  // LiteLLM reads provider credentials from the environment, so key and endpoint are optional.
+  { id: 'litellm', name: 'LiteLLM (Local)', defaultModel: 'anthropic/claude-sonnet-4-6', optionalKey: true, optionalEndpoint: true, hallucinationCapable: true },
 ]
+
+// Providers that may run on server-side credentials; local deployments only.
+const LOCAL_ONLY_PROVIDERS = ['vllm', 'chatgpt', 'litellm']
 
 /**
  * Modal for adding/editing LLM configurations
@@ -70,16 +75,17 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   }, [isOpen, editConfig, prefillConfig])
 
   const availableProviders = useMemo(
-    () => (multiuser ? PROVIDERS.filter(p => !['vllm', 'chatgpt'].includes(p.id)) : PROVIDERS),
+    () => (multiuser ? PROVIDERS.filter(p => !LOCAL_ONLY_PROVIDERS.includes(p.id)) : PROVIDERS),
     [multiuser],
   )
   const selectedProvider = availableProviders.find(p => p.id === formData.provider)
   const existingProviderConfig = configs.find(config => (
+    formData.provider !== 'litellm' &&
     config.provider === formData.provider &&
     config.id !== editConfig?.id &&
     (config.has_key || useKeyStore.getState().hasKey(config.provider) || useKeyStore.getState().hasKey(`llm:${config.id}`))
   ))
-  const reusableProviderKey = (
+  const reusableProviderKey = formData.provider === 'litellm' ? null : (
     useKeyStore.getState().getKey(formData.provider) ||
     (existingProviderConfig ? useKeyStore.getState().getKey(`llm:${existingProviderConfig.id}`) : null)
   )
@@ -101,7 +107,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
 
   useEffect(() => {
     if (!multiuser) return
-    if (formData.provider === 'vllm') {
+    if (['vllm', 'litellm'].includes(formData.provider)) {
       const fallbackProvider = availableProviders[0]
       setFormData(prev => ({
         ...prev,
@@ -296,6 +302,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
       // Validate API connection before saving (only for new configs or when API key is provided)
       if (
         (selectedProvider?.requiresKey && (effectiveApiKey || (!editConfig && !existingProviderConfig))) ||
+        (selectedProvider?.optionalKey && (effectiveApiKey || !editConfig)) ||
         selectedProvider?.requiresChatGPTLogin
       ) {
         setIsValidating(true)
@@ -384,7 +391,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         if (configId) {
           useKeyStore.getState().setKey(`llm:${configId}`, effectiveApiKey)
         }
-        useKeyStore.getState().setKey(formData.provider, effectiveApiKey)
+        if (formData.provider !== 'litellm') {
+          useKeyStore.getState().setKey(formData.provider, effectiveApiKey)
+        }
         logger.info('LLMConfigModal', 'API key saved to local key store', { provider: formData.provider })
       }
 
@@ -438,7 +447,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
             {selectedProvider?.hallucinationCapable
               ? selectedProvider?.requiresChatGPTLogin
                 ? 'Uses your ChatGPT plan for extraction and hallucination checks.'
-                : 'Can be used for extraction and hallucination checks.'
+                : selectedProvider?.id === 'litellm'
+                  ? 'Any LiteLLM model id (bedrock/..., vertex_ai/..., ollama/...). Hallucination checks search the web when the model supports it.'
+                  : 'Can be used for extraction and hallucination checks.'
               : 'Local vLLM is available for extraction only.'}
           </p>
         </div>
@@ -559,7 +570,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         </div>
 
         {/* API Key */}
-        {selectedProvider?.requiresKey && (
+        {(selectedProvider?.requiresKey || selectedProvider?.optionalKey) && (
           <div>
             <label 
               htmlFor="api_key"
@@ -567,6 +578,14 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               style={{ color: 'var(--color-text-primary)' }}
             >
               API Key
+              {selectedProvider?.optionalKey && !editConfig && (
+                <span
+                  className="ml-1 font-normal"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  (optional)
+                </span>
+              )}
               {editConfig && (
                 <span 
                   className="ml-1 font-normal"
@@ -594,7 +613,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               className="mt-1 text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {multiuser
+              {selectedProvider?.optionalKey && !formData.api_key
+                ? "Leave blank to use the provider's own environment variables (ANTHROPIC_API_KEY, AWS credentials, ...)."
+                : multiuser
                 ? hasServerEnvironmentKey && !formData.api_key
                   ? 'Using the server environment key by default. Enter a key here to override it for this browser.'
                   : 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
@@ -608,7 +629,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         )}
 
         {/* Endpoint */}
-        {selectedProvider?.requiresEndpoint && (
+        {(selectedProvider?.requiresEndpoint || selectedProvider?.optionalEndpoint) && (
           <div>
             <label 
               htmlFor="endpoint"
@@ -616,6 +637,14 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               style={{ color: 'var(--color-text-primary)' }}
             >
               Endpoint URL
+              {selectedProvider?.optionalEndpoint && (
+                <span
+                  className="ml-1 font-normal"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  (optional)
+                </span>
+              )}
             </label>
             <input
               type="url"
@@ -623,7 +652,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               name="endpoint"
               value={formData.endpoint}
               onChange={handleChange}
-              placeholder={formData.provider === 'vllm' ? 'http://localhost:8000' : 'https://your-resource.openai.azure.com'}
+              placeholder={formData.provider === 'vllm' ? 'http://localhost:8000' : formData.provider === 'litellm' ? 'Only for self-hosted or Azure models' : 'https://your-resource.openai.azure.com'}
               className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
               style={{
                 backgroundColor: 'var(--color-bg-secondary)',

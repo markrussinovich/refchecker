@@ -14,7 +14,8 @@ import { logger } from '../../utils/logger'
 
 function getConfigApiKey(keyStore, config) {
   if (!config) return null
-  return keyStore.getKey(`llm:${config.id}`) || keyStore.getKey(config.provider)
+  return keyStore.getKey(`llm:${config.id}`) ||
+    (config.provider === 'litellm' ? null : keyStore.getKey(config.provider))
 }
 
 /**

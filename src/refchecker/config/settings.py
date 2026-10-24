@@ -58,6 +58,8 @@ DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
     'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
     'vllm':      'meta-llama/Llama-3.1-8B-Instruct',
+    # LiteLLM model ids are ``<provider>/<model>`` (bedrock/..., vertex_ai/...).
+    'litellm':   'anthropic/claude-sonnet-4-6',
 }
 
 DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
@@ -67,6 +69,7 @@ DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
     'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
     'vllm':      'gpt-4.1',
+    'litellm':   'anthropic/claude-sonnet-4-6',
 }
 
 DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
@@ -78,7 +81,8 @@ DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
 # Providers that can perform hallucination checking (i.e. have web-search
 # capability so the LLM can verify references against the live web).
 # vLLM is excluded because local models cannot perform web searches.
-HALLUCINATION_CAPABLE_PROVIDERS = frozenset({'openai', 'chatgpt', 'anthropic', 'google', 'azure'})
+# LiteLLM uses web search for models that support it and plain chat otherwise.
+HALLUCINATION_CAPABLE_PROVIDERS = frozenset({'openai', 'chatgpt', 'anthropic', 'google', 'azure', 'litellm'})
 
 
 # Default configuration
@@ -179,7 +183,13 @@ DEFAULT_CONFIG = {
             "server_url": "http://localhost:8000",
             "download_path": "./models",
             "auto_download": True,
-        }
+        },
+        "litellm": {
+            "model": DEFAULT_EXTRACTION_MODELS['litellm'],
+            "max_tokens": 4000,
+            "temperature": 0.1,
+            "timeout": 30,
+        },
     }
 }
 
