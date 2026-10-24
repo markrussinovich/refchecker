@@ -876,13 +876,13 @@ class LLMHallucinationVerifier:
                 try:
                     return self._call_litellm_with_web_search(system_prompt, user_prompt)
                 except Exception as exc:
-                    # Like the Responses API path: stop paying for a search
-                    # call this model/route rejects on every later reference.
-                    self._litellm_web_search = False
+                    if isinstance(exc, self.client.UnsupportedParamsError) and 'web_search_options' in str(exc):
+                        self._litellm_web_search = False
+                        logger.warning('LiteLLM route does not support web_search_options; disabling web search: %s', exc)
                     if not _fallback_allowed():
                         logger.debug('LiteLLM web search failed and call budget exhausted; not chaining chat fallback: %s', exc)
                         raise
-                    logger.debug('LiteLLM web search failed, falling back to chat: %s', exc)
+                    logger.warning('LiteLLM web search failed, falling back to chat: %s', exc)
             return self._call_litellm_chat(system_prompt, user_prompt)
 
         # ChatGPT plan usage supports only the streaming Responses API and

@@ -80,11 +80,12 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   )
   const selectedProvider = availableProviders.find(p => p.id === formData.provider)
   const existingProviderConfig = configs.find(config => (
+    formData.provider !== 'litellm' &&
     config.provider === formData.provider &&
     config.id !== editConfig?.id &&
     (config.has_key || useKeyStore.getState().hasKey(config.provider) || useKeyStore.getState().hasKey(`llm:${config.id}`))
   ))
-  const reusableProviderKey = (
+  const reusableProviderKey = formData.provider === 'litellm' ? null : (
     useKeyStore.getState().getKey(formData.provider) ||
     (existingProviderConfig ? useKeyStore.getState().getKey(`llm:${existingProviderConfig.id}`) : null)
   )
@@ -390,7 +391,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         if (configId) {
           useKeyStore.getState().setKey(`llm:${configId}`, effectiveApiKey)
         }
-        useKeyStore.getState().setKey(formData.provider, effectiveApiKey)
+        if (formData.provider !== 'litellm') {
+          useKeyStore.getState().setKey(formData.provider, effectiveApiKey)
+        }
         logger.info('LLMConfigModal', 'API key saved to local key store', { provider: formData.provider })
       }
 

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   configs: [],
   hasKey: vi.fn(),
   getKey: vi.fn(),
+  setKey: vi.fn(),
   getChatGPTStatus: vi.fn(),
   listLLMModels: vi.fn(),
 }))
@@ -29,7 +30,7 @@ vi.mock('../../stores/useAuthStore', () => ({
 
 vi.mock('../../stores/useKeyStore', () => {
   const useKeyStore = () => ({})
-  useKeyStore.getState = () => ({ setKey: vi.fn(), getKey: mocks.getKey, hasKey: mocks.hasKey })
+  useKeyStore.getState = () => ({ setKey: mocks.setKey, getKey: mocks.getKey, hasKey: mocks.hasKey })
   return { useKeyStore }
 })
 
@@ -184,5 +185,43 @@ describe('LLMConfigModal', () => {
     render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
 
     expect(screen.queryByRole('option', { name: 'LiteLLM (Local)' })).toBeNull()
+  })
+
+  it('does not reuse another LiteLLM model key when the key is blank', async () => {
+    mocks.configs = [{ id: 9, provider: 'litellm', model: 'openai/gpt-4.1', has_key: true }]
+    mocks.getKey.mockImplementation(key => (
+      key === 'litellm' || key === 'llm:9' ? 'other-vendor-key' : null
+    ))
+    mocks.hasKey.mockReturnValue(true)
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'litellm' } })
+    fireEvent.click(screen.getByRole('button', { name: /Test connection/i }))
+
+    await waitFor(() => {
+      expect(mocks.validateLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'litellm', api_key: undefined,
+      }))
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add Configuration/i }))
+
+    await waitFor(() => {
+      expect(mocks.addConfig).toHaveBeenCalledWith(
+        expect.not.objectContaining({ api_key: expect.anything() }),
+        expect.anything(),
+      )
+    })
+  })
+
+  it('stores an explicit LiteLLM key only for its own configuration', async () => {
+    mocks.addConfig.mockResolvedValue({ id: 10, provider: 'litellm' })
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'litellm' } })
+    fireEvent.change(screen.getByLabelText(/API Key/i), { target: { value: 'model-key' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add Configuration/i }))
+
+    await waitFor(() => {
+      expect(mocks.setKey).toHaveBeenCalledWith('llm:10', 'model-key')
+    })
+    expect(mocks.setKey).not.toHaveBeenCalledWith('litellm', expect.anything())
   })
 })

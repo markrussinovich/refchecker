@@ -1006,7 +1006,7 @@ async def _reuse_provider_key_for_new_config(
     user_id: Optional[int],
 ) -> Optional[str]:
     """Return an existing same-provider key for single-user config creation."""
-    if is_multiuser_mode():
+    if is_multiuser_mode() or provider.strip().lower() == "litellm":
         return None
 
     configs = await db.get_llm_configs(user_id=user_id)

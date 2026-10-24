@@ -43,6 +43,11 @@ def fake_litellm(monkeypatch):
     module.responses = []
     module.web_search_models = set()
 
+    class UnsupportedParamsError(Exception):
+        pass
+
+    module.UnsupportedParamsError = UnsupportedParamsError
+
     def completion(**kwargs):
         module.calls.append(kwargs)
         result = module.responses.pop(0) if module.responses else _Response("ok")
@@ -200,7 +205,10 @@ def test_verifier_falls_back_to_chat_when_web_search_fails(fake_litellm):
 
     model = "gemini/gemini-2.5-flash"
     fake_litellm.web_search_models.add(model)
-    fake_litellm.responses.extend([RuntimeError("search tool rejected"), _Response("VERDICT: LIKELY")])
+    fake_litellm.responses.extend([
+        fake_litellm.UnsupportedParamsError("web_search_options is not supported"),
+        _Response("VERDICT: LIKELY"),
+    ])
     verifier = LLMHallucinationVerifier(provider="litellm", model=model)
     text, urls = verifier._call_uncached("system", "user")
 
@@ -212,6 +220,40 @@ def test_verifier_falls_back_to_chat_when_web_search_fails(fake_litellm):
     verifier._call_uncached("system", "user")
     assert len(fake_litellm.calls) == 3
     assert "web_search_options" not in fake_litellm.calls[2]
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timed out"), RuntimeError("429 rate limit")])
+def test_verifier_retries_web_search_after_transient_failure(fake_litellm, error):
+    from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
+
+    model = "anthropic/claude-sonnet-4-6"
+    fake_litellm.web_search_models.add(model)
+    fake_litellm.responses.extend([
+        error, _Response("VERDICT: UNCERTAIN"), _Response("VERDICT: UNLIKELY"),
+    ])
+    verifier = LLMHallucinationVerifier(provider="litellm", model=model)
+
+    assert verifier._call_uncached("system", "first reference") == ("VERDICT: UNCERTAIN", [])
+    assert verifier._call_uncached("system", "next reference") == ("VERDICT: UNLIKELY", [])
+    assert "web_search_options" in fake_litellm.calls[0]
+    assert "web_search_options" not in fake_litellm.calls[1]
+    assert "web_search_options" in fake_litellm.calls[2]
+
+
+def test_verifier_preserves_search_after_transient_failure_exhausts_budget(fake_litellm, monkeypatch):
+    from refchecker.llm import hallucination_verifier
+
+    monkeypatch.setattr(hallucination_verifier, "_CALL_DEADLINE_S", 0)
+    model = "anthropic/claude-sonnet-4-6"
+    fake_litellm.web_search_models.add(model)
+    fake_litellm.responses.append(TimeoutError("timed out"))
+    verifier = hallucination_verifier.LLMHallucinationVerifier(provider="litellm", model=model)
+
+    with pytest.raises(TimeoutError):
+        verifier._call_uncached("system", "user")
+
+    assert len(fake_litellm.calls) == 1
+    assert verifier._litellm_web_search
 
 
 # ---------------------------------------------------------------------------
