@@ -144,9 +144,9 @@ test('fresh scan history card derives reference buckets from live results before
   })
 
   const card = sidebar.locator('[data-history-item]').filter({ hasText: serverState.title })
-  await expect(card.locator('[title="1 ref with errors"]')).toBeVisible()
-  await expect(card.locator('[title="1 ref with warnings"]')).toBeVisible()
-  await expect(card.locator('[title="1 ref with suggestions"]')).toBeVisible()
+  await expect(card.locator('[title="1 ref with an error"]')).toBeVisible()
+  await expect(card.locator('[title="1 ref with a warning"]')).toBeVisible()
+  await expect(card.locator('[title="1 ref with a suggestion"]')).toBeVisible()
   await expect(card.locator('[title="2 unverified refs"]')).toBeVisible()
   await expect(card.locator('[title="1 likely hallucinated ref"]')).toBeVisible()
   await expect(card.locator('[title="6 unverified refs"]')).toHaveCount(0)
