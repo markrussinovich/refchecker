@@ -234,7 +234,7 @@ def build_check_parser(subparsers=None):
     # --- LLM extraction / verification config ------------------------------
     parser.add_argument(
         "--llm-provider", default="anthropic",
-        choices=["anthropic", "openai", "chatgpt", "google", "azure", "vllm"],
+        choices=["anthropic", "openai", "chatgpt", "google", "azure", "vllm", "litellm"],
         help="LLM provider for reference extraction (default: anthropic; mirrors the web default)",
     )
     parser.add_argument("--llm-model", default=None,
@@ -265,7 +265,7 @@ def build_check_parser(subparsers=None):
                         help="Run the LLM hallucination check on each reference "
                              "(needs a hallucination-capable provider/model/key)")
     parser.add_argument("--hallucination-provider", default=None,
-                        choices=["openai", "chatgpt", "anthropic", "google", "azure"],
+                        choices=["openai", "chatgpt", "anthropic", "google", "azure", "litellm"],
                         help="Provider for the hallucination check (defaults to --llm-provider when capable)")
     parser.add_argument("--hallucination-model", default=None,
                         help="Model for the hallucination check (defaults to the provider's default)")

@@ -8,7 +8,7 @@ const CHAT_SELECTION_KEY = 'refchecker_selected_chat_llm'
 // R34 — Chat-with-PDF and Summarize each get their own model selection.
 // Summarize falls back to the chat → extraction/default chain when unset.
 const SUMMARY_SELECTION_KEY = 'refchecker_selected_summary_llm'
-const hallucinationCapableProviders = ['openai', 'chatgpt', 'anthropic', 'google', 'azure']
+const hallucinationCapableProviders = ['openai', 'chatgpt', 'anthropic', 'google', 'azure', 'litellm']
 const isUsableConfig = config => (
   config?.provider !== 'chatgpt' || Boolean(config.oauth_connected)
 )

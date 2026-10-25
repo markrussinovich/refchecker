@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sqlite3
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -237,6 +238,57 @@ def test_single_user_llm_config_update_validates_model_with_stored_key(tmp_path,
     assert exc.value.status_code == 400
     stored = _run(temp_db.get_llm_config_by_id(config_id))
     assert stored["model"] == "claude-sonnet-4-6"
+
+
+@pytest.mark.parametrize("provider,expected_key", [
+    ("litellm", None),
+    ("anthropic", "stored-key"),
+])
+def test_single_user_config_creation_only_reuses_vendor_specific_keys(
+    auth_db, monkeypatch, provider, expected_key,
+):
+    api_main, db = auth_db
+    monkeypatch.setattr(api_main, "is_multiuser_mode", lambda: False)
+    monkeypatch.setattr(api_main, "_validate_llm_connection_or_raise", AsyncMock())
+    _run(db.create_llm_config(
+        name="Existing", provider=provider, model="openai/gpt-4.1", api_key="stored-key",
+    ))
+
+    created = _run(api_main.create_llm_config(
+        api_main.LLMConfigCreate(
+            name="New", provider=provider, model="anthropic/claude-sonnet-4-6",
+        ),
+        api_main.UserInfo(id=0, name="Local User", provider="local", is_admin=True),
+    ))
+
+    stored = _run(db.get_llm_config_by_id(created["id"]))
+    assert stored["api_key"] == expected_key
+
+
+@pytest.mark.parametrize("request_key", [None, "explicit-key"])
+def test_single_user_litellm_request_does_not_reuse_another_configs_key(
+    auth_db, monkeypatch, request_key,
+):
+    api_main, db = auth_db
+    monkeypatch.setattr(api_main, "is_multiuser_mode", lambda: False)
+    keyless_id = _run(db.create_llm_config(
+        name="Anthropic environment", provider="litellm", model="anthropic/claude-sonnet-4-6",
+    ))
+    keyed_id = _run(db.create_llm_config(
+        name="OpenAI explicit", provider="litellm", model="openai/gpt-4.1", api_key="stored-key",
+    ))
+
+    resolved = _run(api_main._resolve_llm_config_for_request(
+        user_id=None, use_llm=True, llm_config_id=keyless_id,
+        llm_provider="litellm", llm_model=None, api_key=request_key,
+    ))
+    assert resolved[:3] == ("litellm", "anthropic/claude-sonnet-4-6", request_key)
+
+    keyed = _run(api_main._resolve_llm_config_for_request(
+        user_id=None, use_llm=True, llm_config_id=keyed_id,
+        llm_provider="litellm", llm_model=None, api_key=None,
+    ))
+    assert keyed[:3] == ("litellm", "openai/gpt-4.1", "stored-key")
 
 
 def test_multiuser_rejects_vllm_config_creation_and_validation(auth_db):

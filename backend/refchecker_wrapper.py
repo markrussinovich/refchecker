@@ -1249,6 +1249,8 @@ class ProgressRefChecker:
         if use_llm and llm_provider:
             if is_multiuser_mode() and llm_provider.strip().lower() == "vllm":
                 raise ValueError("vLLM is only supported in single-user local deployments")
+            if is_multiuser_mode() and llm_provider.strip().lower() == "litellm":
+                raise ValueError("LiteLLM is only supported in single-user local deployments")
             try:
                 # Build config dict for the LLM provider
                 llm_config = {}

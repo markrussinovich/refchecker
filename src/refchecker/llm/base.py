@@ -550,6 +550,7 @@ def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> Optional[
         AzureProvider,
         ChatGPTProvider,
         GoogleProvider,
+        LiteLLMProvider,
         OpenAIProvider,
         vLLMProvider,
     )
@@ -561,6 +562,7 @@ def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> Optional[
         "google": GoogleProvider,
         "azure": AzureProvider,
         "vllm": vLLMProvider,
+        "litellm": LiteLLMProvider,
     }
     
     if provider_name not in providers:

@@ -5,9 +5,10 @@ detected by the checkers, and determines whether the reference is likely
 fabricated (LIKELY), genuine (UNLIKELY), or unclear (UNCERTAIN).
 
 Supports any configured LLM provider (OpenAI, ChatGPT, Anthropic, Google,
-Azure, vLLM).  When using OpenAI without a custom endpoint, the verifier uses
+Azure, vLLM, LiteLLM).  When using OpenAI without a custom endpoint, the verifier uses
 the Responses API with the ``web_search_preview`` tool so the LLM can
-search the web during its assessment.  For other providers the verifier
+search the web during its assessment.  LiteLLM passes ``web_search_options``
+for models it knows can search.  For other providers the verifier
 falls back to plain chat completions.
 """
 
@@ -47,6 +48,9 @@ def _record_hallucination_usage(provider: str, model: str, response) -> None:
         if provider == 'anthropic':
             from refchecker.llm.providers import _track_anthropic_usage
             _track_anthropic_usage(response, model)
+        elif provider == 'litellm':
+            from refchecker.llm.providers import _track_litellm_usage
+            _track_litellm_usage(response, model)
         elif provider in ('google', 'gemini'):
             from refchecker.llm.providers import _track_google_usage
             _track_google_usage(response, model)
@@ -380,7 +384,7 @@ def _build_validation_summary_static(error_entry: dict) -> str:
 class LLMHallucinationVerifier:
     """LLM-based hallucination verifier.
 
-    Supports OpenAI, ChatGPT, Anthropic, Google, Azure, and vLLM providers.
+    Supports OpenAI, ChatGPT, Anthropic, Google, Azure, vLLM, and LiteLLM providers.
     When using OpenAI (without a custom endpoint), the Responses API with
     ``web_search_preview`` is used so the LLM can verify references against
     the live web.  All other providers use a standard chat completion.
@@ -411,8 +415,11 @@ class LLMHallucinationVerifier:
         self.model = model or self._DEFAULT_MODELS.get(self.provider, DEFAULT_HALLUCINATION_MODELS['openai'])
         self.client = None
         self._use_responses_api = False
+        self._litellm_web_search = False
 
-        if not self.api_key:
+        # LiteLLM can run on the provider's own env credentials (or none, for
+        # local models), so a missing key is not fatal there.
+        if not self.api_key and self.provider != 'litellm':
             logger.debug('No API key for hallucination verifier (provider=%s)', self.provider)
             return
 
@@ -421,6 +428,8 @@ class LLMHallucinationVerifier:
                 self._init_anthropic()
             elif self.provider == 'google':
                 self._init_google()
+            elif self.provider == 'litellm':
+                self._init_litellm()
             else:
                 # OpenAI, Azure, vLLM all use the OpenAI client
                 self._init_openai()
@@ -492,6 +501,22 @@ class LLMHallucinationVerifier:
     @property
     def available(self) -> bool:
         return self.client is not None
+
+    def _init_litellm(self) -> None:
+        from refchecker.llm.providers import import_litellm
+        litellm = import_litellm()
+        self.client = litellm
+        # LiteLLM knows which models can search (Anthropic, Gemini, OpenAI
+        # search models, xAI, Perplexity, ...). Models it has no metadata for,
+        # e.g. behind a custom endpoint, go straight to plain chat.
+        try:
+            self._litellm_web_search = bool(litellm.supports_web_search(model=self.model))
+        except Exception:
+            self._litellm_web_search = False
+        logger.debug(
+            'Hallucination verifier initialized (provider=litellm, model=%s, web_search=%s)',
+            self.model, self._litellm_web_search,
+        )
 
     # ------------------------------------------------------------------
     # OpenAI call paths
@@ -630,6 +655,60 @@ class LLMHallucinationVerifier:
             if getattr(block, 'type', '') == 'text':
                 text += getattr(block, 'text', '')
         return text.strip(), []
+
+    # ------------------------------------------------------------------
+    # LiteLLM call paths
+    # ------------------------------------------------------------------
+
+    def _call_litellm_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
+        """LiteLLM chat completion with ``web_search_options``.
+
+        LiteLLM maps the option onto each provider's native search tool and
+        returns the cited pages as OpenAI-style ``url_citation`` annotations.
+        """
+        from refchecker.llm.providers import litellm_call_kwargs
+        resp = self.client.completion(
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
+            max_tokens=1024,
+            web_search_options={'search_context_size': 'medium'},
+            timeout=90.0,
+            **litellm_call_kwargs(self.model, self.api_key, self.endpoint),
+        )
+        _record_hallucination_usage('litellm', self.model, resp)
+
+        message = resp.choices[0].message
+        web_urls: List[str] = []
+        seen_urls: set = set()
+        for ann in getattr(message, 'annotations', None) or []:
+            citation = ann.get('url_citation') if isinstance(ann, dict) else getattr(ann, 'url_citation', None)
+            if isinstance(citation, dict):
+                url = citation.get('url') or ''
+            else:
+                url = getattr(citation, 'url', '') or ''
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                web_urls.append(url)
+
+        return (message.content or '').strip(), web_urls
+
+    def _call_litellm_chat(self, system_prompt: str, user_prompt: str) -> tuple:
+        """LiteLLM chat completion without web search."""
+        from refchecker.llm.providers import litellm_call_kwargs
+        resp = self.client.completion(
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
+            max_tokens=300,
+            temperature=0.0,
+            timeout=60.0,
+            **litellm_call_kwargs(self.model, self.api_key, self.endpoint),
+        )
+        _record_hallucination_usage('litellm', self.model, resp)
+        return (resp.choices[0].message.content or '').strip(), []
 
     # ------------------------------------------------------------------
     # Google call paths
@@ -791,6 +870,20 @@ class LLMHallucinationVerifier:
                     raise
                 logger.debug('Google web search failed, falling back to chat: %s', exc)
                 return self._call_google_chat(system_prompt, user_prompt)
+
+        if self.provider == 'litellm':
+            if self._litellm_web_search:
+                try:
+                    return self._call_litellm_with_web_search(system_prompt, user_prompt)
+                except Exception as exc:
+                    if isinstance(exc, self.client.UnsupportedParamsError) and 'web_search_options' in str(exc):
+                        self._litellm_web_search = False
+                        logger.warning('LiteLLM route does not support web_search_options; disabling web search: %s', exc)
+                    if not _fallback_allowed():
+                        logger.debug('LiteLLM web search failed and call budget exhausted; not chaining chat fallback: %s', exc)
+                        raise
+                    logger.warning('LiteLLM web search failed, falling back to chat: %s', exc)
+            return self._call_litellm_chat(system_prompt, user_prompt)
 
         # ChatGPT plan usage supports only the streaming Responses API and
         # cannot fall back to Chat Completions.
