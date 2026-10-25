@@ -401,9 +401,11 @@ describe('AdminPanel', () => {
 
     it('offers a manual refresh', async () => {
       render(<AdminPanel open onClose={() => {}} />)
-      await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1))
+      const refresh = screen.getByLabelText('Refresh admin data')
+      await waitFor(() => expect(refresh).toBeEnabled())
+      expect(mocks.getAdminOverview).toHaveBeenCalledTimes(1)
 
-      fireEvent.click(screen.getByLabelText('Refresh admin data'))
+      fireEvent.click(refresh)
 
       await waitFor(() => expect(mocks.getAdminOverview).toHaveBeenCalledTimes(2))
     })
