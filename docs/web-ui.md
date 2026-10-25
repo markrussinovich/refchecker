@@ -49,7 +49,7 @@ refchecker-webui --database-dir /path/to/local-db-folder
 Prerequisites:
 
 - Python 3.11+
-- Node.js 20.19+
+- Node.js 22.12+ (22.x, 24.x, or 26+)
 - npm
 
 ```bash
@@ -333,7 +333,7 @@ web-ui/
 
 ### Frontend does not start
 
-- verify `node --version` is 20.19+
+- verify `node --version` is 22.12+ (22.x, 24.x, or 26+)
 - reinstall dependencies with `rm -rf node_modules && npm install`
 
 ### PDF extraction is limited

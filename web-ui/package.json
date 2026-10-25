@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
   "scripts": {
     "start": "node start.js",
     "restart": "node start.js --restart",
@@ -36,7 +39,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "@vitest/ui": "^4.1.5",
+    "@vitest/ui": "^5.0.5",
     "autoprefixer": "^10.5.0",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -45,7 +48,7 @@
     "jsdom": "^29.1.0",
     "postcss": "^8.5.25",
     "tailwindcss": "^4.2.4",
-    "vite": "^8.3.5",
+    "vite": "^8.3.4",
     "vitest": "^5.0.5"
   },
   "overrides": {
