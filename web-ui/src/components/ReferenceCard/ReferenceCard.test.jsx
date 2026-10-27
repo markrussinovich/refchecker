@@ -301,6 +301,7 @@ describe('ReferenceCard — R04 hallucination-pending safety net', () => {
 // R11 (pin/scroll), R36/R53 (ORCID link + number), R37 (badge co-locate).
 describe('ReferenceCard — author UI cluster (D1)', () => {
   afterEach(() => {
+    vi.useRealTimers()
     mockFetchAuthorProfile.mockReset()
     mockFetchAuthorProfile.mockResolvedValue({ data: { available: false } })
     mockFindAuthorProfile.mockReset()
@@ -398,7 +399,7 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
   })
 
   it('hover cards close with ×, Escape, or outside-click and show all recent papers', async () => {
-    vi.useRealTimers()
+    vi.useFakeTimers()
     mockFetchAuthorProfile.mockResolvedValue({
       data: {
         available: true,
@@ -423,27 +424,29 @@ describe('ReferenceCard — author UI cluster (D1)', () => {
     }
     render(<ReferenceCard reference={reference} index={0} />)
 
-    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
-    const dialog = await screen.findByRole('tooltip')
+    const openCard = async () => {
+      fireEvent.mouseEnter(screen.getByText('Jane Smith'))
+      await act(async () => { vi.advanceTimersByTime(250) })
+      return screen.getByRole('tooltip')
+    }
+    const dialog = await openCard()
     expect(dialog).toBeTruthy()
 
     // All recent papers remain available without pinning.
-    await waitFor(() => expect(within(dialog).getByText('Paper Four')).toBeTruthy())
+    expect(within(dialog).getByText('Paper Four')).toBeTruthy()
     expect(within(dialog).getByText('Paper Five')).toBeTruthy()
 
     // Escape closes it.
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+    expect(screen.queryByRole('tooltip')).toBeNull()
 
-    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
-    const dialog2 = await screen.findByRole('tooltip')
+    const dialog2 = await openCard()
     fireEvent.click(within(dialog2).getByRole('button', { name: /close author card/i }))
-    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+    expect(screen.queryByRole('tooltip')).toBeNull()
 
-    fireEvent.mouseEnter(screen.getByText('Jane Smith'))
-    await screen.findByRole('tooltip')
+    await openCard()
     fireEvent.mouseDown(document.body)
-    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+    expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
   it('resolves an ID-less author automatically on open — no click required', async () => {
