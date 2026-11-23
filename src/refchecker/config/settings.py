@@ -55,7 +55,7 @@ DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'chatgpt':   'gpt-6.1-sol',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-3.1-flash-lite-preview',
+    'google':    'gemini-3.1-flash-lite',
     'azure':     'gpt-4.1',
     'vllm':      'meta-llama/Llama-3.1-8B-Instruct',
 }
@@ -64,7 +64,7 @@ DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'chatgpt':   'gpt-6.1-sol',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-3.1-flash-lite-preview',
+    'google':    'gemini-3.1-flash-lite',
     'azure':     'gpt-4.1',
     'vllm':      'gpt-4.1',
 }
@@ -72,7 +72,7 @@ DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
 DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-3.1-flash-lite-preview',
+    'google':    'gemini-3.1-flash-lite',
 }
 
 # Providers that can perform hallucination checking (i.e. have web-search

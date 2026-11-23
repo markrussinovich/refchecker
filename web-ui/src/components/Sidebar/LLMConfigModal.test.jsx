@@ -79,6 +79,15 @@ describe('LLMConfigModal', () => {
     expect(screen.queryByRole('option', { name: 'ChatGPT account' })).toBeNull()
   })
 
+  it('offers the stable Gemini model by default for a new Google configuration', () => {
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'google' },
+    })
+
+    expect(screen.getByPlaceholderText('gemini-3.1-flash-lite')).toBeTruthy()
+  })
+
   it('creates hallucination configs without selecting them for extraction', async () => {
     render(<LLMConfigModal isOpen={true} onClose={vi.fn()} selectionMode="hallucination" />)
 
