@@ -950,7 +950,7 @@ LLM-powered extraction improves accuracy with complex bibliographies. Hallucinat
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4.1` |
 | ChatGPT | Browser sign-in (no API key) | Account model catalog |
-| Google | `GOOGLE_API_KEY` | `gemini-3.1-flash-lite-preview` |
+| Google | `GOOGLE_API_KEY` | `gemini-3.1-flash-lite` |
 | Azure | `AZURE_OPENAI_API_KEY` | `gpt-4.1` |
 | vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
 

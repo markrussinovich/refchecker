@@ -18,7 +18,7 @@ const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, hallucinationCapable: true },
   { id: 'chatgpt', name: 'ChatGPT account', defaultModel: 'gpt-6.1-sol', requiresChatGPTLogin: true, hallucinationCapable: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true, hallucinationCapable: true },
-  { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite-preview', requiresKey: true, hallucinationCapable: true },
+  { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite', requiresKey: true, hallucinationCapable: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
   { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true, hallucinationCapable: false },
 ]

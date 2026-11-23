@@ -10,7 +10,7 @@ suite for providers with API keys in the environment:
 
 To run one or more specified models:
 
-    REFCHECKER_HALLUCINATION_MODELS="google:gemini-3.1-flash-lite-preview" \
+    REFCHECKER_HALLUCINATION_MODELS="google:gemini-3.1-flash-lite" \
             pytest tests/integration/test_live_hallucination_llm_benchmark.py -q --run-llm
 
 Multiple models can be comma-separated, for example:
@@ -59,7 +59,7 @@ def _parse_model_spec(spec: str) -> ModelConfig:
     if not sep or not provider or not rest:
         raise ValueError(
             'Model specs must use provider:model, e.g. '
-            'google:gemini-3.1-flash-lite-preview'
+            'google:gemini-3.1-flash-lite'
         )
     endpoint = None
     model = rest
