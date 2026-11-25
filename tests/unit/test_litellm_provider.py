@@ -187,6 +187,50 @@ def test_verifier_web_search_collects_cited_urls(fake_litellm):
     assert call["drop_params"] is True
 
 
+@pytest.mark.parametrize("evidence", ["citations", "search_results", "both"])
+def test_verifier_preserves_anthropic_search_evidence(fake_litellm, evidence):
+    from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
+
+    model = "anthropic/claude-sonnet-4-5-20250929"
+    urls = [
+        "https://arxiv.org/abs/1706.03762",
+        "https://dl.acm.org/doi/10.5555/3295222.3295349",
+    ]
+    fields = {}
+    if evidence in ("citations", "both"):
+        fields["citations"] = [
+            [{"type": "web_search_result_location", "url": url} for url in urls],
+            [{"type": "web_search_result_location", "url": urls[0]}],
+        ]
+    if evidence in ("search_results", "both"):
+        fields["web_search_results"] = [
+            {
+                "type": "web_search_tool_result",
+                "content": [{"type": "web_search_result", "url": url} for url in urls],
+            },
+            {
+                "type": "web_search_tool_result",
+                "content": {"type": "web_search_tool_result_error", "error_code": "too_many_requests"},
+            },
+        ]
+    response = _Response(
+        "EXPLANATION: The exact paper was found.\nLINK: NONE\nVERDICT: UNLIKELY",
+        annotations=(
+            [{"type": "url_citation", "url_citation": {"url": urls[0]}}]
+            if evidence == "both" else None
+        ),
+    )
+    response.choices[0].message.provider_specific_fields = fields
+    fake_litellm.web_search_models.add(model)
+    fake_litellm.responses.append(response)
+    verifier = LLMHallucinationVerifier(provider="litellm", model=model)
+
+    result = verifier.assess({"error_type": "unverified", "ref_title": "Attention Is All You Need"})
+
+    assert result["web_search"]["academic_urls"] == urls
+    assert result["verdict"] == "UNLIKELY"
+
+
 def test_verifier_uses_plain_chat_when_model_cannot_search(fake_litellm):
     from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
 

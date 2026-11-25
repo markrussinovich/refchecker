@@ -142,7 +142,13 @@ def test_llm_backend_unavailable_without_key(monkeypatch):
     assert r.abstain_reason == "llm_not_configured"
 
 
-def test_webui_llm_judge_uses_hallucination_llm(monkeypatch):
+@pytest.mark.parametrize("hallucination_config", [
+    ("google", "gemini-hallucination", "hallucination-key", "https://hallucination.example"),
+    ("litellm", "anthropic/claude-sonnet-4-6", None, None),
+    ("litellm", None, None, None),
+    (None, None, None, None),
+])
+def test_webui_llm_judge_uses_one_complete_llm_config(monkeypatch, hallucination_config):
     captured = {}
 
     class FakeDetectionResult:
@@ -163,23 +169,25 @@ def test_webui_llm_judge_uses_hallucination_llm(monkeypatch):
     checker.ai_detection_backend = "llm-judge"
     checker.check_id = 42
     checker.progress_callback = None
-    checker.llm_provider = "anthropic"
-    checker.llm_model = "claude-extraction"
+    checker.llm_provider = "litellm"
+    checker.llm_model = "openai/gpt-4.1"
     checker.api_key = "extraction-key"
-    checker.endpoint = None
-    checker.hallucination_provider = "google"
-    checker.hallucination_model = "gemini-hallucination"
-    checker.hallucination_api_key = "hallucination-key"
-    checker.hallucination_endpoint = "https://hallucination.example"
+    checker.endpoint = "https://extraction.example"
+    (
+        checker.hallucination_provider,
+        checker.hallucination_model,
+        checker.hallucination_api_key,
+        checker.hallucination_endpoint,
+    ) = hallucination_config
 
     result = asyncio.run(checker._run_ai_detection(LONG_PROSE, "Paper"))
 
     assert result["band"] == "low"
     assert captured["backend"] == "llm-judge"
-    assert captured["provider"] == "google"
-    assert captured["model"] == "gemini-hallucination"
-    assert captured["api_key"] == "hallucination-key"
-    assert captured["endpoint"] == "https://hallucination.example"
+    expected = hallucination_config if hallucination_config[0] else (
+        checker.llm_provider, checker.llm_model, checker.api_key, checker.endpoint,
+    )
+    assert tuple(captured[key] for key in ("provider", "model", "api_key", "endpoint")) == expected
 
 
 def test_api_backend_requires_consent():

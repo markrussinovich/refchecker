@@ -2944,12 +2944,20 @@ class ProgressRefChecker:
         backend = self.ai_detection_backend or DEFAULT_BACKEND
         opts: Dict[str, Any] = {}
         if backend in ("llm-judge", "llm"):
-            opts = {
-                "provider": self.hallucination_provider or self.llm_provider,
-                "api_key": self.hallucination_api_key or self.api_key,
-                "model": self.hallucination_model or self.llm_model,
-                "endpoint": self.hallucination_endpoint or self.endpoint,
-            }
+            if self.hallucination_provider:
+                opts = {
+                    "provider": self.hallucination_provider,
+                    "api_key": self.hallucination_api_key,
+                    "model": self.hallucination_model,
+                    "endpoint": self.hallucination_endpoint,
+                }
+            else:
+                opts = {
+                    "provider": self.llm_provider,
+                    "api_key": self.api_key,
+                    "model": self.llm_model,
+                    "endpoint": self.endpoint,
+                }
         elif backend == "api":
             opts = {
                 "service": self.ai_detection_service,

@@ -663,8 +663,9 @@ class LLMHallucinationVerifier:
     def _call_litellm_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
         """LiteLLM chat completion with ``web_search_options``.
 
-        LiteLLM maps the option onto each provider's native search tool and
-        returns the cited pages as OpenAI-style ``url_citation`` annotations.
+        LiteLLM maps the option onto each provider's native search tool.
+        Anthropic evidence remains in ``provider_specific_fields`` rather
+        than OpenAI-style ``url_citation`` annotations.
         """
         from refchecker.llm.providers import litellm_call_kwargs
         resp = self.client.completion(
@@ -682,15 +683,26 @@ class LLMHallucinationVerifier:
         message = resp.choices[0].message
         web_urls: List[str] = []
         seen_urls: set = set()
-        for ann in getattr(message, 'annotations', None) or []:
-            citation = ann.get('url_citation') if isinstance(ann, dict) else getattr(ann, 'url_citation', None)
-            if isinstance(citation, dict):
-                url = citation.get('url') or ''
-            else:
-                url = getattr(citation, 'url', '') or ''
+
+        def add_url(citation) -> None:
+            url = citation.get('url', '') if isinstance(citation, dict) else getattr(citation, 'url', '')
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 web_urls.append(url)
+
+        for ann in getattr(message, 'annotations', None) or []:
+            citation = ann.get('url_citation') if isinstance(ann, dict) else getattr(ann, 'url_citation', None)
+            add_url(citation)
+
+        fields = getattr(message, 'provider_specific_fields', None) or {}
+        for citations in fields.get('citations') or []:
+            for citation in citations:
+                add_url(citation)
+        for block in fields.get('web_search_results') or []:
+            results = block.get('content') or []
+            if isinstance(results, list):
+                for result in results:
+                    add_url(result)
 
         return (message.content or '').strip(), web_urls
 
