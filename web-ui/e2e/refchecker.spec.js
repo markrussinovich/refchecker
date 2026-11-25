@@ -458,9 +458,9 @@ test.describe('RefChecker Web UI', () => {
     // so Ref 3 (which has an error AND a warning) is an error reference, leaving
     // exactly 1 warning-only reference (Ref 2). 1 error ref, 1 warning-only ref,
     // 1 suggestion-only ref.
-    await expect(page.getByRole('button', { name: '1 Errors', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '1 Warnings', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '1 Suggestions', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Error', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Warning', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Suggestion', exact: true })).toBeVisible();
     
     // Verify suggestion is displayed as "Suggestion:" not "Error:"
     await expect(page.getByText('Suggestion Ref', { exact: true })).toBeVisible();

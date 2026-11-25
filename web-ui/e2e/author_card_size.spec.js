@@ -171,13 +171,13 @@ test('the author card fits its content and does not grow after it opens', async 
     return worst;
   });
   expect(slack, 'blank space stretched into the card').toBeLessThan(24);
-  await expect(card.getByText('Recent work', { exact: true })).toHaveCount(0);
+  await expect(card.getByText(/^Recent work(?: \(\d+\))?$/)).toHaveCount(0);
 
   await dismiss(page);
 
   // --- The author who does have recent work ---
   card = await openCard(page, 'Rich Author');
-  await expect(card.getByText('Recent work', { exact: true })).toBeVisible();
+  await expect(card.getByText('Recent work (3)', { exact: true })).toBeVisible();
   const richOnOpen = await card.boundingBox();
   await page.waitForTimeout(600);
   const richSettled = await card.boundingBox();

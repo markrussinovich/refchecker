@@ -170,6 +170,13 @@ def parse_bibtex_entry_content(entry_type: str, entry_key: str, content: str) ->
             if i < len(content):
                 field_value = content[value_start:i]
                 i += 1  # Skip closing brace
+        else:
+            value_start = i
+            while i < len(content) and content[i] not in ',}':
+                i += 1
+            numeric_value = content[value_start:i].strip()
+            if numeric_value.isdecimal():
+                field_value = numeric_value
         
         if field_value:
             field_value = field_value.strip()

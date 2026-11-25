@@ -296,7 +296,7 @@ pip install -e ".[llm,webui]"
 pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 ```
 
-**Requirements:** Python 3.11+. Node.js 20.19+ is only needed for Web UI frontend development.
+**Requirements:** Python 3.11+. Node.js 22.12+ (22.x, 24.x, or 26+) is only needed for Web UI frontend development.
 
 ---
 
