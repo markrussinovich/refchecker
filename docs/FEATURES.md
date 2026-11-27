@@ -83,11 +83,11 @@ Providers: **OpenAI, Anthropic, Google, Azure**.
 
 ```bash
 refchecker-webui check --paper 2406.01234 --check-hallucinations \
-    --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
+    --llm-provider anthropic --llm-model claude-sonnet-4-6
 
 # Separate hallucination provider/model
 refchecker-webui check --paper ./paper.pdf --check-hallucinations \
-    --hallucination-provider anthropic --hallucination-model claude-3-5-sonnet-latest
+    --hallucination-provider anthropic --hallucination-model claude-sonnet-4-6
 ```
 
 ### Inline-citation numbering / ordering check

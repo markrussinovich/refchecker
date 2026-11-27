@@ -253,7 +253,7 @@ refchecker-webui check --paper 2406.01234
 refchecker-webui check --paper ./paper.pdf --json
 refchecker-webui check --paper ./refs.bib --check-retractions --suggest-missing
 refchecker-webui check --paper 2406.01234 --check-hallucinations \
-    --llm-provider anthropic --llm-model claude-3-5-sonnet-latest
+    --llm-provider anthropic --llm-model claude-sonnet-4-6
 refchecker-webui check --paper ./paper.pdf --ai-detection api \
     --ai-detection-consent --ai-detection-key $PANGRAM_KEY
 ```
